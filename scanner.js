@@ -9,7 +9,7 @@ import {
   getATR as getDailyATR,
   debounceSignal,
   detectAllPatterns,
-} from "../backend/util.js";
+} from "./util.js";
 
 import { getHigherTimeframeData } from "./kite.js";
 import {

@@ -1,24 +1,31 @@
 // kite.js
 import { KiteConnect, KiteTicker } from "kiteconnect";
-import { calculateEMA, calculateSupertrend } from "../backend/util.js";
+import { calculateEMA, calculateSupertrend } from "./util.js";
 import fs from "fs";
 import path from "path";
 import dotenv from "dotenv";
 import { fileURLToPath } from "url";
 dotenv.config();
 
+import db from "./db.js"; // 🧠 Import database module for future use
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const apiKey = process.env.KITE_API_KEY;
 const apiSecret = process.env.KITE_API_SECRET;
-const requestToken = process.env.KITE_REQUEST_TOKEN;
-const tokensPath = path.join(__dirname, "tokens.json");
 const kc = new KiteConnect({ api_key: apiKey });
 
-const instrumentsPath = path.join(__dirname, "routes", "instruments.json");
-const historicalDataPath = path.join(__dirname, "historical_data.json");
-const sessionDataPath = path.join(__dirname, "session_data.json");
+const instruments = await db.collection("instruments").find({}).toArray();
+
+// const tokensPath = path.join(__dirname, "tokens.json");
+// const historicalDataPath = path.join(__dirname, "historical_data.json");
+// const sessionDataPath = path.join(__dirname, "session_data.json");
+
+const tokensData = await db.collection("tokens").findOne({});
+const historicalData = await db.collection("historical_data").findOne({});
+const sessionData = await db.collection("session_data").findOne({});
+
 let candleHistory = {}; // 🧠 Store per-token candle history for EMA, RSI, etc.
 let historicalCache = {};
 
@@ -31,9 +38,9 @@ let stockSymbols = [
   "NSE:STLTECH",
   "NSE:SPMLINFRA",
 ];
+
 const tokenSymbolMap = {}; // token: symbol
-// 🧠 Patch tokenSymbolMap from instruments.json
-const instruments = JSON.parse(fs.readFileSync(instrumentsPath, "utf-8"));
+
 for (const inst of instruments) {
   const key = `${inst.exchange}:${inst.tradingsymbol}`;
   if (stockSymbols.includes(key)) {
@@ -47,8 +54,7 @@ let ticker,
   tickBuffer = {},
   candleInterval,
   globalIO;
-let errorLog = [],
-  tradeLog = [];
+let errorLog = [], tradeLog = [];
 let riskState = {
   dailyLoss: 0,
   maxDailyLoss: 5000,
@@ -59,15 +65,18 @@ let riskState = {
 // 🔐 Initialize Kite session
 async function initSession() {
   try {
-    if (fs.existsSync(tokensPath)) {
-      const saved = JSON.parse(fs.readFileSync(tokensPath, "utf-8"));
-      kc.setAccessToken(saved.access_token);
+    if (tokensData) {
+      kc.setAccessToken(tokensData.access_token);
       console.log("♻️ Loaded saved access token");
-      return saved.access_token;
+      return tokensData.access_token;
     } else {
-      const session = await kc.generateSession(requestToken, apiSecret);
+      const session = await kc.generateSession(tokensData.request_token, apiSecret);
       kc.setAccessToken(session.access_token);
-      fs.writeFileSync(tokensPath, JSON.stringify(session));
+      await db.collection("tokens").updateOne(
+        {},
+        { $set: { access_token: session.access_token } },
+        { upsert: true }
+      );
       console.log("✅ Session generated and saved");
       return session.access_token;
     }
@@ -90,14 +99,11 @@ function isMarketOpen() {
   );
 }
 
-function getTokensForSymbols(symbols) {
+async function getTokensForSymbols(symbols) {
   try {
-    const instruments = JSON.parse(fs.readFileSync(instrumentsPath, "utf-8"));
-    return instruments
-      .filter((inst) =>
-        symbols.includes(`${inst.exchange}:${inst.tradingsymbol}`)
-      )
-      .map((inst) => parseInt(inst.instrument_token));
+    const instruments = await db.collection("instruments").find({}).toArray();
+    const tokens = instruments.filter((inst) => symbols.includes(`${inst.exchange}:${inst.tradingsymbol}`)).map((inst) => parseInt(inst.instrument_token));
+    return tokens;
   } catch (err) {
     logError("Error reading instruments", err);
     return [];
@@ -112,11 +118,10 @@ async function startLiveFeed(io) {
 
   // 🧠 Load initial session data into candle history
   try {
-    const sessionRaw = fs.readFileSync(sessionDataPath, "utf-8");
-    const sessionJSON = JSON.parse(sessionRaw);
-    for (const token in sessionJSON) {
-      const tokenStr = String(token);
-      candleHistory[tokenStr] = sessionJSON[token]
+    for (const token in sessionData) {
+      const tokenStr = token;
+      if (tokenStr === "_id") continue; // Skip MongoDB _id field
+      candleHistory[tokenStr] = sessionData[token]
         .map((c) => ({
           open: c.open,
           high: c.high,
@@ -139,7 +144,7 @@ async function startLiveFeed(io) {
     console.warn("⚠️ Could not preload session data:", err.message);
   }
 
-  instrumentTokens = getTokensForSymbols(stockSymbols);
+  instrumentTokens = await getTokensForSymbols(stockSymbols);
   if (!instrumentTokens.length) return logError("No instrument tokens found");
 
   ticker = new KiteTicker({ api_key: apiKey, access_token: accessToken });
@@ -171,11 +176,10 @@ async function startLiveFeed(io) {
 
   // 🧠 Load initial session data into candle history
   try {
-    const sessionRaw = fs.readFileSync(sessionDataPath, "utf-8");
-    const sessionJSON = JSON.parse(sessionRaw);
-    for (const token in sessionJSON) {
-      const tokenStr = String(token);
-      candleHistory[tokenStr] = sessionJSON[token]
+    for (const token in sessionData) {
+      const tokenStr = token;
+      if (tokenStr === "_id") continue; // Skip MongoDB _id field
+      candleHistory[tokenStr] = sessionData[token]
         .map((c) => ({
           open: c.open,
           high: c.high,
@@ -507,7 +511,7 @@ async function fetchFallbackOneMinuteCandles() {
 }
 
 // Logging
-function logError(context, err) {
+async function logError(context, err) {
   const errorEntry = {
     time: new Date(),
     context,
@@ -515,10 +519,12 @@ function logError(context, err) {
   };
   console.error(`❌ [${context}]:`, err?.message || err);
   errorLog.push(errorEntry);
-  fs.appendFileSync("error.log", JSON.stringify(errorEntry) + "\n");
+
+  await db.collection("error_logs").insertOne(errorEntry);
+  // fs.appendFileSync("error.log", JSON.stringify(errorEntry) + "\n");
 }
 
-function logTrade(signal) {
+async function logTrade(signal) {
   const tradeEntry = {
     time: new Date(),
     stock: signal.stock,
@@ -534,7 +540,8 @@ function logTrade(signal) {
     confidence: signal.confidence,
   };
   tradeLog.push(tradeEntry);
-  fs.appendFileSync("trade.log", JSON.stringify(tradeEntry) + "\n");
+  await db.collection("trade_logs").insertOne(tradeEntry);
+  // fs.appendFileSync("trade.log", JSON.stringify(tradeEntry) + "\n");
 }
 
 fetchHistoricalData();
@@ -575,13 +582,17 @@ async function fetchHistoricalData() {
       console.error(`❌ Error for ${symbol}:`, err.message);
     }
   }
-  fs.writeFileSync(historicalDataPath, JSON.stringify(historicalData, null, 2));
+  // fs.writeFileSync(historicalDataPath, JSON.stringify(historicalData, null, 2));
+  await db.collection("historical_data").updateOne(
+    {},
+    { $set: historicalData },
+    { upsert: true }
+  );
   console.log("✅ historical_data.json written successfully");
 }
-function loadHistoricalCache() {
+async function loadHistoricalCache() {
   try {
-    const data = fs.readFileSync(historicalDataPath, "utf-8");
-    historicalCache = JSON.parse(data);
+    historicalCache = await db.collection("historical_data").findOne({});
     console.log("✅ historical_data.json loaded into cache");
   } catch (err) {
     console.warn("⚠️ Could not load historical data:", err.message);
@@ -669,10 +680,15 @@ async function fetchSessionData() {
   }
 
   if (Object.keys(sessionData).length > 0) {
-    fs.writeFileSync(sessionDataPath, JSON.stringify(sessionData, null, 2));
-    console.log("✅ Session data written to file.");
+    // fs.writeFileSync(sessionDataPath, JSON.stringify(sessionData, null, 2));
+    await db.collection("session_data").updateOne(
+      {},
+      { $set: sessionData },
+      { upsert: true }
+    );
+    console.log("✅ Session data written to database.");
   } else {
-    console.warn("⚠️ No session data written to file (empty response)");
+    console.warn("⚠️ No session data written to database (empty response)");
   }
 }
 
@@ -680,14 +696,15 @@ setInterval(() => fetchSessionData(), 3 * 60 * 1000);
 fetchSessionData();
 
 function getMA(token, period) {
-  const data = JSON.parse(fs.readFileSync(historicalDataPath, "utf-8"))[token];
+  // const data = JSON.parse(fs.readFileSync(historicalDataPath, "utf-8"))[token];
+  const data = historicalCache[token];
   return data?.length >= period
     ? data.slice(-period).reduce((a, b) => a + b.close, 0) / period
     : null;
 }
 
 function getATR(token, period = 14) {
-  const data = JSON.parse(fs.readFileSync(historicalDataPath, "utf-8"))[token];
+  const data = historicalCache[token];
   if (!data || data.length < period) return null;
   return (
     data.slice(-period).reduce((acc, cur, i, arr) => {
@@ -707,7 +724,8 @@ function getATR(token, period = 14) {
 }
 
 function getAverageVolume(token, period) {
-  const data = JSON.parse(fs.readFileSync(historicalDataPath, "utf-8"))[token];
+  // const data = JSON.parse(fs.readFileSync(historicalDataPath, "utf-8"))[token];
+  const data = historicalCache[token];
   return data?.length >= period
     ? data.slice(-period).reduce((a, b) => a + b.volume, 0) / period
     : "NA";

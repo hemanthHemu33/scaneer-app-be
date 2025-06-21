@@ -3,13 +3,18 @@ import dayjs from "dayjs";
 import customParseFormat from "dayjs/plugin/customParseFormat.js";
 import { analyzeCandles } from "./scanner.js";
 import { candleHistory } from "./kite.js";
+import db from "./db.js";
 
 dayjs.extend(customParseFormat);
 
 // ✅ Load instruments and build maps
-const instruments = JSON.parse(
-  fs.readFileSync("./routes/instruments.json", "utf-8")
-);
+// const instruments = JSON.parse(
+//   fs.readFileSync("./routes/instruments.json", "utf-8")
+// );
+const instruments = await db
+  .collection("instruments")
+  .find({})
+  .toArray();
 const tokenSymbolMap = {};
 const symbolTokenMap = {};
 
@@ -20,9 +25,10 @@ for (const inst of instruments) {
 }
 
 // ✅ Load session-level historical data
-const sessionData = JSON.parse(
-  fs.readFileSync("./historical_data.json", "utf-8")
-);
+// const sessionData = JSON.parse(
+//   fs.readFileSync("./historical_data.json", "utf-8")
+// );
+const sessionData = await db.collection("session_data").findOne({});
 
 // 🧠 CONFIG
 const SYMBOL = "NSE:ADANIENT";
@@ -117,10 +123,13 @@ async function runBacktest(symbol = SYMBOL) {
     if (!grouped[key]) grouped[key] = [];
     grouped[key].push(s);
   }
+  
+  await db.collection("backtest_signals").deleteMany({});
+  await db.collection("backtest_signals").insertMany(signals);
 
-  fs.writeFileSync("backtest_signals.json", JSON.stringify(grouped, null, 2));
+  // fs.writeFileSync("backtest_signals.json", JSON.stringify(grouped, null, 2));
   console.log(
-    `✅ Backtest complete. ${signals.length} signals saved to backtest_signals.json`
+    `✅ Backtest complete. ${signals.length} signals saved to database`
   );
 }
 

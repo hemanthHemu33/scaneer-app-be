@@ -11,10 +11,12 @@ import {
   getAverageVolume,
 } from "./kite.js";
 
+import db from "./db.js";
+
 const app = express();
 app.use(
   cors({
-    origin: "http://localhost:5600",
+    origin: "https://scanner-app-fe.onrender.com",
     methods: ["GET", "POST"],
     credentials: true,
   })
@@ -24,7 +26,7 @@ app.use(express.json());
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: "http://localhost:5600",
+    origin: "https://scanner-app-fe.onrender.com",
     methods: ["GET", "POST"],
     credentials: true,
   },
@@ -101,6 +103,19 @@ app.post("/set-interval", (req, res) => {
   } else {
     res.status(400).json({ error: "Invalid interval" });
   }
+});
+
+app.get("/kite-redirect", async (req, res) => {
+  const requestToken = req.query.request_token;
+  if (!requestToken) {
+    return res.status(400).json({ error: "Missing request_token" });
+  }
+  await db.collection("tokens").updateOne(
+    {},
+    { $set: { request_token: requestToken } },
+    { upsert: true }
+  );
+  res.json({ status: "Request token saved" });
 });
 
 io.on("connection", (socket) => {
