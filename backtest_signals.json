@@ -1,0 +1,207 @@
+[
+  {
+    "stock": "NSE:ADANIENT",
+    "pattern": "Engulfing Bearish",
+    "strength": 2,
+    "direction": "Short",
+    "entry": 2453.2,
+    "stopLoss": 2456.6,
+    "target1": 2448.95,
+    "target2": 2444.7,
+    "qty": 29,
+    "riskPerUnit": 3.4,
+    "riskAmount": 100,
+    "accountBalance": 10000,
+    "rsi": 65.34,
+    "ma20": null,
+    "ma50": null,
+    "ema9": 2449.62,
+    "ema21": 2448.47,
+    "ema50": 2449.33,
+    "supertrend": {
+      "signal": "Sell",
+      "level": 2453.3
+    },
+    "atr": 4.828571428571422,
+    "slippage": 0.1,
+    "spread": 0.3,
+    "liquidity": 5000,
+    "confidence": "Medium",
+    "liveTickData": {
+      "last_price": 2453.3,
+      "volume_traded": 4273,
+      "total_buy_quantity": 1000,
+      "total_sell_quantity": 900
+    },
+    "depth": null,
+    "generatedAt": "2025-06-21T07:04:12.470Z",
+    "source": "analyzeCandles",
+    "ai": {
+      "advisory": "Based on the provided data:\n\n1. Your risk-to-reward ratios (R:R) of 1:2 and 1:2.5 are favorable, suggesting a potential for good returns relative to the risk taken.\n2. An engulfing bearish short signal indicates a potential downward move which aligns well with a short trading strategy.\n3. A relatively low spread of 0.3 is beneficial as it implies lower transaction costs.\n4. Suitable liquidity (5000) and manageable ATR (4.828571428571422) suggest moderate market volatility and enough market depth to handle typical trade sizes without causing significant price impact.\n\nGiven this analysis and your favorable R:R, this trade appears worthwhile. However, consider monitoring the Depth (BuyQty vs. SellQty) closely, as it shows more buying than selling pressure, which could influence market direction contrary to your short position.\n\n#### Advice: Potentially profitable trade, but stay cautious and monitor market depth and sentiment changes closely."
+    }
+  },
+  {
+    "stock": "NSE:ADANIENT",
+    "pattern": "Head & Shoulders",
+    "strength": 3,
+    "direction": "Short",
+    "entry": 2444.9,
+    "stopLoss": 2451.1,
+    "target1": 2437.15,
+    "target2": 2429.4,
+    "qty": 16,
+    "riskPerUnit": 6.2,
+    "riskAmount": 100,
+    "accountBalance": 10000,
+    "rsi": 28.33,
+    "ma20": null,
+    "ma50": null,
+    "ema9": 2448.52,
+    "ema21": 2448.74,
+    "ema50": 2449.78,
+    "supertrend": {
+      "signal": "Sell",
+      "level": 2445.9
+    },
+    "atr": 3.1999999999999806,
+    "slippage": 0.1,
+    "spread": 0.3,
+    "liquidity": 5000,
+    "confidence": "Medium",
+    "liveTickData": {
+      "last_price": 2445.9,
+      "volume_traded": 2503,
+      "total_buy_quantity": 1000,
+      "total_sell_quantity": 900
+    },
+    "depth": null,
+    "generatedAt": "2025-06-21T07:04:17.764Z",
+    "source": "analyzeCandles",
+    "ai": {
+      "advisory": "Based on the provided data, with an adequate risk-reward ratio of 1:2 to 1:2.5, and a recognizable trading pattern like Head & Shoulders indicating a potential short, the trade seems fundamentally sound. However, the liquidity and market depth show a relatively balanced but slight bias towards buyers (1000 BuyQty vs 900 SellQty), which might impact the ease of executing a short sale.\n\n**Advice**: If you are confident in the pattern recognition and can manage risks effectively with your stated R:R ratios, consider proceeding with the trade but be cautious of potential difficulty in execution due to slightly higher buying pressure."
+    }
+  },
+  {
+    "stock": "NSE:ADANIENT",
+    "pattern": "Engulfing Bearish",
+    "strength": 2,
+    "direction": "Short",
+    "entry": 2443.8,
+    "stopLoss": 2459,
+    "target1": 2424.8,
+    "target2": 2405.8,
+    "qty": 6,
+    "riskPerUnit": 15.2,
+    "riskAmount": 100,
+    "accountBalance": 10000,
+    "rsi": 39.74,
+    "ma20": null,
+    "ma50": null,
+    "ema9": 2450.42,
+    "ema21": 2449.64,
+    "ema50": 2449.28,
+    "supertrend": {
+      "signal": "Sell",
+      "level": 2443.9
+    },
+    "atr": 3.7999999999998897,
+    "slippage": 0.1,
+    "spread": 0.3,
+    "liquidity": 5000,
+    "confidence": "Medium",
+    "liveTickData": {
+      "last_price": 2443.9,
+      "volume_traded": 270550,
+      "total_buy_quantity": 1000,
+      "total_sell_quantity": 900
+    },
+    "depth": null,
+    "generatedAt": "2025-06-21T07:04:22.884Z",
+    "source": "analyzeCandles",
+    "ai": {
+      "advisory": "The trade setup based on the bearish engulfing pattern can potentially be advantageous, considering your R:R ratios (1:2 to 1:2.5) which suggest a good potential reward compared to risk. However, with a relatively high ATR (indicating volatility) and a nearly balanced depth (close buy and sell quantities), the market might be somewhat turbulent or indecisive.\n\nEnsure that trade entry and exits are set around key levels informed by the ATR and liquidity to manage risk adequately. Overall, the setup could be worth trading if these conditions align with your risk management strategy. Proceed with caution."
+    }
+  },
+  {
+    "stock": "NSE:ADANIENT",
+    "pattern": "Head & Shoulders",
+    "strength": 3,
+    "direction": "Short",
+    "entry": 2446.6,
+    "stopLoss": 2458.1,
+    "target1": 2432.22,
+    "target2": 2417.85,
+    "qty": 8,
+    "riskPerUnit": 11.5,
+    "riskAmount": 100,
+    "accountBalance": 10000,
+    "rsi": 51.73,
+    "ma20": null,
+    "ma50": null,
+    "ema9": 2449.83,
+    "ema21": 2449.5,
+    "ema50": 2449.42,
+    "supertrend": {
+      "signal": "Sell",
+      "level": 2448.3
+    },
+    "atr": 3.6357142857141946,
+    "slippage": 0.1,
+    "spread": 0.3,
+    "liquidity": 5000,
+    "confidence": "Medium",
+    "liveTickData": {
+      "last_price": 2448.3,
+      "volume_traded": 210867,
+      "total_buy_quantity": 1000,
+      "total_sell_quantity": 900
+    },
+    "depth": null,
+    "generatedAt": "2025-06-21T07:04:26.700Z",
+    "source": "analyzeCandles",
+    "ai": {
+      "advisory": "Based on the data provided:\n\n- The risk-reward ratios (1:2 and 1:2.5) are favorable, suggesting potential for good returns relative to the risk.\n- The signal is \"Head & Shoulders Short,\" which is a bearish pattern and generally indicates a likely decline in prices.\n- The spread of 0.3 is reasonable, keeping transaction costs lower.\n- Liquidity of 5000 seems adequate, possibly ensuring smoother execution of trades.\n- ATR (Average True Range) of about 3.64 indicates moderate price volatility, offering opportunity for profit in short moves.\n- The market depth shows a slight imbalance favoring buyers (1000 Buy Qty vs. 900 Sell Qty), which could mean slight resistance to downward movements.\n\n**Advice**: Based on the provided data and favorable risk-reward ratios, this trade opportunity can be considered. However, keep an eye on liquidity and market depth as they can affect trade execution and potential slippage."
+    }
+  },
+  {
+    "stock": "NSE:ADANIENT",
+    "pattern": "Engulfing Bearish",
+    "strength": 2,
+    "direction": "Short",
+    "entry": 2449.5,
+    "stopLoss": 2455,
+    "target1": 2442.63,
+    "target2": 2435.75,
+    "qty": 18,
+    "riskPerUnit": 5.5,
+    "riskAmount": 100,
+    "accountBalance": 10000,
+    "rsi": 47.55,
+    "ma20": null,
+    "ma50": null,
+    "ema9": 2449.54,
+    "ema21": 2449.29,
+    "ema50": 2448.38,
+    "supertrend": {
+      "signal": "Sell",
+      "level": 2449.6
+    },
+    "atr": 2.849999999999909,
+    "slippage": 0.1,
+    "spread": 0.3,
+    "liquidity": 5000,
+    "confidence": "Medium",
+    "liveTickData": {
+      "last_price": 2449.6,
+      "volume_traded": 210584,
+      "total_buy_quantity": 1000,
+      "total_sell_quantity": 900
+    },
+    "depth": null,
+    "generatedAt": "2025-06-21T07:04:32.958Z",
+    "source": "analyzeCandles",
+    "ai": {
+      "advisory": "Based on the given data, here's a brief assessment and advice:\n\n- **Signal**: Engulfing Bearish Short suggests a potential downward price movement.\n- **Spread**: 0.3 is relatively tight, which is good for trading as it implies less cost to enter the trade.\n- **Liquidity**: 5000 indicates decent market depth, allowing for reasonable order execution.\n- **ATR (Average True Range)**: 2.85 suggests moderate volatility, which matches well with the bearish signal for potential decent price movement.\n- **Depth**: The ratio of BuyQty to SellQty is close to 1:1, indicating a slightly higher buying pressure although not significantly strong.\n\nGiven your risk to reward ratios of 1:2 and 1:2.5, the setup appears to align well with a conservative and profitable trading strategy.\n\n**Advice**: This trade could be considered, aligning it carefully with your entry and exit strategy based on the risk:reward ratio and monitoring market conditions closely after entering the trade."
+    }
+  }
+]
