@@ -856,4 +856,5 @@ export {
   candleHistory,
   isMarketOpen,
   setStockSymbol,
+  initSession,
 };

@@ -11,6 +11,7 @@ import {
   getAverageVolume,
   isMarketOpen,
   setStockSymbol,
+  initSession,
 } from "./kite.js";
 
 import db from "./db.js";
@@ -234,7 +235,8 @@ app.get("/kite/callback", async (req, res) => {
   const requestToken = req.query.request_token;
 
   if (!requestToken) {
-    return res.status(400).send("Missing request token");
+    // return res.status(400).send("Missing request token");
+    return res.status(400).json({ error: "Missing request_token" });
   }
 
   // ✅ Save the request_token in DB with type
