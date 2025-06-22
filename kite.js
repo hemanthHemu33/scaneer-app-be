@@ -5,6 +5,8 @@ import fs from "fs";
 import path from "path";
 import dotenv from "dotenv";
 import { fileURLToPath } from "url";
+import { ObjectId } from "mongodb";
+
 dotenv.config();
 
 import db from "./db.js"; // 🧠 Import database module for future use
@@ -30,14 +32,34 @@ let candleHistory = {}; // 🧠 Store per-token candle history for EMA, RSI, etc
 let historicalCache = {};
 
 let stockSymbols = [
-  "NSE:ESAFSFB",
-  "NSE:GOKULAGRO",
-  "NSE:LANDMARK",
-  "NSE:ADANIENT",
-  "NSE:VMM",
-  "NSE:STLTECH",
-  "NSE:SPMLINFRA",
+  // "NSE:ESAFSFB",
+  // "NSE:GOKULAGRO",
+  // "NSE:LANDMARK",
+  // "NSE:ADANIENT",
+  // "NSE:VMM",
+  // "NSE:STLTECH",
+  // "NSE:SPMLINFRA",
 ];
+
+// SET THE STOCKS SYMBOLS
+async function setStockSymbol(symbol) {
+  if (!stockSymbols.includes(symbol)) {
+    stockSymbols.push(symbol);
+    console.log(`🔍 Stock symbol added to memory: ${symbol}`);
+  }
+  const existingSymbols = await db.collection("stock_symbols").findOne({});
+  if (!existingSymbols) {
+    await db.collection("stock_symbols").insertOne({ symbols: [symbol] });
+    console.log("✅ Stock symbol saved to database (new record)");
+    return;
+  }
+  await db.collection("stock_symbols").updateOne(
+    {},
+    { $addToSet: { symbols: symbol } }, // avoids duplicates
+    { upsert: true }
+  );
+  console.log(`✅ Stock symbol "${symbol}" saved to database`);
+}
 
 const tokenSymbolMap = {}; // token: symbol
 
@@ -54,7 +76,8 @@ let ticker,
   tickBuffer = {},
   candleInterval,
   globalIO;
-let errorLog = [], tradeLog = [];
+let errorLog = [],
+  tradeLog = [];
 let riskState = {
   dailyLoss: 0,
   maxDailyLoss: 5000,
@@ -63,23 +86,39 @@ let riskState = {
 };
 
 // 🔐 Initialize Kite session
+
+// our actual ObjectId from your DB
+const tokenDocId = new ObjectId("685834de6afb59a5c477e638");
+
 async function initSession() {
   try {
-    if (tokensData) {
-      kc.setAccessToken(tokensData.access_token);
-      console.log("♻️ Loaded saved access token");
-      return tokensData.access_token;
-    } else {
-      const session = await kc.generateSession(tokensData.request_token, apiSecret);
-      kc.setAccessToken(session.access_token);
-      await db.collection("tokens").updateOne(
-        {},
-        { $set: { access_token: session.access_token } },
-        { upsert: true }
-      );
-      console.log("✅ Session generated and saved");
-      return session.access_token;
+    const savedSession = await db
+      .collection("tokens")
+      .findOne({ _id: tokenDocId });
+
+    if (savedSession?.access_token) {
+      kc.setAccessToken(savedSession.access_token);
+      console.log("♻️ Loaded saved access token from DB");
+      return savedSession.access_token;
     }
+
+    // 🧠 fallback to tokensData if needed
+    const requestToken =
+      savedSession?.request_token || tokensData?.request_token;
+    if (!requestToken) {
+      throw new Error("Missing request_token. Cannot generate session.");
+    }
+
+    const session = await kc.generateSession(requestToken, apiSecret);
+    kc.setAccessToken(session.access_token);
+
+    // ✅ Update existing document (not insert new)
+    await db
+      .collection("tokens")
+      .updateOne({ _id: tokenDocId }, { $set: session });
+
+    console.log("✅ Session generated and updated in DB:", session);
+    return session.access_token;
   } catch (err) {
     logError("Session init failed", err);
     return null;
@@ -102,7 +141,11 @@ function isMarketOpen() {
 async function getTokensForSymbols(symbols) {
   try {
     const instruments = await db.collection("instruments").find({}).toArray();
-    const tokens = instruments.filter((inst) => symbols.includes(`${inst.exchange}:${inst.tradingsymbol}`)).map((inst) => parseInt(inst.instrument_token));
+    const tokens = instruments
+      .filter((inst) =>
+        symbols.includes(`${inst.exchange}:${inst.tradingsymbol}`)
+      )
+      .map((inst) => parseInt(inst.instrument_token));
     return tokens;
   } catch (err) {
     logError("Error reading instruments", err);
@@ -213,6 +256,12 @@ let processingInProgress = false;
 
 export async function processAlignedCandles(io) {
   if (processingInProgress) return;
+  if (!isMarketOpen()) {
+    console.log("Market closed, skipping aligned candle processing.");
+    processingInProgress = false;
+    return;
+  }
+
   processingInProgress = true;
 
   const { analyzeCandles } = await import("./scanner.js");
@@ -548,6 +597,11 @@ fetchHistoricalData();
 // Session & Historical Data
 async function fetchHistoricalData() {
   const accessToken = await initSession();
+
+  if (!isMarketOpen()) {
+    console.log("Market closed. Skipping historical data fetch.");
+    return;
+  }
   if (!accessToken) return console.error("❌ Cannot fetch historical data");
   const startDate = new Date();
   startDate.setDate(startDate.getDate() - 90);
@@ -583,11 +637,9 @@ async function fetchHistoricalData() {
     }
   }
   // fs.writeFileSync(historicalDataPath, JSON.stringify(historicalData, null, 2));
-  await db.collection("historical_data").updateOne(
-    {},
-    { $set: historicalData },
-    { upsert: true }
-  );
+  await db
+    .collection("historical_data")
+    .updateOne({}, { $set: historicalData }, { upsert: true });
   console.log("✅ historical_data.json written successfully");
 }
 async function loadHistoricalCache() {
@@ -604,6 +656,10 @@ async function fetchSessionData() {
   const accessToken = await initSession();
   if (!accessToken) {
     console.error("❌ Cannot fetch session data");
+    return;
+  }
+  if (!isMarketOpen()) {
+    console.log("Market closed. Skipping session data fetch.");
     return;
   }
 
@@ -681,19 +737,22 @@ async function fetchSessionData() {
 
   if (Object.keys(sessionData).length > 0) {
     // fs.writeFileSync(sessionDataPath, JSON.stringify(sessionData, null, 2));
-    await db.collection("session_data").updateOne(
-      {},
-      { $set: sessionData },
-      { upsert: true }
-    );
+    await db
+      .collection("session_data")
+      .updateOne({}, { $set: sessionData }, { upsert: true });
     console.log("✅ Session data written to database.");
   } else {
     console.warn("⚠️ No session data written to database (empty response)");
   }
 }
 
-setInterval(() => fetchSessionData(), 3 * 60 * 1000);
-fetchSessionData();
+// setInterval(() => fetchSessionData(), 3 * 60 * 1000);
+// fetchSessionData();
+
+setInterval(() => {
+  if (!isMarketOpen()) initSession(); // token refresh only
+  else fetchSessionData(); // full session + candle pull
+}, 3 * 60 * 1000);
 
 function getMA(token, period) {
   // const data = JSON.parse(fs.readFileSync(historicalDataPath, "utf-8"))[token];
@@ -794,4 +853,6 @@ export {
   getATR,
   getAverageVolume,
   candleHistory,
+  isMarketOpen,
+  setStockSymbol,
 };

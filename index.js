@@ -9,27 +9,141 @@ import {
   updateInstrumentTokens,
   setTickInterval,
   getAverageVolume,
+  isMarketOpen,
+  setStockSymbol,
 } from "./kite.js";
 
 import db from "./db.js";
 
 const app = express();
+const server = http.createServer(app);
+
+// app.use(
+//   cors({
+//     origin: "https://scanner-app-fe.onrender.com",
+//     methods: ["GET", "POST"],
+//     credentials: true,
+//   })
+// );
+
+// const io = new Server(server, {
+//   cors: {
+//     origin: "https://scanner-app-fe.onrender.com",
+//     methods: ["GET", "POST"],
+//     credentials: true,
+//   },
+// });
+const allowedOrigins = [
+  "https://scanner-app-fe.onrender.com",
+  "http://localhost:5600",
+];
+
 app.use(
   cors({
-    origin: "https://scanner-app-fe.onrender.com",
-    methods: ["GET", "POST"],
+    origin: function (origin, callback) {
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error("Not allowed by CORS"));
+      }
+    },
+    methods: ["GET", "POST", "DELETE"],
     credentials: true,
   })
 );
-app.use(express.json());
 
-const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: "https://scanner-app-fe.onrender.com",
-    methods: ["GET", "POST"],
+    origin: function (origin, callback) {
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error("Not allowed by CORS"));
+      }
+    },
+    methods: ["GET", "POST", "DELETE"],
     credentials: true,
   },
+});
+
+app.use(express.json());
+
+// ADD STOCK SYMBOLS ENDPOINT
+app.post("/addStockSymbol", async (req, res) => {
+  const { symbol } = req.body;
+  if (!symbol || typeof symbol !== "string") {
+    return res.status(400).json({ error: "Invalid symbol" });
+  }
+  try {
+    const existingSymbols = await db.collection("stock_symbols").findOne({});
+    if (!existingSymbols) {
+      // ADD SYMBOLS WITH NSE PREFIX
+      await setStockSymbol(`NSE:${symbol}`);
+      await db
+        .collection("stock_symbols")
+        .insertOne({ symbols: [`NSE:${symbol}`] });
+    } else {
+      await db
+        .collection("stock_symbols")
+        .updateOne({}, { $addToSet: { symbols: `NSE:${symbol}` } });
+    }
+    const updated = await db.collection("stock_symbols").findOne({});
+    res.json({ status: "success", symbols: updated.symbols }); // ⬅ send updated list
+  } catch (err) {
+    console.error("❌ Error:", err.message);
+    res.status(500).json({ error: "Failed to update symbols" });
+  }
+});
+
+// GET STOCK SYMBOLS ENDPOINT
+app.get("/stockSymbols", async (req, res) => {
+  try {
+    const stockSymbols = await db.collection("stock_symbols").findOne({});
+    res.json(stockSymbols || { symbols: [] });
+  } catch (err) {
+    console.error("❌ Error fetching stock symbols:", err);
+    res.status(500).json({ error: "Failed to fetch stock symbols" });
+  }
+});
+// delete stock symbols by symbol
+app.delete("/stockSymbols/:symbol", async (req, res) => {
+  const { symbol } = req.params;
+  if (!symbol || typeof symbol !== "string") {
+    return res.status(400).json({ error: "Invalid stock symbol" });
+  }
+  try {
+    const result = await db
+      .collection("stock_symbols")
+      .updateOne({}, { $pull: { symbols: `${symbol}` } }, { upsert: true });
+    if (result.modifiedCount > 0) {
+      console.log(`🗑️ Stock symbol "${symbol}" deleted successfully.`);
+      res.json({ status: "success", deletedSymbol: `NSE:${symbol}` });
+    } else {
+      res.status(404).json({ error: "Stock symbol not found" });
+    }
+  } catch (err) {
+    console.error("❌ Error deleting stock symbol:", err);
+    res.status(500).json({ error: "Failed to delete stock symbol" });
+  }
+});
+
+// DELETE ALL THE COLLECTIONS EXCEPT THE instruments COLLECTIONS AND RECREATE THE COLLECTIONS WITH EMPTY DATA
+app.delete("/reset", async (req, res) => {
+  try {
+    const collections = await db.collections();
+    for (const collection of collections) {
+      if (collection.collectionName !== "instruments") {
+        await collection.deleteMany({});
+      }
+    }
+    // Recreate the stock_symbols collection with an empty array
+    await db.collection("stock_symbols").deleteMany({});
+    await db.collection("stock_symbols").insertOne({ symbols: [] });
+    res.json({ status: "success", message: "Collections reset successfully" });
+  } catch (err) {
+    console.error("❌ Error resetting collections:", err);
+    res.status(500).json({ error: "Failed to reset collections" });
+  }
 });
 
 // 🔥 Enhanced endpoint to process candle data and emit signals
@@ -110,11 +224,9 @@ app.get("/kite-redirect", async (req, res) => {
   if (!requestToken) {
     return res.status(400).json({ error: "Missing request_token" });
   }
-  await db.collection("tokens").updateOne(
-    {},
-    { $set: { request_token: requestToken } },
-    { upsert: true }
-  );
+  await db
+    .collection("tokens")
+    .updateOne({}, { $set: { request_token: requestToken } }, { upsert: true });
   res.json({ status: "Request token saved" });
 });
 
@@ -123,7 +235,18 @@ io.on("connection", (socket) => {
   socket.emit("serverMessage", "Connected to backend.");
 });
 
+// server.listen(3000, () => {
+//   console.log("📡 Backend running on port 3000");
+//   startLiveFeed(io); // Start live market data and signal processing
+// });
+
 server.listen(3000, () => {
   console.log("📡 Backend running on port 3000");
-  startLiveFeed(io); // Start live market data and signal processing
+
+  if (isMarketOpen()) {
+    console.log("✅ Market is open. Starting live feed...");
+    startLiveFeed(io);
+  } else {
+    console.log("⏸ Market is closed. Skipping live feed start.");
+  }
 });
