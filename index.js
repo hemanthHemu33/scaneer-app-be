@@ -147,6 +147,18 @@ app.delete("/reset", async (req, res) => {
   }
 });
 
+// GET SIGNALS ENDPOINT
+app.get("/signals", async (req, res) => {
+  try {
+    const signals = await db.collection("signals").find({}).toArray();
+    // res.json(signals);
+    res.json({ status: "success", signals: signals });
+  } catch (err) {
+    console.error("❌ Error fetching signals:", err);
+    res.status(500).json({ error: "Failed to fetch signals" });
+  }
+});
+
 // 🔥 Enhanced endpoint to process candle data and emit signals
 app.post("/candles", async (req, res) => {
   const candles = req.body;
@@ -196,9 +208,9 @@ app.post("/candles", async (req, res) => {
   }
 });
 
-app.get("/signal-history", (req, res) => {
-  res.json(getSignalHistory());
-});
+// app.get("/signal-history", (req, res) => {
+//   res.json(getSignalHistory());
+// });
 
 app.post("/subscribe", (req, res) => {
   const { tokens } = req.body;
@@ -270,7 +282,7 @@ app.get("/kite-redirect", async (req, res) => {
       { $set: { request_token: requestToken, type: "kite_session" } },
       { upsert: true }
     );
-  
+
   // ✅ Optionally generate session here
   const session = await initSession();
 

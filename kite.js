@@ -374,6 +374,8 @@ export async function processAlignedCandles(io) {
             console.log("🚀 Emitting Aligned Signal:", signal);
             io.emit("tradeSignal", signal);
             logTrade(signal);
+            // STORE THE SIGNAL IN DB
+            await db.collection("signals").insertOne(signal);
           }
         } catch (err) {
           logError(`⚠️ Error processing token ${token} at ${minute}`, err);
