@@ -231,7 +231,7 @@ app.post("/set-interval", (req, res) => {
 //   res.json({ status: "Request token saved" });
 // });
 
-app.get("/kite/callback", async (req, res) => {
+app.get("/kite-redirect", async (req, res) => {
   const requestToken = req.query.request_token;
 
   if (!requestToken) {
@@ -247,7 +247,7 @@ app.get("/kite/callback", async (req, res) => {
       { $set: { request_token: requestToken, type: "kite_session" } },
       { upsert: true }
     );
-
+  
   // ✅ Optionally generate session here
   const session = await initSession();
 
