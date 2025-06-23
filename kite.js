@@ -86,11 +86,15 @@ let riskState = {
 };
 
 // 🔐 Initialize Kite session
+
+// our actual ObjectId from your DB
+const tokenDocId = new ObjectId("685834de6afb59a5c477e638");
+
 async function initSession() {
   try {
-    const sessionQuery = { type: "kite_session" };
-
-    const savedSession = await db.collection("tokens").findOne(sessionQuery);
+    const savedSession = await db
+      .collection("tokens")
+      .findOne({ _id: tokenDocId });
 
     if (savedSession?.access_token) {
       kc.setAccessToken(savedSession.access_token);
@@ -101,7 +105,6 @@ async function initSession() {
     // 🧠 fallback to tokensData if needed
     const requestToken =
       savedSession?.request_token || tokensData?.request_token;
-
     if (!requestToken) {
       throw new Error("Missing request_token. Cannot generate session.");
     }
@@ -109,14 +112,10 @@ async function initSession() {
     const session = await kc.generateSession(requestToken, apiSecret);
     kc.setAccessToken(session.access_token);
 
-    // ✅ Save session object with fixed identifier
+    // ✅ Update existing document (not insert new)
     await db
       .collection("tokens")
-      .updateOne(
-        sessionQuery,
-        { $set: { ...session, type: "kite_session" } },
-        { upsert: true }
-      );
+      .updateOne({ _id: tokenDocId }, { $set: session });
 
     console.log("✅ Session generated and updated in DB:", session);
     return session.access_token;
