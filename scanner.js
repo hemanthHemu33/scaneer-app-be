@@ -33,7 +33,7 @@ let riskState = {
 };
 
 // ⚙️ Scanner mode toggle
-const MODE = "strict"; // Options: "strict" | "relaxed"
+const MODE = "relaxed"; // Options: "strict" | "relaxed"
 const FILTERS = {
   atrThreshold: MODE === "strict" ? 2 : 0.4,
   minBuySellRatio: MODE === "strict" ? 0.8 : 0.6,
