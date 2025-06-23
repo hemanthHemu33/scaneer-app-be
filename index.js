@@ -254,6 +254,33 @@ app.get("/kite-redirect", async (req, res) => {
 //   }
 // });
 
+app.get("/kite-redirect", async (req, res) => {
+  const requestToken = req.query.request_token;
+
+  if (!requestToken) {
+    // return res.status(400).send("Missing request token");
+    return res.status(400).json({ error: "Missing request_token" });
+  }
+
+  // ✅ Save the request_token in DB with type
+  await db
+    .collection("tokens")
+    .updateOne(
+      { type: "kite_session" },
+      { $set: { request_token: requestToken, type: "kite_session" } },
+      { upsert: true }
+    );
+  
+  // ✅ Optionally generate session here
+  const session = await initSession();
+
+  if (session) {
+    return res.send("✅ Login Successful, session created.");
+  } else {
+    return res.send("⚠️ Login saved, but session creation failed.");
+  }
+});
+
 io.on("connection", (socket) => {
   console.log("✅ Client connected:", socket.id);
   socket.emit("serverMessage", "Connected to backend.");
