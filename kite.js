@@ -374,7 +374,8 @@ export async function processAlignedCandles(io) {
             console.log("🚀 Emitting Aligned Signal:", signal);
             io.emit("tradeSignal", signal);
             logTrade(signal);
-            // STORE THE SIGNAL IN DB
+            // STORE THE LATEST SIGNAL IN DB LATEST SIGNAL ON TOP
+
             await db.collection("signals").insertOne(signal);
           }
         } catch (err) {

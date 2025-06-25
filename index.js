@@ -15,6 +15,7 @@ import {
 } from "./kite.js";
 
 import db from "./db.js";
+import { Console } from "console";
 
 const app = express();
 const server = http.createServer(app);
@@ -106,21 +107,60 @@ app.get("/stockSymbols", async (req, res) => {
     res.status(500).json({ error: "Failed to fetch stock symbols" });
   }
 });
-// delete stock symbols by symbol
+
+// DELETE stock symbol and its historical data
 app.delete("/stockSymbols/:symbol", async (req, res) => {
   const { symbol } = req.params;
+
   if (!symbol || typeof symbol !== "string") {
     return res.status(400).json({ error: "Invalid stock symbol" });
   }
+
+  // ✅ Extract actual tradingsymbol (remove "NSE:" prefix if present)
+  const cleanedSymbol = symbol.includes(":") ? symbol.split(":")[1] : symbol;
+
   try {
+    // Step 1: Remove from stock_symbols list
     const result = await db
       .collection("stock_symbols")
-      .updateOne({}, { $pull: { symbols: `${symbol}` } }, { upsert: true });
-    if (result.modifiedCount > 0) {
-      console.log(`🗑️ Stock symbol "${symbol}" deleted successfully.`);
-      res.json({ status: "success", deletedSymbol: `NSE:${symbol}` });
+      .updateOne(
+        {},
+        { $pull: { symbols: `NSE:${cleanedSymbol}` } },
+        { upsert: true }
+      );
+
+    // Step 2: Find instrument using cleaned symbol
+    const instrument = await db
+      .collection("instruments")
+      .findOne({ tradingsymbol: cleanedSymbol, exchange: "NSE" });
+
+    console.log("Trying to delete symbol:", symbol);
+    console.log("Cleaned symbol for lookup:", cleanedSymbol);
+    console.log("Instrument found:", instrument);
+
+    // Step 3: If instrument found, delete historical data
+    if (instrument && instrument.instrument_token) {
+      const instrumentToken = String(instrument.instrument_token);
+      const deleteResult = await db
+        .collection("historical_data")
+        .updateOne({}, { $unset: { [instrumentToken]: "" } });
+
+      console.log(
+        `📉 Removed token "${instrumentToken}" from historical_data:`,
+        deleteResult.modifiedCount
+      );
     } else {
-      res.status(404).json({ error: "Stock symbol not found" });
+      console.warn(
+        `❗Instrument not found for symbol "${cleanedSymbol}" on NSE`
+      );
+    }
+
+    // Step 4: Final response
+    if (result.modifiedCount > 0) {
+      console.log(`🗑️ Stock symbol "${cleanedSymbol}" deleted successfully.`);
+      res.json({ status: "success", deletedSymbol: `NSE:${cleanedSymbol}` });
+    } else {
+      res.status(404).json({ error: "Stock symbol not found in list" });
     }
   } catch (err) {
     console.error("❌ Error deleting stock symbol:", err);
@@ -133,7 +173,11 @@ app.delete("/reset", async (req, res) => {
   try {
     const collections = await db.collections();
     for (const collection of collections) {
-      if (collection.collectionName !== "instruments") {
+      if (
+        collection.collectionName !== "instruments" &&
+        collection.collectionName !== "nifty50stocksymbols" &&
+        collection.collectionName !== "nifty100qualitystocksymbols"
+      ) {
         await collection.deleteMany({});
       }
     }
@@ -150,7 +194,11 @@ app.delete("/reset", async (req, res) => {
 // GET SIGNALS ENDPOINT
 app.get("/signals", async (req, res) => {
   try {
-    const signals = await db.collection("signals").find({}).toArray();
+    const signals = await db
+      .collection("signals")
+      .find({})
+      .sort({ generatedAt: -1 })
+      .toArray();
     // res.json(signals);
     res.json({ status: "success", signals: signals });
   } catch (err) {
