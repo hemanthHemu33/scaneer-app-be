@@ -270,7 +270,7 @@ export async function analyzeCandles(
     }
 
     // Debounce logic
-    const conflictWindow = 5 * 60 * 1000;
+    const conflictWindow = 3 * 60 * 1000;
     if (
       !debounceSignal(signalHistory, symbol, pattern.direction, conflictWindow)
     )

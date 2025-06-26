@@ -245,8 +245,10 @@ async function startLiveFeed(io) {
 let alignedTickStorage = {};
 function storeTickAligned(tick) {
   const token = tick.instrument_token;
-  const ts = tick.timestamp ? new Date(tick.timestamp) : new Date();
-  const minuteKey = `${ts.getFullYear()}-${ts.getMonth()}-${ts.getDate()}-${ts.getHours()}-${ts.getMinutes()}`;
+  const ts = new Date(tick.timestamp || Date.now());
+  const minuteKey = new Date(Math.floor(ts.getTime() / 60000) * 60000)
+    .toISOString()
+    .slice(0, 16); // "YYYY-MM-DDTHH:mm"
   if (!alignedTickStorage[token]) alignedTickStorage[token] = {};
   if (!alignedTickStorage[token][minuteKey])
     alignedTickStorage[token][minuteKey] = [];
