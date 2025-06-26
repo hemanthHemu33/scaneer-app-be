@@ -57,203 +57,6 @@ export function getATR(data, period = 14) {
   return trSum / period;
 }
 
-// export function detectPatterns(candles, atrValue, lookback = 5) {
-//   if (candles.length < lookback) return null;
-
-//   const last = candles[candles.length - 1];
-//   const lastN = candles.slice(-lookback);
-//   const highs = lastN.map((c) => c.high);
-//   const lows = lastN.map((c) => c.low);
-//   const recentHigh = Math.max(...highs);
-//   const recentLow = Math.min(...lows);
-//   const epsilon = 0.1;
-//   const totalVolume = lastN.reduce((acc, c) => acc + c.volume, 0);
-//   const avgVolume = totalVolume / lookback;
-
-//   if (
-//     last.close > recentHigh &&
-//     atrValue &&
-//     Math.abs(last.close - recentLow) > atrValue * 0.5
-//   ) {
-//     return {
-//       type: "Breakout",
-//       breakout: last.close,
-//       stopLoss: recentLow,
-//       direction: "Long",
-//       strength: 3,
-//     };
-//   }
-
-//   if (last.close > recentHigh && last.volume > avgVolume * 1.2)
-//     return {
-//       type: "Breakout",
-//       breakout: last.close,
-//       stopLoss: recentLow,
-//       direction: "Long",
-//       strength: 3,
-//       confidence: "High",
-//     };
-
-//   if (
-//     last.high < lastN[lastN.length - 2].high &&
-//     last.low > lastN[lastN.length - 2].low
-//   )
-//     return {
-//       type: "Inside Bar",
-//       breakout: last.high,
-//       stopLoss: last.low,
-//       direction: "Long",
-//       strength: 1,
-//       confidence: "Medium",
-//     };
-
-//   if (
-//     last.high > lastN[lastN.length - 2].high &&
-//     last.low < lastN[lastN.length - 2].low &&
-//     last.close > lastN[lastN.length - 2].close &&
-//     atrValue &&
-//     Math.abs(last.close - last.open) > atrValue * 0.3
-//   )
-//     return {
-//       type: "Engulfing Bullish",
-//       breakout: last.close,
-//       stopLoss: last.low,
-//       direction: "Long",
-//       strength: 2,
-//       confidence: "High",
-//     };
-
-//   if (
-//     last.high > lastN[lastN.length - 2].high &&
-//     last.low < lastN[lastN.length - 2].low &&
-//     last.close < lastN[lastN.length - 2].close &&
-//     atrValue &&
-//     Math.abs(last.open - last.close) > atrValue * 0.3
-//   )
-//     return {
-//       type: "Engulfing Bearish",
-//       breakout: last.close,
-//       stopLoss: last.high,
-//       direction: "Short",
-//       strength: 2,
-//       confidence: "High",
-//     };
-
-//   const strongUp = candles.slice(-6, -3).every((c) => c.close > c.open);
-//   const flagRange = candles
-//     .slice(-3)
-//     .every((c) => Math.abs(c.close - c.open) < (c.high - c.low) * 0.5);
-//   if (strongUp && flagRange && last.close > last.open)
-//     return {
-//       type: "Bull Flag",
-//       breakout: last.high,
-//       stopLoss: recentLow,
-//       direction: "Long",
-//       strength: 2,
-//       confidence: "Medium",
-//     };
-
-//   const isAscending =
-//     lows[1] > lows[0] && lows[2] > lows[1] && lows[3] > lows[2];
-//   const flatTop =
-//     Math.abs(highs[0] - highs[1]) < epsilon &&
-//     Math.abs(highs[1] - highs[2]) < epsilon;
-//   if (isAscending && flatTop)
-//     return {
-//       type: "Ascending Triangle",
-//       breakout: recentHigh,
-//       stopLoss: recentLow,
-//       direction: "Long",
-//       strength: 3,
-//       confidence: "High",
-//     };
-
-//   const middle = Math.floor(lastN.length / 2);
-//   const isCup =
-//     lastN[0].high > lastN[middle].high &&
-//     lastN[lastN.length - 1].high > lastN[middle].high;
-//   const isHandle = last.low > lastN[middle].low && last.close > last.open;
-//   if (isCup && isHandle)
-//     return {
-//       type: "Cup and Handle",
-//       breakout: last.high,
-//       stopLoss: last.low,
-//       direction: "Long",
-//       strength: 2,
-//       confidence: "High",
-//     };
-
-//   const isFalling = lows[0] > lows[1] && lows[1] > lows[2] && lows[2] > lows[3];
-//   const isNarrowing = highs[0] - lows[0] > highs[4] - lows[4];
-//   if (isFalling && isNarrowing && last.close > last.open)
-//     return {
-//       type: "Falling Wedge",
-//       breakout: last.high,
-//       stopLoss: last.low,
-//       direction: "Long",
-//       strength: 2,
-//       confidence: "High",
-//     };
-
-//   if (Math.abs(lows[3] - lows[4]) < epsilon && last.close > recentHigh)
-//     return {
-//       type: "Double Bottom",
-//       breakout: last.close,
-//       stopLoss: recentLow,
-//       direction: "Long",
-//       strength: 2,
-//       confidence: "Medium",
-//     };
-
-//   if (Math.abs(highs[3] - highs[4]) < epsilon && last.close < recentLow)
-//     return {
-//       type: "Double Top",
-//       breakout: last.close,
-//       stopLoss: recentHigh,
-//       direction: "Short",
-//       strength: 2,
-//       confidence: "Medium",
-//     };
-
-//   const vwap = calculateVWAP(candles);
-//   if (
-//     Math.abs(last.close - vwap) < (recentHigh - recentLow) * 0.1 &&
-//     last.volume > avgVolume * 1.2
-//   )
-//     return {
-//       type: "VWAP Reversal",
-//       breakout: last.close,
-//       stopLoss: recentLow,
-//       direction: last.close > vwap ? "Long" : "Short",
-//       strength: 1,
-//       confidence: "High",
-//     };
-
-//   if (candles.length >= 7) {
-//     const l = candles.length;
-//     const left = candles[l - 7].high;
-//     const head = candles[l - 4].high;
-//     const right = candles[l - 1].high;
-//     if (
-//       head > left &&
-//       head > right &&
-//       Math.abs(left - right) < (head - Math.min(left, right)) * 0.3 &&
-//       atrValue &&
-//       head - Math.min(left, right) > atrValue * 0.6
-//     )
-//       return {
-//         type: "Head & Shoulders",
-//         breakout: candles[l - 1].low,
-//         stopLoss: head,
-//         direction: "Short",
-//         strength: 3,
-//         confidence: "High",
-//       };
-//   }
-
-//   return null;
-// }
-
 export function calculateVWAP(candles) {
   if (!candles || candles.length === 0) return null;
   let totalPV = 0,
@@ -414,47 +217,51 @@ export function detectAllPatterns(candles, atrValue, lookback = 5) {
   const lows = lastN.map((c) => c.low);
   const recentHigh = Math.max(...highs);
   const recentLow = Math.min(...lows);
-  const totalVolume = lastN.reduce((acc, c) => acc + c.volume, 0);
-  const avgVolume = totalVolume / lookback;
   const epsilon = 0.1;
 
+  // --- Single Candle Reversal ---
   const isDoji =
     Math.abs(last.open - last.close) < (last.high - last.low) * 0.1;
   const isHammer =
     last.close > last.open &&
-    last.low - Math.min(last.open, last.close) > 2 * (last.high - last.close);
+    last.open - last.low > 2 * (last.high - last.close);
   const isInvertedHammer =
     last.close > last.open &&
-    last.high - Math.max(last.open, last.close) > 2 * (last.close - last.low);
+    last.high - last.close > 2 * (last.close - last.low);
+  const isShootingStar =
+    last.open > last.close &&
+    last.high - last.open > 2 * (last.open - last.low);
 
-  if (isDoji) {
+  if (isDoji)
     patterns.push({
       type: "Doji",
       direction: "Indecision",
       strength: 1,
       confidence: "Medium",
     });
-  }
-
-  if (isHammer) {
+  if (isHammer)
     patterns.push({
       type: "Hammer",
       direction: "Long",
       strength: 2,
       confidence: "High",
     });
-  }
-
-  if (isInvertedHammer) {
+  if (isInvertedHammer)
     patterns.push({
       type: "Inverted Hammer",
       direction: "Long",
       strength: 2,
       confidence: "Medium",
     });
-  }
+  if (isShootingStar)
+    patterns.push({
+      type: "Shooting Star",
+      direction: "Short",
+      strength: 2,
+      confidence: "High",
+    });
 
-  // Morning Star / Evening Star
+  // --- Multi-Candle Reversal ---
   if (candles.length >= 3) {
     const [c1, c2, c3] = candles.slice(-3);
     const morningStar =
@@ -462,23 +269,43 @@ export function detectAllPatterns(candles, atrValue, lookback = 5) {
     const eveningStar =
       c1.close > c1.open && isDoji && c3.close < c3.open && c3.close < c1.open;
 
-    if (morningStar) {
+    const piercingLine =
+      c1.close < c1.open &&
+      c2.open < c1.low &&
+      c2.close > (c1.open + c1.close) / 2;
+    const darkCloudCover =
+      c1.close > c1.open &&
+      c2.open > c1.high &&
+      c2.close < (c1.open + c1.close) / 2;
+
+    if (morningStar)
       patterns.push({
         type: "Morning Star",
         direction: "Long",
         strength: 3,
         confidence: "High",
       });
-    }
-
-    if (eveningStar) {
+    if (eveningStar)
       patterns.push({
         type: "Evening Star",
         direction: "Short",
         strength: 3,
         confidence: "High",
       });
-    }
+    if (piercingLine)
+      patterns.push({
+        type: "Piercing Line",
+        direction: "Long",
+        strength: 2,
+        confidence: "Medium",
+      });
+    if (darkCloudCover)
+      patterns.push({
+        type: "Dark Cloud Cover",
+        direction: "Short",
+        strength: 2,
+        confidence: "Medium",
+      });
   }
 
   // Harami
@@ -487,52 +314,189 @@ export function detectAllPatterns(candles, atrValue, lookback = 5) {
     last.open > last.close && last.high < prev.high && last.low > prev.low;
   const haramiBearish =
     last.open < last.close && last.high < prev.high && last.low > prev.low;
-
-  if (haramiBullish) {
+  if (haramiBullish)
     patterns.push({
       type: "Bullish Harami",
       direction: "Long",
       strength: 2,
       confidence: "Medium",
     });
-  }
-
-  if (haramiBearish) {
+  if (haramiBearish)
     patterns.push({
       type: "Bearish Harami",
       direction: "Short",
       strength: 2,
       confidence: "Medium",
     });
-  }
 
   // Three Soldiers / Crows
   if (candles.length >= 4) {
     const [c1, c2, c3] = candles.slice(-4, -1);
     const threeSoldiers = [c1, c2, c3].every((c) => c.close > c.open);
     const threeCrows = [c1, c2, c3].every((c) => c.close < c.open);
-
-    if (threeSoldiers) {
+    if (threeSoldiers)
       patterns.push({
         type: "Three White Soldiers",
         direction: "Long",
         strength: 3,
         confidence: "High",
       });
-    }
-
-    if (threeCrows) {
+    if (threeCrows)
       patterns.push({
         type: "Three Black Crows",
         direction: "Short",
         strength: 3,
         confidence: "High",
       });
+  }
+
+  // --- Continuation Patterns ---
+  if (candles.length >= 6) {
+    const flagConsolidation = candles
+      .slice(-3)
+      .every((c) => Math.abs(c.close - c.open) < (c.high - c.low) * 0.5);
+    const priorUp = candles.slice(-6, -3).every((c) => c.close > c.open);
+    const priorDown = candles.slice(-6, -3).every((c) => c.close < c.open);
+
+    if (priorUp && flagConsolidation && last.close > last.open) {
+      patterns.push({
+        type: "Bull Flag",
+        direction: "Long",
+        strength: 2,
+        confidence: "Medium",
+      });
+    }
+    if (priorDown && flagConsolidation && last.close < last.open) {
+      patterns.push({
+        type: "Bear Flag",
+        direction: "Short",
+        strength: 2,
+        confidence: "Medium",
+      });
     }
   }
 
-  // Continue with Breakout, Inside Bar, Engulfing, Head & Shoulders (already handled)
+  const isAscending = lows[1] > lows[0] && lows[2] > lows[1];
+  const flatTop =
+    Math.abs(highs[0] - highs[1]) < epsilon &&
+    Math.abs(highs[1] - highs[2]) < epsilon;
+  if (isAscending && flatTop) {
+    patterns.push({
+      type: "Ascending Triangle",
+      direction: "Long",
+      breakout: recentHigh,
+      stopLoss: recentLow,
+      strength: 3,
+      confidence: "High",
+    });
+  }
 
+  const isDescending = highs[1] < highs[0] && highs[2] < highs[1];
+  const flatBottom =
+    Math.abs(lows[0] - lows[1]) < epsilon &&
+    Math.abs(lows[1] - lows[2]) < epsilon;
+  if (isDescending && flatBottom) {
+    patterns.push({
+      type: "Descending Triangle",
+      direction: "Short",
+      breakout: recentLow,
+      stopLoss: recentHigh,
+      strength: 3,
+      confidence: "High",
+    });
+  }
+
+  const isCup = lastN[0].high > lastN[2].high && lastN[4].high > lastN[2].high;
+  const isHandle = last.low > lastN[2].low && last.close > last.open;
+  if (isCup && isHandle) {
+    patterns.push({
+      type: "Cup & Handle",
+      direction: "Long",
+      breakout: last.high,
+      stopLoss: last.low,
+      strength: 2,
+      confidence: "High",
+    });
+  }
+
+  const isFalling = lows[0] > lows[1] && lows[1] > lows[2];
+  const isNarrowing = highs[0] - lows[0] > highs[2] - lows[2];
+  if (isFalling && isNarrowing && last.close > last.open) {
+    patterns.push({
+      type: "Falling Wedge",
+      direction: "Long",
+      breakout: last.high,
+      stopLoss: last.low,
+      strength: 2,
+      confidence: "High",
+    });
+  }
+
+  const isRising =
+    lows[0] < lows[1] &&
+    lows[1] < lows[2] &&
+    highs[0] < highs[1] &&
+    highs[1] < highs[2];
+  const isTightening = highs[2] - lows[2] < highs[0] - lows[0];
+  if (isRising && isTightening && last.close < last.open) {
+    patterns.push({
+      type: "Rising Wedge",
+      direction: "Short",
+      breakout: last.low,
+      stopLoss: last.high,
+      strength: 2,
+      confidence: "High",
+    });
+  }
+
+  if (
+    Math.abs(lows[3] - lows[4]) < epsilon &&
+    Math.abs(lows[4] - last.low) < epsilon
+  ) {
+    patterns.push({
+      type: "Triple Bottom",
+      direction: "Long",
+      breakout: last.high,
+      stopLoss: recentLow,
+      strength: 3,
+      confidence: "Medium",
+    });
+  }
+
+  if (
+    Math.abs(highs[3] - highs[4]) < epsilon &&
+    Math.abs(highs[4] - last.high) < epsilon
+  ) {
+    patterns.push({
+      type: "Triple Top",
+      direction: "Short",
+      breakout: last.low,
+      stopLoss: recentHigh,
+      strength: 3,
+      confidence: "Medium",
+    });
+  }
+
+  const isSymTriangle =
+    Math.abs(highs[0] - highs[2]) > epsilon &&
+    Math.abs(lows[0] - lows[2]) > epsilon &&
+    highs[0] > highs[1] &&
+    highs[1] > highs[2] &&
+    lows[0] < lows[1] &&
+    lows[1] < lows[2];
+
+  if (isSymTriangle) {
+    patterns.push({
+      type: "Symmetrical Triangle",
+      direction: "Neutral",
+      breakout: last.close,
+      stopLoss: recentLow,
+      strength: 2,
+      confidence: "Medium",
+    });
+  }
+
+  // --- Classic Patterns ---
   if (
     last.close > recentHigh &&
     atrValue &&
@@ -540,55 +504,52 @@ export function detectAllPatterns(candles, atrValue, lookback = 5) {
   ) {
     patterns.push({
       type: "Breakout",
+      direction: "Long",
       breakout: last.close,
       stopLoss: recentLow,
-      direction: "Long",
       strength: 3,
       confidence: "High",
     });
   }
 
-  if (
-    last.high < lastN[lastN.length - 2].high &&
-    last.low > lastN[lastN.length - 2].low
-  ) {
+  if (last.high < lastN[3].high && last.low > lastN[3].low) {
     patterns.push({
       type: "Inside Bar",
+      direction: "Long",
       breakout: last.high,
       stopLoss: last.low,
-      direction: "Long",
       strength: 1,
       confidence: "Medium",
     });
   }
 
   if (
-    last.high > lastN[lastN.length - 2].high &&
-    last.low < lastN[lastN.length - 2].low &&
-    last.close > lastN[lastN.length - 2].close &&
+    last.high > lastN[3].high &&
+    last.low < lastN[3].low &&
+    last.close > lastN[3].close &&
     Math.abs(last.close - last.open) > atrValue * 0.3
   ) {
     patterns.push({
       type: "Engulfing Bullish",
+      direction: "Long",
       breakout: last.close,
       stopLoss: last.low,
-      direction: "Long",
       strength: 2,
       confidence: "High",
     });
   }
 
   if (
-    last.high > lastN[lastN.length - 2].high &&
-    last.low < lastN[lastN.length - 2].low &&
-    last.close < lastN[lastN.length - 2].close &&
+    last.high > lastN[3].high &&
+    last.low < lastN[3].low &&
+    last.close < lastN[3].close &&
     Math.abs(last.open - last.close) > atrValue * 0.3
   ) {
     patterns.push({
       type: "Engulfing Bearish",
+      direction: "Short",
       breakout: last.close,
       stopLoss: last.high,
-      direction: "Short",
       strength: 2,
       confidence: "High",
     });
@@ -608,9 +569,9 @@ export function detectAllPatterns(candles, atrValue, lookback = 5) {
     ) {
       patterns.push({
         type: "Head & Shoulders",
+        direction: "Short",
         breakout: candles[l - 1].low,
         stopLoss: head,
-        direction: "Short",
         strength: 3,
         confidence: "High",
       });
