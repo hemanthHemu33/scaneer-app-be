@@ -12,12 +12,6 @@ import {
 } from "./util.js";
 
 import { getHigherTimeframeData } from "./kite.js";
-import {
-  getSignalExplanation,
-  getConfidenceScore,
-  getFilteredAdvice,
-  generateTradePlan,
-} from "./openAI.js";
 import { candleHistory } from "./kite.js";
 
 // 📊 Signal history tracking
@@ -371,12 +365,8 @@ export async function analyzeCandles(
       source: "analyzeCandles",
     };
 
-    signal.ai = {
-      explanation: await getSignalExplanation(signal),
-      confidenceReview: await getConfidenceScore(signal),
-      advisory: await getFilteredAdvice(signal),
-      plan: await generateTradePlan(signal),
-    };
+    // AI enrichment will be handled asynchronously after the signal is emitted
+    signal.ai = null;
 
     return signal;
   } catch (err) {
