@@ -22,7 +22,11 @@ export function sendSignal(signal) {
   const { stock, direction, entry, stopLoss, target1, target2, confidence } =
     signal;
 
-  const text = `\u{1F4C8} *${stock}*\nDirection: *${direction}*\nEntry: ${entry}\nSL: ${stopLoss}\nT1: ${target1} | T2: ${target2}\nConfidence: ${confidence}`;
+  // CHANGE THE DIRECTION COLOR BASED ON DIRECTION
+  const directionColor = direction === "Long" ? "green" : "red";
+  // Format the direction with color
+  const formattedDirection = `<span style="color:${directionColor}">${direction}</span>`;
+  const text = `\u{1F4C8} *${stock}*\nDirection: *${formattedDirection}*\nEntry: ${entry}\nSL: ${stopLoss}\nT1: ${target1} | T2: ${target2}\nConfidence: ${confidence}`;
 
   bot
     .sendMessage(chatId, text, { parse_mode: "Markdown" })
