@@ -6,7 +6,7 @@ import path from "path";
 import dotenv from "dotenv";
 import { fileURLToPath } from "url";
 import { ObjectId } from "mongodb";
-
+import { sendSignal } from "./telegram.js";
 dotenv.config();
 
 import db from "./db.js"; // 🧠 Import database module for future use
@@ -374,6 +374,7 @@ export async function processAlignedCandles(io) {
             console.log("🚀 Emitting Aligned Signal:", signal);
             io.emit("tradeSignal", signal);
             logTrade(signal);
+            sendSignal(signal); // 🐦 Send to Telegram
             // STORE THE LATEST SIGNAL IN DB LATEST SIGNAL ON TOP
 
             await db.collection("signals").insertOne(signal);
@@ -496,6 +497,7 @@ async function processBuffer(io) {
         console.log("🚀 Emitting TickBuffer Signal:", signal);
         io.emit("tradeSignal", signal);
         logTrade(signal);
+        sendSignal(signal); // 🐦 Send to Telegram
       }
     } catch (err) {
       logError(`❌ Signal generation error for token ${token}`, err);

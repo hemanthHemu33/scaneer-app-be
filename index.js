@@ -13,7 +13,7 @@ import {
   setStockSymbol,
   initSession,
 } from "./kite.js";
-
+import { sendSignal } from "./telegram.js";
 import db from "./db.js";
 import { Console } from "console";
 
@@ -144,7 +144,15 @@ app.delete("/stockSymbols/:symbol", async (req, res) => {
       const deleteResult = await db
         .collection("historical_data")
         .updateOne({}, { $unset: { [instrumentToken]: "" } });
-
+      //  delete the session_data for that instrument token
+      const deleteSessionResult = await db
+        .collection("session_data")
+        .updateOne({}, { $unset: { [instrumentToken]: "" } });
+      // Log the deletion result
+      console.log(
+        `🗑️ Deleted historical data for instrument "${cleanedSymbol}":`,
+        deleteResult.modifiedCount
+      );
       console.log(
         `📉 Removed token "${instrumentToken}" from historical_data:`,
         deleteResult.modifiedCount
@@ -245,6 +253,7 @@ app.post("/candles", async (req, res) => {
     if (signal) {
       console.log("🚀 Emitting tradeSignal:", signal);
       io.emit("tradeSignal", signal);
+      sendSignal(signal); // Send signal to Telegram
     } else {
       console.log("ℹ️ No signal generated for:", symbol);
     }
