@@ -14,6 +14,7 @@ import {
   initSession,
 } from "./kite.js";
 import { sendSignal } from "./telegram.js";
+import { fetchAIData } from "./openAI.js";
 import db from "./db.js";
 import { Console } from "console";
 
@@ -254,6 +255,12 @@ app.post("/candles", async (req, res) => {
       console.log("🚀 Emitting tradeSignal:", signal);
       io.emit("tradeSignal", signal);
       sendSignal(signal); // Send signal to Telegram
+      // Fetch AI details without blocking response
+      fetchAIData(signal)
+        .then((ai) => {
+          signal.ai = ai;
+        })
+        .catch((err) => console.error("AI enrichment", err));
     } else {
       console.log("ℹ️ No signal generated for:", symbol);
     }

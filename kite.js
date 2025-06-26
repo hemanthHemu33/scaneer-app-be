@@ -7,6 +7,7 @@ import dotenv from "dotenv";
 import { fileURLToPath } from "url";
 import { ObjectId } from "mongodb";
 import { sendSignal } from "./telegram.js";
+import { fetchAIData } from "./openAI.js";
 dotenv.config();
 
 import db from "./db.js"; // 🧠 Import database module for future use
@@ -379,7 +380,16 @@ export async function processAlignedCandles(io) {
             sendSignal(signal); // 🐦 Send to Telegram
             // STORE THE LATEST SIGNAL IN DB LATEST SIGNAL ON TOP
 
-            await db.collection("signals").insertOne(signal);
+            const { insertedId } = await db.collection("signals").insertOne(signal);
+            // Enrich signal with AI data after emission without blocking
+            fetchAIData(signal)
+              .then(async (ai) => {
+                signal.ai = ai;
+                await db
+                  .collection("signals")
+                  .updateOne({ _id: insertedId }, { $set: { ai } });
+              })
+              .catch((err) => logError("AI enrichment", err));
           }
         } catch (err) {
           logError(`⚠️ Error processing token ${token} at ${minute}`, err);
@@ -500,6 +510,10 @@ async function processBuffer(io) {
         io.emit("tradeSignal", signal);
         logTrade(signal);
         sendSignal(signal); // 🐦 Send to Telegram
+        // Populate AI info asynchronously
+        fetchAIData(signal).then((ai) => {
+          signal.ai = ai;
+        }).catch((err) => logError("AI enrichment", err));
       }
     } catch (err) {
       logError(`❌ Signal generation error for token ${token}`, err);

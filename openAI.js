@@ -76,3 +76,13 @@ export async function generateTradePlan(signal) {
   //   });
   //   return response.choices[0].message.content.trim();
 }
+
+// Fetch all AI related information for a signal
+export async function fetchAIData(signal) {
+  return {
+    explanation: await getSignalExplanation(signal),
+    confidenceReview: await getConfidenceScore(signal),
+    advisory: await getFilteredAdvice(signal),
+    plan: await generateTradePlan(signal),
+  };
+}
