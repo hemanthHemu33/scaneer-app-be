@@ -218,6 +218,12 @@ export function detectAllPatterns(candles, atrValue, lookback = 5) {
   const recentHigh = Math.max(...highs);
   const recentLow = Math.min(...lows);
   const epsilon = 0.1;
+  const vwapPeriod = Math.min(candles.length, 20);
+  const vwap = calculateVWAP(candles.slice(-vwapPeriod));
+  const prevVWAP =
+    candles.length > vwapPeriod
+      ? calculateVWAP(candles.slice(-(vwapPeriod + 1), -1))
+      : vwap;
 
   // --- Single Candle Reversal ---
   const isDoji =
@@ -463,6 +469,21 @@ export function detectAllPatterns(candles, atrValue, lookback = 5) {
     });
   }
 
+  // Double Bottom
+  if (
+    Math.abs(lows[4] - last.low) < epsilon &&
+    highs[3] < highs[4] - epsilon
+  ) {
+    patterns.push({
+      type: "Double Bottom",
+      direction: "Long",
+      breakout: last.high,
+      stopLoss: recentLow,
+      strength: 2,
+      confidence: "Medium",
+    });
+  }
+
   if (
     Math.abs(highs[3] - highs[4]) < epsilon &&
     Math.abs(highs[4] - last.high) < epsilon
@@ -473,6 +494,21 @@ export function detectAllPatterns(candles, atrValue, lookback = 5) {
       breakout: last.low,
       stopLoss: recentHigh,
       strength: 3,
+      confidence: "Medium",
+    });
+  }
+
+  // Double Top
+  if (
+    Math.abs(highs[4] - last.high) < epsilon &&
+    lows[3] > lows[4] + epsilon
+  ) {
+    patterns.push({
+      type: "Double Top",
+      direction: "Short",
+      breakout: last.low,
+      stopLoss: recentHigh,
+      strength: 2,
       confidence: "Medium",
     });
   }
@@ -494,6 +530,32 @@ export function detectAllPatterns(candles, atrValue, lookback = 5) {
       strength: 2,
       confidence: "Medium",
     });
+  }
+
+  // VWAP Reversal
+  if (candles.length >= 2 && vwap) {
+    const prevClose = candles[candles.length - 2].close;
+    const crossUp = prevClose < prevVWAP && last.close > vwap;
+    const crossDown = prevClose > prevVWAP && last.close < vwap;
+    if (crossUp) {
+      patterns.push({
+        type: "VWAP Reversal",
+        direction: "Long",
+        breakout: last.high,
+        stopLoss: last.low,
+        strength: 2,
+        confidence: "Medium",
+      });
+    } else if (crossDown) {
+      patterns.push({
+        type: "VWAP Reversal",
+        direction: "Short",
+        breakout: last.low,
+        stopLoss: last.high,
+        strength: 2,
+        confidence: "Medium",
+      });
+    }
   }
 
   // --- Classic Patterns ---
@@ -571,6 +633,29 @@ export function detectAllPatterns(candles, atrValue, lookback = 5) {
         type: "Head & Shoulders",
         direction: "Short",
         breakout: candles[l - 1].low,
+        stopLoss: head,
+        strength: 3,
+        confidence: "High",
+      });
+    }
+  }
+
+  if (candles.length >= 7) {
+    const l = candles.length;
+    const left = candles[l - 7].low;
+    const head = candles[l - 4].low;
+    const right = candles[l - 1].low;
+    if (
+      head < left &&
+      head < right &&
+      Math.abs(left - right) < (Math.max(left, right) - head) * 0.3 &&
+      atrValue &&
+      Math.max(left, right) - head > atrValue * 0.6
+    ) {
+      patterns.push({
+        type: "Inverse Head & Shoulders",
+        direction: "Long",
+        breakout: candles[l - 1].high,
         stopLoss: head,
         strength: 3,
         confidence: "High",
