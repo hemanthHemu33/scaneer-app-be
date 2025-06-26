@@ -4,7 +4,7 @@ import {
   calculateEMA,
   calculateRSI,
   calculateSupertrend,
-  detectPatterns,
+  // detectPatterns,
   getMAForSymbol,
   getATR as getDailyATR,
   debounceSignal,

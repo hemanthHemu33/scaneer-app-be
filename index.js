@@ -21,21 +21,6 @@ import { Console } from "console";
 const app = express();
 const server = http.createServer(app);
 
-// app.use(
-//   cors({
-//     origin: "https://scanner-app-fe.onrender.com",
-//     methods: ["GET", "POST"],
-//     credentials: true,
-//   })
-// );
-
-// const io = new Server(server, {
-//   cors: {
-//     origin: "https://scanner-app-fe.onrender.com",
-//     methods: ["GET", "POST"],
-//     credentials: true,
-//   },
-// });
 const allowedOrigins = [
   "https://scanner-app-fe.onrender.com",
   "http://localhost:5600",
@@ -296,40 +281,6 @@ app.post("/set-interval", (req, res) => {
   }
 });
 
-// app.get("/kite-redirect", async (req, res) => {
-//   const requestToken = req.query.request_token;
-//   if (!requestToken) {
-//     return res.status(400).json({ error: "Missing request_token" });
-//   }
-//   await db
-//     .collection("tokens")
-//     .updateOne({}, { $set: { request_token: requestToken } }, { upsert: true });
-//   res.json({ status: "Request token saved" });
-// });
-
-// app.get("/kite-redirect", async (req, res) => {
-//   const requestToken = req.query.request_token;
-
-//   if (!requestToken) {
-//     // return res.status(400).send("Missing request token");
-//     return res.status(400).json({ error: "Missing request_token" });
-//   }
-
-//   // ✅ Save the request_token in DB with type
-//   await db
-//     .collection("tokens")
-//     .updateOne({}, { $set: { request_token: requestToken } }, { upsert: true });
-
-//   // ✅ Optionally generate session here
-//   const session = await initSession();
-
-//   if (session) {
-//     return res.send("✅ Login Successful, session created.");
-//   } else {
-//     return res.send("⚠️ Login saved, but session creation failed.");
-//   }
-// });
-
 app.get("/kite-redirect", async (req, res) => {
   const requestToken = req.query.request_token;
 
@@ -361,11 +312,6 @@ io.on("connection", (socket) => {
   console.log("✅ Client connected:", socket.id);
   socket.emit("serverMessage", "Connected to backend.");
 });
-
-// server.listen(3000, () => {
-//   console.log("📡 Backend running on port 3000");
-//   startLiveFeed(io); // Start live market data and signal processing
-// });
 
 server.listen(3000, () => {
   console.log("📡 Backend running on port 3000");
