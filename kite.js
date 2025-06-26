@@ -756,7 +756,7 @@ async function fetchSessionData() {
 }
 
 // setInterval(() => fetchSessionData(), 3 * 60 * 1000);
-// fetchSessionData();
+fetchSessionData();
 
 setInterval(() => {
   if (!isMarketOpen()) initSession(); // token refresh only
