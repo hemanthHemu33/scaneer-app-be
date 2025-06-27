@@ -455,9 +455,17 @@ export function detectAllPatterns(candles, atrValue, lookback = 5) {
     });
   }
 
+  const len = lastN.length;
+  const lowLast = lows[len - 1];
+  const lowPrev = lows[len - 2];
+  const lowPrev2 = lows[len - 3];
+  const highLast = highs[len - 1];
+  const highPrev = highs[len - 2];
+  const highPrev2 = highs[len - 3];
+
   if (
-    Math.abs(lows[3] - lows[4]) < epsilon &&
-    Math.abs(lows[4] - last.low) < epsilon
+    Math.abs(lowPrev2 - lowPrev) < epsilon &&
+    Math.abs(lowPrev - lowLast) < epsilon
   ) {
     patterns.push({
       type: "Triple Bottom",
@@ -470,10 +478,7 @@ export function detectAllPatterns(candles, atrValue, lookback = 5) {
   }
 
   // Double Bottom
-  if (
-    Math.abs(lows[4] - last.low) < epsilon &&
-    highs[3] < highs[4] - epsilon
-  ) {
+  if (Math.abs(lowPrev - lowLast) < epsilon && highPrev < highLast - epsilon) {
     patterns.push({
       type: "Double Bottom",
       direction: "Long",
@@ -485,8 +490,8 @@ export function detectAllPatterns(candles, atrValue, lookback = 5) {
   }
 
   if (
-    Math.abs(highs[3] - highs[4]) < epsilon &&
-    Math.abs(highs[4] - last.high) < epsilon
+    Math.abs(highPrev2 - highPrev) < epsilon &&
+    Math.abs(highPrev - highLast) < epsilon
   ) {
     patterns.push({
       type: "Triple Top",
@@ -499,10 +504,7 @@ export function detectAllPatterns(candles, atrValue, lookback = 5) {
   }
 
   // Double Top
-  if (
-    Math.abs(highs[4] - last.high) < epsilon &&
-    lows[3] > lows[4] + epsilon
-  ) {
+  if (Math.abs(highPrev - highLast) < epsilon && lowPrev > lowLast + epsilon) {
     patterns.push({
       type: "Double Top",
       direction: "Short",
