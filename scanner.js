@@ -81,6 +81,7 @@ export async function analyzeCandles(
     const ema9 = calculateEMA(closePrices, 9);
     const ema21 = calculateEMA(closePrices, 21);
     const ema50 = calculateEMA(closePrices, 50);
+    const ema200 = calculateEMA(closePrices, 200);
     const rsi = calculateRSI(closePrices, 14);
     const supertrend = calculateSupertrend(validCandles, 50);
     const atrValue = getDailyATR(validCandles) || 1;
@@ -143,6 +144,15 @@ export async function analyzeCandles(
         console.log(`[SKIP] ${symbol} - VWAP Reversal with flat slope`);
         return null;
       }
+    }
+
+    // 200 EMA confirmation filter
+    if (
+      (pattern.direction === "Long" && last.close < ema200) ||
+      (pattern.direction === "Short" && last.close > ema200)
+    ) {
+      console.log(`[SKIP] ${symbol} - Price against 200 EMA filter`);
+      return null;
     }
 
     // Trend alignment
@@ -362,6 +372,7 @@ export async function analyzeCandles(
       ema9: parseFloat(ema9.toFixed(2)),
       ema21: parseFloat(ema21.toFixed(2)),
       ema50: parseFloat(ema50.toFixed(2)),
+      ema200: parseFloat(ema200.toFixed(2)),
       supertrend,
       atr: atrValue,
       slippage: parseFloat(slippage.toFixed(2)),
