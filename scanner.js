@@ -119,6 +119,15 @@ export async function analyzeCandles(
 
     if (!pattern) return null;
 
+    // Fallback breakout/stopLoss if missing
+    if (typeof pattern.breakout !== "number" || isNaN(pattern.breakout)) {
+      pattern.breakout = last.close;
+    }
+    if (typeof pattern.stopLoss !== "number" || isNaN(pattern.stopLoss)) {
+      pattern.stopLoss =
+        pattern.direction === "Long" ? last.low : last.high;
+    }
+
     if (
       (pattern.direction === "Long" && rsi > 75) ||
       (pattern.direction === "Short" && rsi < 25)
