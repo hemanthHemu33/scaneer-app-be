@@ -20,8 +20,15 @@ export function sendSignal(signal) {
     return;
   }
 
-  const { stock, direction, entry, stopLoss, target1, target2, confidence } =
-    signal;
+  const data = signal.algoSignal || signal;
+  const stock = signal.stock || data.symbol;
+  const direction =
+    signal.direction || (data.side === "buy" ? "Long" : "Short");
+  const entry = signal.entry || data.entry;
+  const stopLoss = signal.stopLoss || data.stopLoss;
+  const target1 = signal.target1 || (data.targets ? data.targets[0] : null);
+  const target2 = signal.target2 || (data.targets ? data.targets[1] : null);
+  const confidence = signal.confidence || data.confidenceScore;
   const formattedDirection =
     direction === "Long" ? "🟢 Long Bias" : "🔴 Short Bias";
 

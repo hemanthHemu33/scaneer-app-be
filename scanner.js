@@ -12,6 +12,7 @@ import {
 } from "./util.js";
 
 import { getHigherTimeframeData } from "./kite.js";
+import { evaluateStrategies } from "./strategies.js";
 import { candleHistory } from "./kite.js";
 
 // 📊 Signal history tracking
@@ -75,6 +76,10 @@ export async function analyzeCandles(
       (c) => c.open && c.high && c.low && c.close
     );
     if (validCandles.length < 5) return null;
+    const volumes = validCandles.map((c) => c.volume || 0);
+    const avgVolume = volumes.slice(0, -1).reduce((a, b) => a + b, 0) / Math.max(volumes.length - 1, 1);
+    const rvol = avgVolume ? volumes[volumes.length - 1] / avgVolume : 1;
+
 
     const last = validCandles.at(-1);
     const closePrices = validCandles.map((c) => c.close);
@@ -353,6 +358,10 @@ export async function analyzeCandles(
     const ma20Val = getMAForSymbol(symbol, 20);
     const ma50Val = getMAForSymbol(symbol, 50);
 
+    const [topStrategy] = evaluateStrategies(validCandles, { rvol }, { topN: 1 });
+    const strategyName = topStrategy ? topStrategy.name : pattern.type;
+    const strategyConfidence = topStrategy ? topStrategy.confidence : (confidence === "High" ? 0.8 : confidence === "Medium" ? 0.6 : 0.4);
+
     const signal = {
       stock: symbol,
       pattern: pattern.type,
@@ -384,6 +393,42 @@ export async function analyzeCandles(
       generatedAt: new Date().toISOString(),
       source: "analyzeCandles",
     };
+    const advancedSignal = {
+      signalId: `${symbol}-1m-${strategyName.replace(/\s+/g, "-")}-${new Date().toISOString().replace(/[:.-]/g, "")}`,
+      symbol,
+      timeframe: "1m",
+      strategy: strategyName,
+      side: pattern.direction === "Long" ? "buy" : "sell",
+      entry: signal.entry,
+      stopLoss: signal.stopLoss,
+      targets: [signal.target1, signal.target2],
+      quantity: qty,
+      risk: {
+        rrRatio: parseFloat(rr.toFixed(2)),
+        slDistance: parseFloat(Math.abs(signal.entry - signal.stopLoss).toFixed(2)),
+        capitalRequired: parseFloat((signal.entry * qty).toFixed(2)),
+      },
+      filters: {
+        rvol: parseFloat(rvol.toFixed(2)),
+        marketTrend: isUptrend ? "bullish" : isDowntrend ? "bearish" : "sideways"
+      },
+      context: { volatility: atrValue.toFixed(2) },
+      confidenceScore: strategyConfidence,
+      executionWindow: {
+        validFrom: signal.generatedAt,
+        validUntil: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+      },
+      executionHint: {
+        type: "limitOrMarket",
+        slippageTolerance: 0.05,
+        broker: "zerodha",
+        strategyRef: `id:${strategyName.toLowerCase().replace(/\s+/g, "-")}`
+      },
+      status: "pending",
+      autoCancelOn: []
+    };
+    signal.algoSignal = advancedSignal;
+
 
     // AI enrichment will be handled asynchronously after the signal is emitted
     signal.ai = null;
