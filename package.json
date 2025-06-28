@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "node tests/basic.test.js",
+    "test": "node --test --experimental-test-module-mocks",
     "start": "node index.js"
   },
   "author": "",

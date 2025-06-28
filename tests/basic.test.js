@@ -1,4 +1,6 @@
-import assert from 'node:assert';
+import test from 'node:test';
+import assert from 'node:assert/strict';
 
-assert.strictEqual(1 + 1, 2);
-console.log('All tests passed');
+test('basic arithmetic', () => {
+  assert.strictEqual(1 + 1, 2);
+});
