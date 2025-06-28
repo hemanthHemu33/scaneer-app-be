@@ -14,6 +14,7 @@ import {
 import { getHigherTimeframeData } from "./kite.js";
 import { evaluateStrategies } from "./strategies.js";
 import { candleHistory } from "./kite.js";
+import { calculatePositionSize, RISK_REWARD_RATIO } from "./positionSizing.js";
 
 // 📊 Signal history tracking
 const signalHistory = {};
@@ -310,9 +311,22 @@ export async function analyzeCandles(
 
     const baseRisk = Math.abs(entry - stopLoss);
     const riskAmount = accountBalance * riskPerTradePercentage;
-    const qty = Math.max(Math.floor(riskAmount / baseRisk), 1);
+    const qty = calculatePositionSize({
+      capital: accountBalance,
+      risk: riskAmount,
+      slPoints: baseRisk,
+      price: entry,
+      volatility: atrValue,
+      vix: 0,
+      lotSize: 1,
+      marginPerLot: entry * 0.2,
+      utilizationCap: 1,
+      volatilityGuard: 5,
+      marketDepth: depth ? { buy: totalBuy, sell: totalSell } : undefined,
+      priceMovement: liveTick ? liveTick.last_price - last.close : 0,
+    });
 
-    let rrMultiplier = 2.0;
+    let rrMultiplier = RISK_REWARD_RATIO;
     if (
       atrValue > 2 ||
       (liveTick &&
@@ -321,7 +335,7 @@ export async function analyzeCandles(
           (pattern.direction === "Short" &&
             liveTick.total_sell_quantity > liveTick.total_buy_quantity * 1.5)))
     ) {
-      rrMultiplier = 2.5;
+      rrMultiplier = RISK_REWARD_RATIO + 0.5;
     }
 
     let target1 =
@@ -331,8 +345,8 @@ export async function analyzeCandles(
       entry + (pattern.direction === "Long" ? 1 : -1) * rrMultiplier * baseRisk;
 
     const rr = Math.abs((target2 - entry) / baseRisk);
-    if (rr < 2) {
-      console.log(`[SKIP] ${symbol} - R:R below 1:2. RR = ${rr.toFixed(2)}`);
+    if (rr < RISK_REWARD_RATIO) {
+      console.log(`[SKIP] ${symbol} - R:R below 1:${RISK_REWARD_RATIO}. RR = ${rr.toFixed(2)}`);
       return null;
     }
 
