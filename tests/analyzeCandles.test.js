@@ -16,6 +16,7 @@ const utilMock = test.mock.module('../util.js', {
     calculateEMA: () => 100,
     calculateRSI: () => 60,
     calculateSupertrend: () => ({ signal: 'Buy' }),
+    calculateVWAP: () => 100,
     getMAForSymbol: () => 100,
     getATR: () => 2.5,
     debounceSignal: () => true,
