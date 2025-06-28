@@ -32,7 +32,7 @@ export function sendSignal(signal) {
     `🎯 *Entry:* ${entry}\n` +
     `🛑 *Stop Loss:* ${stopLoss}\n` +
     `🎯 *Targets:* T1: ${target1} | T2: ${target2}\n` +
-    `📊 *Confidence Level:* ${confidence}/10\n\n` +
+    `📊 *Confidence Level:* ${confidence}\n\n` +
     `🕒 _Stay sharp. Market conditions may change quickly._`;
 
   bot
