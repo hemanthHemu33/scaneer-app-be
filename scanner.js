@@ -9,6 +9,7 @@ import {
   getATR as getDailyATR,
   debounceSignal,
   detectAllPatterns,
+  calculateExpiryMinutes,
 } from "./util.js";
 
 import { getHigherTimeframeData } from "./kite.js";
@@ -91,6 +92,8 @@ export async function analyzeCandles(
     const rsi = calculateRSI(closePrices, 14);
     const supertrend = calculateSupertrend(validCandles, 50);
     const atrValue = getDailyATR(validCandles) || 1;
+    const expiryMinutes = calculateExpiryMinutes({ atr: atrValue, rvol });
+    const expiresAt = new Date(Date.now() + expiryMinutes * 60 * 1000).toISOString();
 
     // ⚠️ Momentum filter
     if (rsi > 45 && rsi < 55 && atrValue < 1) {
@@ -404,6 +407,7 @@ export async function analyzeCandles(
       confidence,
       liveTickData: liveTick,
       depth,
+      expiresAt,
       generatedAt: new Date().toISOString(),
       source: "analyzeCandles",
     };
@@ -430,7 +434,7 @@ export async function analyzeCandles(
       confidenceScore: strategyConfidence,
       executionWindow: {
         validFrom: signal.generatedAt,
-        validUntil: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+        validUntil: expiresAt,
       },
       executionHint: {
         type: "limitOrMarket",
@@ -438,7 +442,8 @@ export async function analyzeCandles(
         broker: "zerodha",
         strategyRef: `id:${strategyName.toLowerCase().replace(/\s+/g, "-")}`
       },
-      status: "pending",
+      status: "active",
+      expiresAt,
       autoCancelOn: []
     };
     signal.algoSignal = advancedSignal;

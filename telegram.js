@@ -46,3 +46,8 @@ export function sendSignal(signal) {
     .sendMessage(chatId, text, { parse_mode: "Markdown" })
     .catch((err) => console.error("Telegram send error", err));
 }
+
+export function sendNotification(message) {
+  if (!bot || !chatId) return;
+  bot.sendMessage(chatId, message).catch((err) => console.error("Telegram send error", err));
+}

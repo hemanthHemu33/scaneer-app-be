@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+process.env.NODE_ENV = 'test';
 import express from 'express';
 import { EventEmitter } from 'node:events';
 

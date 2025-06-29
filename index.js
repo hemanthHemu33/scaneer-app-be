@@ -17,6 +17,7 @@ import { sendSignal } from "./telegram.js";
 import { fetchAIData } from "./openAI.js";
 import db from "./db.js";
 import { Console } from "console";
+import { addSignal } from "./signalManager.js";
 
 const app = express();
 const server = http.createServer(app);
@@ -240,6 +241,7 @@ app.post("/candles", async (req, res) => {
       console.log("🚀 Emitting tradeSignal:", signal);
       io.emit("tradeSignal", signal);
       sendSignal(signal); // Send signal to Telegram
+      addSignal(signal);
       // Fetch AI details without blocking response
       fetchAIData(signal)
         .then((ai) => {

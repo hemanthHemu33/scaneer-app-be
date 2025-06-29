@@ -100,6 +100,13 @@ export function debounceSignal(
   return true;
 }
 
+export function calculateExpiryMinutes({ atr, rvol }) {
+  const base = 5;
+  const atrFactor = atr ? Math.min(Math.max(atr, 1), 4) : 1;
+  const volumeFactor = rvol && rvol > 1 ? 1 + Math.min(rvol - 1, 1) : 1;
+  return base * atrFactor * volumeFactor;
+}
+
 // export function detectAllPatterns(candles, atrValue, lookback = 5) {
 //   const patterns = [];
 //   if (candles.length < lookback) return [];

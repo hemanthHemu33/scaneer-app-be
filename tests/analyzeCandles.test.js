@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+process.env.NODE_ENV = 'test';
 
 const kiteMock = test.mock.module('../kite.js', {
   namedExports: {
@@ -19,6 +20,7 @@ const utilMock = test.mock.module('../util.js', {
     calculateVWAP: () => 100,
     getMAForSymbol: () => 100,
     getATR: () => 2.5,
+    calculateExpiryMinutes: () => 10,
     debounceSignal: () => true,
     detectAllPatterns: () => [
       {
@@ -65,6 +67,7 @@ test('analyzeCandles returns a signal for valid data', async () => {
   assert.ok(signal);
   assert.equal(signal.stock, 'TEST');
   assert.equal(signal.pattern, 'Breakout');
+  assert.ok(signal.expiresAt);
   kiteMock.restore();
   utilMock.restore();
   dbMock.restore();
