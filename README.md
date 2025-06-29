@@ -18,6 +18,7 @@ Create a `.env` file in the project root (or export variables in your environmen
 - `OPENAI_API_KEY` – OpenAI API key
 - `TELEGRAM_BOT_TOKEN` – Telegram bot token
 - `TELEGRAM_CHAT_ID` – Telegram chat ID for notifications
+- `LOG_ENCRYPTION_KEY` – Hex encoded 32-byte key for log encryption
 
 ## Starting the Server
 

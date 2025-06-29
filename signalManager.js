@@ -1,5 +1,6 @@
 export const activeSignals = new Map();
 import { sendNotification } from './telegram.js';
+import { logSignalExpired, logSignalMutation } from './auditLogger.js';
 
 export function addSignal(signal) {
   const symbol = signal.stock || signal.symbol;
@@ -13,6 +14,13 @@ export function addSignal(signal) {
       return false; // keep existing stronger signal
     }
     existing.status = 'cancelled';
+    logSignalMutation(existing.signal.signalId || existing.signal.algoSignal?.signalId, {
+      fieldChanged: 'status',
+      oldValue: 'active',
+      newValue: 'cancelled',
+      reason: 'conflict',
+      timestamp: new Date().toISOString(),
+    });
     sendNotification && sendNotification(`Signal for ${symbol} cancelled due to conflict`);
   }
 
@@ -31,6 +39,16 @@ export function checkExpiries(now = Date.now()) {
     if (info.status === 'active' && info.expiresAt && now > info.expiresAt) {
       info.status = 'expired';
       sendNotification && sendNotification(`Signal for ${symbol} expired`);
+      logSignalExpired(
+        info.signal.signalId || info.signal.algoSignal?.signalId,
+        {
+          reason: 'timeExpiry',
+          lastPrice: info.signal.entry,
+          atr: info.signal.atr,
+          confidenceAtExpiry: info.signal.confidence,
+          category: 'naturalExpiry',
+        }
+      );
     }
   }
 }

@@ -25,6 +25,7 @@ import { fetchAIData } from "./openAI.js";
 import db from "./db.js";
 import { Console } from "console";
 import { addSignal } from "./signalManager.js";
+import { logSignalCreated } from "./auditLogger.js";
 import {
   detectMarketRegime,
   applyVIXThresholds,
@@ -286,6 +287,11 @@ app.post("/candles", async (req, res) => {
         io.emit("tradeSignal", signal);
         sendSignal(signal); // Send signal to Telegram
         addSignal(signal);
+        logSignalCreated(signal, {
+          vix: marketContext.vix,
+          regime: marketContext.regime,
+          breadth: marketContext.breadth,
+        });
         fetchAIData(signal)
           .then((ai) => {
             signal.ai = ai;

@@ -4,6 +4,7 @@ import customParseFormat from "dayjs/plugin/customParseFormat.js";
 import { analyzeCandles } from "./scanner.js";
 import { candleHistory } from "./kite.js";
 import db from "./db.js";
+import { logBacktestReference } from "./auditLogger.js";
 
 dayjs.extend(customParseFormat);
 
@@ -130,6 +131,20 @@ async function runBacktest(symbol = SYMBOL) {
   // fs.writeFileSync("backtest_signals.json", JSON.stringify(grouped, null, 2));
   console.log(
     `✅ Backtest complete. ${signals.length} signals saved to database`
+  );
+
+  await logBacktestReference(
+    {
+      backtestId: Date.now().toString(),
+      strategyConfigVersion: '1',
+      parametersUsed: {},
+      dateRange: {
+        start: candles[0].timestamp,
+        end: candles[candles.length - 1].timestamp,
+      },
+      capitalDeployed: 100000,
+    },
+    { trades: signals.length }
   );
 }
 
