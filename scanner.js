@@ -15,8 +15,13 @@ import {
 import { getHigherTimeframeData } from "./kite.js";
 import { evaluateStrategies } from "./strategies.js";
 import { candleHistory } from "./kite.js";
-import { calculatePositionSize, RISK_REWARD_RATIO } from "./positionSizing.js";
+import { RISK_REWARD_RATIO } from "./positionSizing.js";
 import { validatePreExecution } from "./riskValidator.js";
+import {
+  calculateDynamicStopLoss,
+  calculateLotSize,
+  adjustRiskBasedOnDrawdown,
+} from "./dynamicRiskModel.js";
 
 // 📊 Signal history tracking
 const signalHistory = {};
@@ -302,33 +307,50 @@ export async function analyzeCandles(
     // Entry/SL/Target Calculation
     let entry =
       pattern.breakout + (pattern.direction === "Long" ? slippage : -slippage);
-    let stopLoss =
+    const patternSL =
       pattern.stopLoss - (pattern.direction === "Long" ? slippage : -slippage);
+
+    const dynamicSL = calculateDynamicStopLoss({
+      atr: atrValue,
+      entry,
+      direction: pattern.direction,
+      setupType:
+        confidence === "High" && pattern.type === "Breakout"
+          ? "breakout"
+          : "conservative",
+    });
+
+    let stopLoss = dynamicSL;
+    if (patternSL) {
+      const distDyn = Math.abs(entry - dynamicSL);
+      const distPat = Math.abs(entry - patternSL);
+      stopLoss = pattern.direction === "Long" ? Math.max(stopLoss, patternSL) : Math.min(stopLoss, patternSL);
+      // Prefer tighter stop when pattern provides closer SL
+      if (distPat < distDyn) stopLoss = patternSL;
+    }
 
     if (
       (pattern.direction === "Long" && stopLoss >= entry) ||
       (pattern.direction === "Short" && stopLoss <= entry)
     ) {
-      stopLoss =
-        entry + (pattern.direction === "Long" ? -1 : 1) * atrValue * 0.5;
+      stopLoss = dynamicSL;
     }
 
     const baseRisk = Math.abs(entry - stopLoss);
     const riskAmount = accountBalance * riskPerTradePercentage;
-    const qty = calculatePositionSize({
+    let qty = calculateLotSize({
       capital: accountBalance,
-      risk: riskAmount,
-      slPoints: baseRisk,
-      price: entry,
+      riskAmount,
+      entry,
+      stopLoss,
       volatility: atrValue,
-      vix: 0,
-      lotSize: 1,
-      marginPerLot: entry * 0.2,
-      utilizationCap: 1,
-      volatilityGuard: 5,
-      marketDepth: depth ? { buy: totalBuy, sell: totalSell } : undefined,
-      priceMovement: liveTick ? liveTick.last_price - last.close : 0,
+      capUtil: 1,
     });
+
+    const drawdown = accountBalance
+      ? riskState.dailyLoss / accountBalance
+      : 0;
+    qty = adjustRiskBasedOnDrawdown({ drawdown, lotSize: qty });
 
     let rrMultiplier = RISK_REWARD_RATIO;
     if (
