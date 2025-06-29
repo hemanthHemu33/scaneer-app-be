@@ -8,6 +8,7 @@ import { fileURLToPath } from "url";
 import { ObjectId } from "mongodb";
 import { sendSignal } from "./telegram.js";
 import { fetchAIData } from "./openAI.js";
+import { addSignal } from "./signalManager.js";
 dotenv.config();
 
 import db from "./db.js"; // 🧠 Import database module for future use
@@ -378,6 +379,7 @@ export async function processAlignedCandles(io) {
             io.emit("tradeSignal", signal);
             logTrade(signal);
             sendSignal(signal); // 🐦 Send to Telegram
+            addSignal(signal);
             // STORE THE LATEST SIGNAL IN DB LATEST SIGNAL ON TOP
 
             const { insertedId } = await db.collection("signals").insertOne(signal);
