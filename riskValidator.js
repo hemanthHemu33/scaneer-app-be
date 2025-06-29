@@ -1,5 +1,6 @@
 // riskValidator.js
 // Provides pre-execution risk validation utilities
+import { logSignalRejected } from './auditLogger.js';
 
 export function getMinRRForStrategy(strategy, winrate = 0) {
   const s = (strategy || '').toLowerCase();
@@ -88,6 +89,11 @@ export function validatePreExecution(signal, market) {
     console.log(
       `[RISK] ${signal.stock || signal.symbol} RR ${rrInfo.rr.toFixed(2)} below ${rrInfo.minRR}`
     );
+    logSignalRejected(
+      signal.signalId || signal.algoSignal?.signalId,
+      'rRTooLow',
+      { rr: rrInfo.rr, minRR: rrInfo.minRR }
+    );
     return false;
   }
 
@@ -100,6 +106,11 @@ export function validatePreExecution(signal, market) {
     })
   ) {
     console.log(`[RISK] ${signal.stock || signal.symbol} stop-loss invalid`);
+    logSignalRejected(
+      signal.signalId || signal.algoSignal?.signalId,
+      'slInvalid',
+      { price: market.currentPrice ?? signal.entry, stopLoss: signal.stopLoss }
+    );
     return false;
   }
 
@@ -117,6 +128,11 @@ export function validatePreExecution(signal, market) {
     })
   ) {
     console.log(`[RISK] ${signal.stock || signal.symbol} market conditions fail`);
+    logSignalRejected(
+      signal.signalId || signal.algoSignal?.signalId,
+      'conflict',
+      { market }
+    );
     return false;
   }
 

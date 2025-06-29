@@ -9,6 +9,7 @@ import { ObjectId } from "mongodb";
 import { sendSignal } from "./telegram.js";
 import { fetchAIData } from "./openAI.js";
 import { addSignal } from "./signalManager.js";
+import { logSignalCreated } from "./auditLogger.js";
 dotenv.config();
 
 import db from "./db.js"; // 🧠 Import database module for future use
@@ -380,6 +381,11 @@ export async function processAlignedCandles(io) {
             logTrade(signal);
             sendSignal(signal); // 🐦 Send to Telegram
             addSignal(signal);
+            logSignalCreated(signal, {
+              vix: marketContext.vix,
+              regime: marketContext.regime,
+              breadth: marketContext.breadth,
+            });
             // STORE THE LATEST SIGNAL IN DB LATEST SIGNAL ON TOP
 
             const { insertedId } = await db.collection("signals").insertOne(signal);
@@ -512,6 +518,11 @@ async function processBuffer(io) {
         io.emit("tradeSignal", signal);
         logTrade(signal);
         sendSignal(signal); // 🐦 Send to Telegram
+        logSignalCreated(signal, {
+          vix: marketContext.vix,
+          regime: marketContext.regime,
+          breadth: marketContext.breadth,
+        });
         // Populate AI info asynchronously
         fetchAIData(signal).then((ai) => {
           signal.ai = ai;
