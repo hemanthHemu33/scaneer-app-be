@@ -14,6 +14,13 @@ import {
   initSession,
 } from "./kite.js";
 import { sendSignal } from "./telegram.js";
+import {
+  trackOpenPositions,
+  checkExposureLimits,
+  preventReEntry,
+  resolveSignalConflicts,
+  notifyExposureEvents,
+} from "./portfolioContext.js";
 import { fetchAIData } from "./openAI.js";
 import db from "./db.js";
 import { Console } from "console";
@@ -21,6 +28,8 @@ import { addSignal } from "./signalManager.js";
 
 const app = express();
 const server = http.createServer(app);
+
+const TOTAL_CAPITAL = Number(process.env.TOTAL_CAPITAL) || 100000;
 
 const allowedOrigins = [
   "https://scanner-app-fe.onrender.com",
@@ -238,16 +247,34 @@ app.post("/candles", async (req, res) => {
     );
 
     if (signal) {
-      console.log("🚀 Emitting tradeSignal:", signal);
-      io.emit("tradeSignal", signal);
-      sendSignal(signal); // Send signal to Telegram
-      addSignal(signal);
-      // Fetch AI details without blocking response
-      fetchAIData(signal)
-        .then((ai) => {
-          signal.ai = ai;
-        })
-        .catch((err) => console.error("AI enrichment", err));
+      const tradeValue = signal.entry * (signal.qty || 1);
+      const allowed =
+        preventReEntry(symbol) &&
+        checkExposureLimits({
+          symbol,
+          tradeValue,
+          sector: signal.sector || "GEN",
+          totalCapital: TOTAL_CAPITAL,
+        }) &&
+        resolveSignalConflicts({
+          symbol,
+          side: signal.direction === "Long" ? "long" : "short",
+          strategy: signal.pattern,
+        });
+
+      if (!allowed) {
+        notifyExposureEvents(`Signal for ${symbol} rejected by portfolio rules`);
+      } else {
+        console.log("🚀 Emitting tradeSignal:", signal);
+        io.emit("tradeSignal", signal);
+        sendSignal(signal); // Send signal to Telegram
+        addSignal(signal);
+        fetchAIData(signal)
+          .then((ai) => {
+            signal.ai = ai;
+          })
+          .catch((err) => console.error("AI enrichment", err));
+      }
     } else {
       console.log("ℹ️ No signal generated for:", symbol);
     }
@@ -323,5 +350,11 @@ server.listen(3000, () => {
     startLiveFeed(io);
   } else {
     console.log("⏸ Market is closed. Skipping live feed start.");
+  }
+
+  if (process.env.NODE_ENV !== 'test') {
+    const dummyBroker = { getPositions: async () => [] };
+    trackOpenPositions(dummyBroker);
+    setInterval(() => trackOpenPositions(dummyBroker), 60 * 1000);
   }
 });
