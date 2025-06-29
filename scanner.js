@@ -22,6 +22,10 @@ import {
   calculateLotSize,
   adjustRiskBasedOnDrawdown,
 } from "./dynamicRiskModel.js";
+import {
+  marketContext,
+  filterStrategiesByRegime,
+} from "./smartStrategySelector.js";
 
 // 📊 Signal history tracking
 const signalHistory = {};
@@ -398,7 +402,9 @@ export async function analyzeCandles(
     const ma20Val = getMAForSymbol(symbol, 20);
     const ma50Val = getMAForSymbol(symbol, 50);
 
-    const [topStrategy] = evaluateStrategies(validCandles, { rvol }, { topN: 1 });
+    const stratResults = evaluateStrategies(validCandles, { rvol }, { topN: 5 });
+    const filtered = filterStrategiesByRegime(stratResults, marketContext);
+    const [topStrategy] = filtered;
     const strategyName = topStrategy ? topStrategy.name : pattern.type;
     const strategyConfidence = topStrategy ? topStrategy.confidence : (confidence === "High" ? 0.8 : confidence === "Medium" ? 0.6 : 0.4);
 
