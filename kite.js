@@ -377,6 +377,7 @@ export async function processAlignedCandles(io) {
           if (signal && checkRisk(signal)) {
             console.log("🚀 Emitting Aligned Signal:", signal);
             io.emit("tradeSignal", signal);
+            io.emit("latestSignal", signal);
             logTrade(signal);
             sendSignal(signal); // 🐦 Send to Telegram
             addSignal(signal);

@@ -29,6 +29,7 @@ export function sendSignal(signal) {
   const target1 = signal.target1 || (data.targets ? data.targets[0] : null);
   const target2 = signal.target2 || (data.targets ? data.targets[1] : null);
   const confidence = signal.confidence || data.confidenceScore;
+  const expiresAt = signal.expiresAt || data.expiresAt;
   const formattedDirection =
     direction === "Long" ? "🟢 Long Bias" : "🔴 Short Bias";
 
@@ -39,8 +40,9 @@ export function sendSignal(signal) {
     `🎯 *Entry:* ${entry}\n` +
     `🛑 *Stop Loss:* ${stopLoss}\n` +
     `🎯 *Targets:* T1: ${target1} | T2: ${target2}\n` +
-    `📊 *Confidence Level:* ${confidence}\n\n` +
-    `🕒 _Stay sharp. Market conditions may change quickly._`;
+    `📊 *Confidence Level:* ${confidence}\n` +
+    (expiresAt ? `⏰ *Expires:* ${new Date(expiresAt).toLocaleTimeString()}\n` : "") +
+    `\n🕒 _Stay sharp. Market conditions may change quickly._`;
 
   bot
     .sendMessage(chatId, text, { parse_mode: "Markdown" })

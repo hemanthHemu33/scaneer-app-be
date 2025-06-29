@@ -33,9 +33,13 @@ app.use(express.json());
 
 const io = new EventEmitter();
 let emittedSignal = null;
+let latestSignal = null;
 io.emit = (event, data) => {
   if (event === 'tradeSignal') {
     emittedSignal = data;
+  }
+  if (event === 'latestSignal') {
+    latestSignal = data;
   }
 };
 
@@ -68,6 +72,7 @@ app.post('/candles', async (req, res) => {
     );
     if (signal) {
       io.emit('tradeSignal', signal);
+      io.emit('latestSignal', signal);
       (await import('../telegram.js')).sendSignal(signal);
       (await import('../openAI.js')).fetchAIData(signal).catch(() => {});
     }
@@ -98,4 +103,5 @@ test('candles route processes data and emits signal', () => {
   assert.equal(body.status, 'Processed');
   assert.ok(emittedSignal);
   assert.deepEqual(emittedSignal, sentSignal);
+  assert.deepEqual(latestSignal, sentSignal);
 });

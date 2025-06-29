@@ -1,4 +1,5 @@
 export const activeSignals = new Map();
+export let latestSignal = null;
 import { sendNotification } from './telegram.js';
 
 export function addSignal(signal) {
@@ -23,6 +24,7 @@ export function addSignal(signal) {
     confidence,
     expiresAt,
   });
+  latestSignal = signal;
   return true;
 }
 
@@ -33,6 +35,10 @@ export function checkExpiries(now = Date.now()) {
       sendNotification && sendNotification(`Signal for ${symbol} expired`);
     }
   }
+}
+
+export function getLatestSignal() {
+  return latestSignal;
 }
 
 let expiryInterval = null;

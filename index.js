@@ -17,7 +17,7 @@ import { sendSignal } from "./telegram.js";
 import { fetchAIData } from "./openAI.js";
 import db from "./db.js";
 import { Console } from "console";
-import { addSignal } from "./signalManager.js";
+import { addSignal, getLatestSignal } from "./signalManager.js";
 
 const app = express();
 const server = http.createServer(app);
@@ -240,6 +240,7 @@ app.post("/candles", async (req, res) => {
     if (signal) {
       console.log("🚀 Emitting tradeSignal:", signal);
       io.emit("tradeSignal", signal);
+      io.emit("latestSignal", signal);
       sendSignal(signal); // Send signal to Telegram
       addSignal(signal);
       // Fetch AI details without blocking response
@@ -261,6 +262,11 @@ app.post("/candles", async (req, res) => {
 
 app.get("/signal-history", (req, res) => {
   res.json(getSignalHistory());
+});
+
+app.get("/latest-signal", (req, res) => {
+  const latest = getLatestSignal();
+  res.json(latest || {});
 });
 
 app.post("/subscribe", (req, res) => {
