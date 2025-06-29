@@ -25,6 +25,13 @@ import { fetchAIData } from "./openAI.js";
 import db from "./db.js";
 import { Console } from "console";
 import { addSignal } from "./signalManager.js";
+import {
+  detectMarketRegime,
+  applyVIXThresholds,
+  handleEconomicEvents,
+  supportUserOverrides,
+  marketContext,
+} from "./smartStrategySelector.js";
 
 const app = express();
 const server = http.createServer(app);
@@ -213,10 +220,20 @@ app.get("/signals", async (req, res) => {
 
 // 🔥 Enhanced endpoint to process candle data and emit signals
 app.post("/candles", async (req, res) => {
-  const candles = req.body;
+  const body = req.body;
+  const candles = Array.isArray(body) ? body : body.candles;
+  const marketData = Array.isArray(body) ? null : body.marketData;
+  const overrides = Array.isArray(body) ? null : body.overrides;
 
   if (!Array.isArray(candles) || candles.length === 0) {
     return res.status(400).json({ error: "No candles provided" });
+  }
+
+  if (overrides) supportUserOverrides(overrides);
+  if (marketData) {
+    detectMarketRegime(marketData);
+    if (typeof marketData.vix === "number") applyVIXThresholds(marketData.vix);
+    if (Array.isArray(marketData.events)) handleEconomicEvents(marketData.events);
   }
 
   const token = candles[0]?.symbol || "UNKNOWN";
