@@ -14,7 +14,13 @@ const kiteMock = test.mock.module('../kite.js', {
 
 const utilMock = test.mock.module('../util.js', {
   namedExports: {
-    calculateEMA: () => 100,
+    calculateEMA: (prices, period) => {
+      if (period === 9) return 105;
+      if (period === 21) return 100;
+      if (period === 50) return 95;
+      if (period === 200) return 90;
+      return 100;
+    },
     calculateRSI: () => 60,
     calculateSupertrend: () => ({ signal: 'Buy' }),
     calculateVWAP: () => 100,
@@ -60,7 +66,7 @@ test('analyzeCandles returns a signal for valid data', async () => {
     0,
     0,
     0,
-    0.5,
+    0.2,
     5000,
     null
   );
