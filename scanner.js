@@ -16,6 +16,7 @@ import { getHigherTimeframeData } from "./kite.js";
 import { evaluateStrategies } from "./strategies.js";
 import { candleHistory } from "./kite.js";
 import { calculatePositionSize, RISK_REWARD_RATIO } from "./positionSizing.js";
+import { validatePreExecution } from "./riskValidator.js";
 
 // 📊 Signal history tracking
 const signalHistory = {};
@@ -448,6 +449,14 @@ export async function analyzeCandles(
     };
     signal.algoSignal = advancedSignal;
 
+    const ok = validatePreExecution(signal, {
+      avgAtr: atrValue,
+      indexTrend: isUptrend ? 'up' : isDowntrend ? 'down' : 'sideways',
+      timeSinceSignal: 0,
+      volume: liquidity,
+      currentPrice: liveTick ? liveTick.last_price : last.close,
+    });
+    if (!ok) return null;
 
     // AI enrichment will be handled asynchronously after the signal is emitted
     signal.ai = null;
