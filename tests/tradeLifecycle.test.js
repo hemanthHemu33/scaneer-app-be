@@ -16,7 +16,9 @@ const dbMock = test.mock.module('../db.js', {
 const auditMock = test.mock.module('../auditLogger.js', {
   namedExports: {
     logSignalRejected: () => {},
-    logSignalCreated: () => {}
+    logSignalCreated: () => {},
+    logSignalExpired: () => {},
+    logSignalMutation: () => {}
   }
 });
 
@@ -40,18 +42,23 @@ const execMock = test.mock.module('../orderExecution.js', {
   },
 });
 
+const { addSignal, activeSignals } = await import('../signalManager.js');
 const mod = await import('../tradeLifecycle.js');
 
-await mod.executeSignal(
-  {
-    stock: 'AAA',
-    direction: 'Long',
-    entry: 100,
-    stopLoss: 95,
-    target2: 110,
-  },
-  { capital: 100000 }
-);
+activeSignals.clear();
+
+const signal = {
+  stock: 'AAA',
+  direction: 'Long',
+  entry: 100,
+  stopLoss: 95,
+  target2: 110,
+  signalId: 'sig1',
+};
+
+addSignal(signal);
+
+await mod.executeSignal(signal, { capital: 100000 });
 
 execMock.restore();
 dbMock.restore();
@@ -63,4 +70,12 @@ test('executeSignal places entry, sl and target orders', () => {
 
 test('executeSignal cancels opposite order after fill', () => {
   assert.equal(cancelled.length, 1);
+});
+
+test('signal has order flags after execution', () => {
+  const info = activeSignals.get('AAA').get('sig1');
+  assert.ok(info.orderFlags.entryId);
+  assert.ok(info.orderFlags.slId);
+  assert.ok(info.orderFlags.targetId);
+  assert.equal(info.orderFlags.state, 'targetHit');
 });

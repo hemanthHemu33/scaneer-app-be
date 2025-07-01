@@ -31,14 +31,30 @@ export function addSignal(signal) {
     }
   }
 
+  signal.signalId = signalId;
   symbolMap.set(signalId, {
     signal,
+    signalId,
     status: 'active',
     direction,
     confidence,
     expiresAt,
+    orderFlags: {
+      entryId: null,
+      slId: null,
+      targetId: null,
+      state: 'pending',
+    },
   });
   return true;
+}
+
+export function updateSignalOrders(symbol, signalId, updates) {
+  const symbolMap = activeSignals.get(symbol);
+  if (!symbolMap) return;
+  const info = symbolMap.get(signalId);
+  if (!info) return;
+  info.orderFlags = { ...info.orderFlags, ...updates };
 }
 
 export function checkExpiries(now = Date.now()) {

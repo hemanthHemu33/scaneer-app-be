@@ -2,6 +2,7 @@
 import { placeOrder, cancelOrder, getAllOrders } from './orderExecution.js';
 import { validatePreExecution } from './riskValidator.js';
 import { calculatePositionSize } from './positionSizing.js';
+import { updateSignalOrders } from './signalManager.js';
 import {
   checkExposureLimits,
   preventReEntry,
@@ -64,6 +65,8 @@ export async function monitorBracketOrders(slId, targetId, interval = 1000) {
 export async function executeSignal(signal, opts = {}) {
   const symbol = signal.stock || signal.symbol;
   if (!validatePreExecution(signal, opts.market || {})) return null;
+  const signalId = signal.signalId || signal.algoSignal?.signalId;
+  if (signalId) updateSignalOrders(symbol, signalId, { state: 'entryPending' });
   const tradeValue = signal.entry * (signal.qty || 1);
   const allowed =
     checkExposureLimits({
@@ -78,7 +81,10 @@ export async function executeSignal(signal, opts = {}) {
       side: signal.direction === 'Long' ? 'long' : 'short',
       strategy: signal.pattern,
     });
-  if (!allowed) return null;
+  if (!allowed) {
+    if (signalId) updateSignalOrders(symbol, signalId, { state: 'blocked' });
+    return null;
+  }
   const qty =
     signal.qty ||
     calculatePositionSize({
@@ -87,7 +93,10 @@ export async function executeSignal(signal, opts = {}) {
       slPoints: Math.abs(signal.entry - signal.stopLoss),
       price: signal.entry,
     });
-  if (qty <= 0) return null;
+  if (qty <= 0) {
+    if (signalId) updateSignalOrders(symbol, signalId, { state: 'blocked' });
+    return null;
+  }
 
   const entryOrder = await placeOrder('regular', {
     exchange: 'NSE',
@@ -98,9 +107,21 @@ export async function executeSignal(signal, opts = {}) {
     price: signal.entry,
     product: 'MIS',
   });
-  if (!entryOrder) return null;
+  if (!entryOrder) {
+    if (signalId) updateSignalOrders(symbol, signalId, { state: 'entryFailed' });
+    return null;
+  }
+  if (signalId)
+    updateSignalOrders(symbol, signalId, {
+      entryId: entryOrder.order_id,
+      state: 'entryPlaced',
+    });
   const filled = await waitForOrderFill(entryOrder.order_id);
-  if (!filled) return null;
+  if (!filled) {
+    if (signalId) updateSignalOrders(symbol, signalId, { state: 'entryCancelled' });
+    return null;
+  }
+  if (signalId) updateSignalOrders(symbol, signalId, { state: 'inTrade' });
 
   const exitType = signal.direction === 'Long' ? 'SELL' : 'BUY';
   const slOrder = await placeOrder('regular', {
@@ -122,12 +143,25 @@ export async function executeSignal(signal, opts = {}) {
     price: signal.target2 || signal.target,
     product: 'MIS',
   });
-  if (!slOrder || !targetOrder) return null;
-  await monitorBracketOrders(slOrder.order_id, targetOrder.order_id);
+  if (!slOrder || !targetOrder) {
+    if (signalId) updateSignalOrders(symbol, signalId, { state: 'bracketFailed' });
+    return null;
+  }
+  if (signalId)
+    updateSignalOrders(symbol, signalId, {
+      slId: slOrder.order_id,
+      targetId: targetOrder.order_id,
+    });
+  const result = await monitorBracketOrders(slOrder.order_id, targetOrder.order_id);
+  if (signalId)
+    updateSignalOrders(symbol, signalId, {
+      state: result === 'TARGET' ? 'targetHit' : 'slHit',
+    });
   return {
     entryId: entryOrder.order_id,
     slId: slOrder.order_id,
     targetId: targetOrder.order_id,
+    result,
   };
 }
 
