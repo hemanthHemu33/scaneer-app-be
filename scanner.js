@@ -303,12 +303,7 @@ export async function analyzeCandles(
       return null;
     }
 
-    // Debounce logic
-    const conflictWindow = 3 * 60 * 1000;
-    if (
-      !debounceSignal(signalHistory, symbol, pattern.direction, conflictWindow)
-    )
-      return null;
+
 
     // Entry/SL/Target Calculation
     let entry =
@@ -418,6 +413,19 @@ export async function analyzeCandles(
     const [topStrategy] = filtered;
     const strategyName = topStrategy ? topStrategy.name : pattern.type;
     const strategyConfidence = topStrategy ? topStrategy.confidence : (confidence === "High" ? 0.8 : confidence === "Medium" ? 0.6 : 0.4);
+
+    // Debounce logic now that strategy name is known
+    const conflictWindow = 3 * 60 * 1000;
+    if (
+      !debounceSignal(
+        signalHistory,
+        symbol,
+        pattern.direction,
+        strategyName,
+        conflictWindow
+      )
+    )
+      return null;
 
     const signal = {
       stock: symbol,

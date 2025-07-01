@@ -92,7 +92,8 @@ export function validatePreExecution(signal, market) {
     logSignalRejected(
       signal.signalId || signal.algoSignal?.signalId,
       'rRTooLow',
-      { rr: rrInfo.rr, minRR: rrInfo.minRR }
+      { rr: rrInfo.rr, minRR: rrInfo.minRR },
+      signal
     );
     return false;
   }
@@ -109,7 +110,8 @@ export function validatePreExecution(signal, market) {
     logSignalRejected(
       signal.signalId || signal.algoSignal?.signalId,
       'slInvalid',
-      { price: market.currentPrice ?? signal.entry, stopLoss: signal.stopLoss }
+      { price: market.currentPrice ?? signal.entry, stopLoss: signal.stopLoss },
+      signal
     );
     return false;
   }
@@ -131,7 +133,8 @@ export function validatePreExecution(signal, market) {
     logSignalRejected(
       signal.signalId || signal.algoSignal?.signalId,
       'conflict',
-      { market }
+      { market },
+      signal
     );
     return false;
   }
