@@ -186,10 +186,7 @@ async function getMarginForStock(order) {
     const hist = historicalCache[token] || [];
     const avgRange =
       hist.length > 1
-        ?
-          hist
-            .slice(-20)
-            .reduce((a, b) => a + (b.high - b.low), 0) /
+        ? hist.slice(-20).reduce((a, b) => a + (b.high - b.low), 0) /
           Math.min(hist.length, 20)
         : 0;
     return { ...response, avgRange };
@@ -324,7 +321,9 @@ async function startLiveFeed(io) {
 
   ticker.on("error", (err) => {
     logError("WebSocket error", err);
-    try { ticker.disconnect(); } catch (e) {}
+    try {
+      ticker.disconnect();
+    } catch (e) {}
     setTimeout(() => startLiveFeed(io), 5000);
   });
   ticker.on("close", () => {
@@ -743,7 +742,9 @@ async function flushTickBufferToDB() {
     const ticks = tickBuffer[token];
     if (!Array.isArray(ticks) || ticks.length === 0) continue;
     for (const t of ticks) {
-      operations.push({ insertOne: { document: { token: Number(token), ...t } } });
+      operations.push({
+        insertOne: { document: { token: Number(token), ...t } },
+      });
     }
     tickBuffer[token] = [];
   }
@@ -780,7 +781,9 @@ async function emitUnifiedSignal(signal, source, io) {
   fetchAIData(signal)
     .then(async (ai) => {
       signal.ai = ai;
-      await db.collection("signals").updateOne({ _id: insertedId }, { $set: { ai } });
+      await db
+        .collection("signals")
+        .updateOne({ _id: insertedId }, { $set: { ai } });
     })
     .catch((err) => logError("AI enrichment", err));
 }
@@ -845,11 +848,13 @@ async function fetchHistoricalIntradayData(interval = "minute", daysBack = 3) {
   }
   // 4) Persist into MongoDB per token
   for (const token in historicalData) {
-    await db.collection("historical_session_data").updateOne(
-      { token: Number(token) },
-      { $set: { token: Number(token), candles: historicalData[token] } },
-      { upsert: true }
-    );
+    await db
+      .collection("historical_session_data")
+      .updateOne(
+        { token: Number(token) },
+        { $set: { token: Number(token), candles: historicalData[token] } },
+        { upsert: true }
+      );
   }
 
   const tokenCount = Object.keys(historicalData).length;
@@ -958,7 +963,10 @@ async function loadHistoricalCache() {
 fetchHistoricalData().then(() => loadHistoricalCache());
 
 async function loadHistoricalSessionData() {
-  const docs = await db.collection("historical_session_data").find({}).toArray();
+  const docs = await db
+    .collection("historical_session_data")
+    .find({})
+    .toArray();
   historicalSessionData = {};
   for (const doc of docs) {
     const tokenStr = String(doc.token);
@@ -975,8 +983,7 @@ function computeGapPercent(tokenStr) {
   if (!todayCandle || !daily.length) return;
   const yesterdayClose = daily[daily.length - 1]?.close;
   if (typeof yesterdayClose === "number") {
-    gapPercent[tokenStr] =
-      (todayCandle.open - yesterdayClose) / yesterdayClose;
+    gapPercent[tokenStr] = (todayCandle.open - yesterdayClose) / yesterdayClose;
   }
 }
 
@@ -1071,11 +1078,13 @@ async function fetchSessionData() {
 
   if (Object.keys(sessionData).length > 0) {
     for (const token in sessionData) {
-      await db.collection("session_data").updateOne(
-        { token: Number(token) },
-        { $set: { token: Number(token), candles: sessionData[token] } },
-        { upsert: true }
-      );
+      await db
+        .collection("session_data")
+        .updateOne(
+          { token: Number(token) },
+          { $set: { token: Number(token), candles: sessionData[token] } },
+          { upsert: true }
+        );
       const tokenStr = String(token);
       if (!candleHistory[tokenStr]) candleHistory[tokenStr] = [];
       candleHistory[tokenStr].push(
@@ -1249,8 +1258,6 @@ export {
   getMA,
   getATR,
   getAverageVolume,
-  getSupportResistanceLevels,
-  rebuildThreeMinCandlesFromOneMin,
   candleHistory,
   isMarketOpen,
   setStockSymbol,
