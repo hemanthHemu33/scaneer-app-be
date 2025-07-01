@@ -8,7 +8,8 @@ const kiteMock = test.mock.module('../kite.js', {
       ema50: 100,
       supertrend: { signal: 'Buy' }
     }),
-    candleHistory: {}
+    candleHistory: {},
+    getSupportResistanceLevels: () => ({ support: 90, resistance: 110 })
   }
 });
 
@@ -74,6 +75,8 @@ test('analyzeCandles returns a signal for valid data', async () => {
   assert.equal(signal.stock, 'TEST');
   assert.equal(signal.pattern, 'Breakout');
   assert.ok(signal.expiresAt);
+  assert.equal(signal.support, 90);
+  assert.equal(signal.resistance, 110);
   kiteMock.restore();
   utilMock.restore();
   dbMock.restore();
