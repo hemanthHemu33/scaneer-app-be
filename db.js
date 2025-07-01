@@ -13,6 +13,10 @@ async function ensureIndexes(db) {
     { generatedAt: 1 },
     { expireAfterSeconds: 60 * 60 * 24 * 7 }
   );
+  await db.collection("tick_data").createIndex(
+    { timestamp: 1 },
+    { expireAfterSeconds: 60 * 60 * 24 }
+  );
 }
 
 export const connectDB = async (attempt = 0) => {

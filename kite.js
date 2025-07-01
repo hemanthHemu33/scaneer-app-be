@@ -322,7 +322,11 @@ async function startLiveFeed(io) {
     }
   });
 
-  ticker.on("error", (err) => logError("WebSocket error", err));
+  ticker.on("error", (err) => {
+    logError("WebSocket error", err);
+    try { ticker.disconnect(); } catch (e) {}
+    setTimeout(() => startLiveFeed(io), 5000);
+  });
   ticker.on("close", () => {
     logError("WebSocket closed, retrying...");
     setTimeout(() => startLiveFeed(io), 5000);
@@ -332,6 +336,7 @@ async function startLiveFeed(io) {
   clearInterval(candleInterval);
   candleInterval = setInterval(() => processBuffer(io), tickIntervalMs);
   setInterval(() => processAlignedCandles(io), 60000); // Process aligned candles every 1 min
+  setInterval(() => flushTickBufferToDB(), 10000); // persist ticks
   // Removed redundant hourly fetchHistoricalIntradayData
 
   // previous reload of historical data removed to avoid duplication
@@ -485,31 +490,8 @@ export async function processAlignedCandles(io) {
             lastTick
           );
 
-          if (signal && checkRisk(signal)) {
-            console.log("🚀 Emitting Aligned Signal:", signal);
-            io.emit("tradeSignal", signal);
-            logTrade(signal);
-            sendSignal(signal); // 🐦 Send to Telegram
-            addSignal(signal);
-            logSignalCreated(signal, {
-              vix: marketContext.vix,
-              regime: marketContext.regime,
-              breadth: marketContext.breadth,
-            });
-            // STORE THE LATEST SIGNAL IN DB LATEST SIGNAL ON TOP
-
-            const { insertedId } = await db
-              .collection("signals")
-              .insertOne(signal);
-            // Enrich signal with AI data after emission without blocking
-            fetchAIData(signal)
-              .then(async (ai) => {
-                signal.ai = ai;
-                await db
-                  .collection("signals")
-                  .updateOne({ _id: insertedId }, { $set: { ai } });
-              })
-              .catch((err) => logError("AI enrichment", err));
+          if (signal) {
+            await emitUnifiedSignal(signal, "Aligned", io);
           }
         } catch (err) {
           logError(`⚠️ Error processing token ${token} at ${minute}`, err);
@@ -626,22 +608,8 @@ async function processBuffer(io) {
         lastTick
       );
 
-      if (signal && checkRisk(signal)) {
-        console.log("🚀 Emitting TickBuffer Signal:", signal);
-        io.emit("tradeSignal", signal);
-        logTrade(signal);
-        sendSignal(signal); // 🐦 Send to Telegram
-        logSignalCreated(signal, {
-          vix: marketContext.vix,
-          regime: marketContext.regime,
-          breadth: marketContext.breadth,
-        });
-        // Populate AI info asynchronously
-        fetchAIData(signal)
-          .then((ai) => {
-            signal.ai = ai;
-          })
-          .catch((err) => logError("AI enrichment", err));
+      if (signal) {
+        await emitUnifiedSignal(signal, "TickBuffer", io);
       }
     } catch (err) {
       logError(`❌ Signal generation error for token ${token}`, err);
@@ -766,6 +734,55 @@ async function logTrade(signal) {
   tradeLog.push(tradeEntry);
   await db.collection("trade_logs").insertOne(tradeEntry);
   // fs.appendFileSync("trade.log", JSON.stringify(tradeEntry) + "\n");
+}
+
+// Persist tick buffer every 10 seconds for restart safety
+async function flushTickBufferToDB() {
+  const operations = [];
+  for (const token in tickBuffer) {
+    const ticks = tickBuffer[token];
+    if (!Array.isArray(ticks) || ticks.length === 0) continue;
+    for (const t of ticks) {
+      operations.push({ insertOne: { document: { token: Number(token), ...t } } });
+    }
+    tickBuffer[token] = [];
+  }
+  if (operations.length) {
+    try {
+      await db.collection("tick_data").bulkWrite(operations);
+    } catch (err) {
+      logError("Tick buffer flush", err);
+    }
+  }
+}
+
+const lastSignalMap = {};
+async function emitUnifiedSignal(signal, source, io) {
+  const key = `${signal.stock}-${signal.pattern}-${signal.direction}`;
+  const now = Date.now();
+  if (lastSignalMap[key] && now - lastSignalMap[key] < 5 * 60 * 1000) {
+    console.log(`🛑 Duplicate signal skipped for ${key}`);
+    return;
+  }
+  lastSignalMap[key] = now;
+  if (!checkRisk(signal)) return;
+  console.log(`🚀 Emitting ${source} Signal:`, signal);
+  io.emit("tradeSignal", signal);
+  logTrade(signal);
+  sendSignal(signal);
+  addSignal(signal);
+  logSignalCreated(signal, {
+    vix: marketContext.vix,
+    regime: marketContext.regime,
+    breadth: marketContext.breadth,
+  });
+  const { insertedId } = await db.collection("signals").insertOne(signal);
+  fetchAIData(signal)
+    .then(async (ai) => {
+      signal.ai = ai;
+      await db.collection("signals").updateOne({ _id: insertedId }, { $set: { ai } });
+    })
+    .catch((err) => logError("AI enrichment", err));
 }
 
 // FETCH HISTORICAL MINUTESS DATA
@@ -1078,6 +1095,15 @@ async function fetchSessionData() {
   } else {
     console.warn("⚠️ No session data written to database (empty response)");
   }
+
+  const anyToken = Object.keys(sessionData)[0];
+  if (anyToken && sessionData[anyToken].length < 3) {
+    const minutes = nowIST.getHours() * 60 + nowIST.getMinutes();
+    if (minutes < 570) {
+      console.log("⏳ Session fetch incomplete. Retrying in 1m...");
+      setTimeout(fetchSessionData, 60 * 1000);
+    }
+  }
 }
 
 // setInterval(() => fetchSessionData(), 3 * 60 * 1000);
@@ -1192,6 +1218,27 @@ export function getSupportResistanceLevels(symbol) {
   };
 }
 
+export async function rebuildThreeMinCandlesFromOneMin(token) {
+  const minutes = alignedTickStorage[token] || {};
+  const entries = Object.keys(minutes).sort();
+  const result = [];
+  for (let i = 0; i < entries.length; i += 3) {
+    const slice = entries.slice(i, i + 3);
+    const ticks = slice.flatMap((m) => minutes[m] || []);
+    if (ticks.length < 2) continue;
+    const prices = ticks.map((t) => t.last_price);
+    result.push({
+      date: new Date(slice[0]),
+      open: prices[0],
+      high: Math.max(...prices),
+      low: Math.min(...prices),
+      close: prices[prices.length - 1],
+      volume: ticks.reduce((s, t) => s + (t.last_traded_quantity || 0), 0),
+    });
+  }
+  return result;
+}
+
 export {
   startLiveFeed,
   updateInstrumentTokens,
@@ -1203,6 +1250,7 @@ export {
   getATR,
   getAverageVolume,
   getSupportResistanceLevels,
+  rebuildThreeMinCandlesFromOneMin,
   candleHistory,
   isMarketOpen,
   setStockSymbol,
