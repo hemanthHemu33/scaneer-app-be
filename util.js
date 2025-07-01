@@ -111,18 +111,19 @@ export function debounceSignal(
   signalHistory,
   symbol,
   direction,
+  strategy = 'default',
   windowMs = 180000
 ) {
   const now = Date.now();
-  const history = signalHistory[symbol] || [];
-  const conflicting = history.find(
+  const symHist = signalHistory[symbol] || {};
+  const stratHist = symHist[strategy] || [];
+  const conflicting = stratHist.find(
     (sig) => now - sig.timestamp < windowMs && sig.direction !== direction
   );
   if (conflicting) return false;
-  signalHistory[symbol] = history.filter(
-    (sig) => now - sig.timestamp < windowMs
-  );
-  signalHistory[symbol].push({ direction, timestamp: now });
+  symHist[strategy] = stratHist.filter((sig) => now - sig.timestamp < windowMs);
+  symHist[strategy].push({ direction, timestamp: now });
+  signalHistory[symbol] = symHist;
   return true;
 }
 

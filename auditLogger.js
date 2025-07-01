@@ -76,7 +76,12 @@ export async function logSignalExpired(signalId, reason) {
   }
 }
 
-export async function logSignalRejected(signalId, reasonCode, validationDetails) {
+export async function logSignalRejected(
+  signalId,
+  reasonCode,
+  validationDetails,
+  signalData = null
+) {
   await secureLogStore(
     {
       type: 'signal_rejected',
@@ -87,6 +92,15 @@ export async function logSignalRejected(signalId, reasonCode, validationDetails)
     },
     ['validationDetails']
   );
+  try {
+    await db.collection('rejected_signals').insertOne({
+      signalId,
+      reasonCode,
+      validationDetails,
+      signal: signalData,
+      timestamp: new Date(),
+    });
+  } catch {}
   sendCriticalAlerts('rejection', { signalId, reasonCode });
 }
 
