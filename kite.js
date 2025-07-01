@@ -158,6 +158,61 @@ async function getTokensForSymbols(symbols) {
   }
 }
 
+// GET THE MARGIN FOR EQUITY IN ZERODHA
+async function getMarginForToken() {
+  try {
+    const response = await kc.getMargins("equity");
+    return response;
+  } catch (err) {
+    logError("Error fetching margin", err);
+    return null;
+  }
+}
+
+// GET THE MARGIN FOR A SPECIFIC STOCK IN ZERODHA
+async function getMarginForStock(order) {
+  try {
+    const response = await kc.orderMargins(order);
+    return response;
+  } catch (err) {
+    logError("Error fetching margin", err);
+    return null;
+  }
+}
+
+// GET THE HOLDINGS IN ZERODHA
+async function getHoldings() {
+  try {
+    const holdings = await kc.getHoldings();
+    return holdings;
+  } catch (err) {
+    logError("Error fetching holdings", err);
+    return [];
+  }
+}
+
+// GET ALL ORDERS IN ZERODHA
+async function getAllOrders() {
+  try {
+    const orders = await kc.getOrders();
+    return orders;
+  } catch (err) {
+    logError("Error fetching orders", err);
+    return [];
+  }
+}
+
+// GET ALL OPEN POSITIONS IN ZERODHA
+async function getOpenPositions() {
+  try {
+    const positions = await kc.getPositions();
+    return positions;
+  } catch (err) {
+    logError("Error fetching open positions", err);
+    return [];
+  }
+}
+
 async function startLiveFeed(io) {
   globalIO = io;
 
@@ -388,7 +443,9 @@ export async function processAlignedCandles(io) {
             });
             // STORE THE LATEST SIGNAL IN DB LATEST SIGNAL ON TOP
 
-            const { insertedId } = await db.collection("signals").insertOne(signal);
+            const { insertedId } = await db
+              .collection("signals")
+              .insertOne(signal);
             // Enrich signal with AI data after emission without blocking
             fetchAIData(signal)
               .then(async (ai) => {
@@ -524,9 +581,11 @@ async function processBuffer(io) {
           breadth: marketContext.breadth,
         });
         // Populate AI info asynchronously
-        fetchAIData(signal).then((ai) => {
-          signal.ai = ai;
-        }).catch((err) => logError("AI enrichment", err));
+        fetchAIData(signal)
+          .then((ai) => {
+            signal.ai = ai;
+          })
+          .catch((err) => logError("AI enrichment", err));
       }
     } catch (err) {
       logError(`❌ Signal generation error for token ${token}`, err);
@@ -629,8 +688,99 @@ async function logTrade(signal) {
   // fs.appendFileSync("trade.log", JSON.stringify(tradeEntry) + "\n");
 }
 
+// FETCH HISTORICAL MINUTESS DATA
+async function fetchHistoricalIntradayData(interval = "minute", daysBack = 3) {
+  const accessToken = await initSession();
+  if (!accessToken) {
+    console.error("❌ Cannot fetch historical intraday data: no access token");
+    return;
+  }
+
+  const today = new Date();
+  const tradingDates = getPastTradingDates(today, daysBack);
+  const historicalData = {};
+
+  for (const dateStr of tradingDates) {
+    console.log(`📆 Fetching ${interval} data for: ${dateStr}`);
+    for (const symbol of stockSymbols) {
+      try {
+        // 1) Lookup instrument token
+        const ltp = await kc.getLTP([symbol]);
+        const token = ltp[symbol]?.instrument_token;
+        if (!token) {
+          console.warn(`⚠️ Skipping ${symbol} — token not found`);
+          continue;
+        }
+
+        // 2) Fetch intraday candles
+        const candles = await kc.getHistoricalData(
+          token,
+          interval,
+          dateStr,
+          dateStr,
+          false // continuous = false
+        );
+        if (!candles?.length) {
+          console.warn(`⚠️ No candles for ${symbol} on ${dateStr}`);
+          continue;
+        }
+
+        // 3) Format and accumulate
+        const formatted = candles.map((c) => ({
+          date: new Date(c.date).toLocaleString("en-IN", {
+            timeZone: "Asia/Kolkata",
+          }),
+          open: c.open,
+          high: c.high,
+          low: c.low,
+          close: c.close,
+          volume: c.volume,
+        }));
+
+        if (!historicalData[token]) {
+          historicalData[token] = [];
+        }
+        historicalData[token].push(...formatted);
+      } catch (err) {
+        console.error(`❌ Error for ${symbol} on ${dateStr}:`, err.message);
+      }
+    }
+  }
+  // 4) Persist into MongoDB
+  await db
+    .collection("historical_session_data")
+    .updateOne({}, { $set: historicalData }, { upsert: true });
+
+  console.log("✅ historical_session_data updated successfully");
+}
+
+// Get past trading dates excluding weekends
+function getPastTradingDates(refDate, count) {
+  const dates = [];
+  const d = new Date(refDate);
+
+  // If today is weekend, start from the last weekday
+  while (d.getDay() === 0 || d.getDay() === 6) {
+    d.setDate(d.getDate() - 1);
+  }
+
+  // Collect previous trading days
+  while (dates.length < count) {
+    d.setDate(d.getDate() - 1);
+    const day = d.getDay();
+    if (day !== 0 && day !== 6) {
+      dates.push(d.toISOString().split("T")[0]);
+    }
+  }
+
+  return dates.reverse(); // Oldest first
+}
+
+fetchHistoricalIntradayData("minute", 3);
+
 fetchHistoricalData();
 // Session & Historical Data
+
 async function fetchHistoricalData() {
   const accessToken = await initSession();
 
