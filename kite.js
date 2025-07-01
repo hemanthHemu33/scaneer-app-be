@@ -167,68 +167,6 @@ async function getTokensForSymbols(symbols) {
   }
 }
 
-// GET THE MARGIN FOR EQUITY IN ZERODHA
-async function getMarginForToken() {
-  try {
-    const response = await kc.getMargins("equity");
-    return response;
-  } catch (err) {
-    logError("Error fetching margin", err);
-    return null;
-  }
-}
-
-// GET THE MARGIN FOR A SPECIFIC STOCK IN ZERODHA
-async function getMarginForStock(order) {
-  try {
-    const response = await kc.orderMargins(order);
-    const token = symbolTokenMap[order.tradingsymbol];
-    const hist = historicalCache[token] || [];
-    const avgRange =
-      hist.length > 1
-        ? hist.slice(-20).reduce((a, b) => a + (b.high - b.low), 0) /
-          Math.min(hist.length, 20)
-        : 0;
-    return { ...response, avgRange };
-  } catch (err) {
-    logError("Error fetching margin", err);
-    return null;
-  }
-}
-
-// GET THE HOLDINGS IN ZERODHA
-async function getHoldings() {
-  try {
-    const holdings = await kc.getHoldings();
-    return holdings;
-  } catch (err) {
-    logError("Error fetching holdings", err);
-    return [];
-  }
-}
-
-// GET ALL ORDERS IN ZERODHA
-async function getAllOrders() {
-  try {
-    const orders = await kc.getOrders();
-    return orders;
-  } catch (err) {
-    logError("Error fetching orders", err);
-    return [];
-  }
-}
-
-// GET ALL OPEN POSITIONS IN ZERODHA
-async function getOpenPositions() {
-  try {
-    const positions = await kc.getPositions();
-    return positions;
-  } catch (err) {
-    logError("Error fetching open positions", err);
-    return [];
-  }
-}
-
 let warmupDone = false;
 async function warmupCandleHistory() {
   if (warmupDone) return;
