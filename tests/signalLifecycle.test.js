@@ -1,7 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
+const auditMock = test.mock.module('../auditLogger.js', {
+  namedExports: { logSignalExpired: () => {}, logSignalMutation: () => {} }
+});
+
 import { addSignal, activeSignals, checkExpiries } from '../signalManager.js';
+
+auditMock.restore();
 process.env.NODE_ENV = 'test';
 
 activeSignals.clear();

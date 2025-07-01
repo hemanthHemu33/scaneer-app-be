@@ -159,5 +159,7 @@ async function setupIndexes() {
   }
 }
 
-setupIndexes();
-setInterval(() => archiveOldLogs().catch(() => {}), 24 * 60 * 60 * 1000);
+if (process.env.NODE_ENV !== 'test') {
+  setupIndexes();
+  setInterval(() => archiveOldLogs().catch(() => {}), 24 * 60 * 60 * 1000);
+}
