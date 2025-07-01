@@ -30,6 +30,9 @@ const instruments = await db.collection("instruments").find({}).toArray();
 const tokensData = await db.collection("tokens").findOne({});
 const historicalData = await db.collection("historical_data").findOne({});
 const sessionData = await db.collection("session_data").findOne({});
+const historicalSessionData = await db
+  .collection("historical_session_data")
+  .findOne({});
 
 let candleHistory = {}; // 🧠 Store per-token candle history for EMA, RSI, etc.
 let historicalCache = {};
@@ -219,13 +222,34 @@ async function startLiveFeed(io) {
   const accessToken = await initSession();
   if (!accessToken) return logError("Live feed start failed: No access token");
 
-  // 🧠 Load initial session data into candle history
+  // 🧠 Load historical intraday data then today's session data into candle history
   try {
+    if (historicalSessionData) {
+      for (const token in historicalSessionData) {
+        const tokenStr = token;
+        if (tokenStr === "_id") continue;
+        if (!candleHistory[tokenStr]) candleHistory[tokenStr] = [];
+        candleHistory[tokenStr].push(
+          ...historicalSessionData[token].map((c) => ({
+            open: c.open,
+            high: c.high,
+            low: c.low,
+            close: c.close,
+            volume: c.volume,
+            timestamp: new Date(c.date),
+          }))
+        );
+        candleHistory[tokenStr] = candleHistory[tokenStr].slice(-60);
+      }
+      console.log("✅ Preloaded historical intraday data into candle history");
+    }
+
     for (const token in sessionData) {
       const tokenStr = token;
       if (tokenStr === "_id") continue; // Skip MongoDB _id field
-      candleHistory[tokenStr] = sessionData[token]
-        .map((c) => ({
+      if (!candleHistory[tokenStr]) candleHistory[tokenStr] = [];
+      candleHistory[tokenStr].push(
+        ...sessionData[token].map((c) => ({
           open: c.open,
           high: c.high,
           low: c.low,
@@ -233,7 +257,8 @@ async function startLiveFeed(io) {
           volume: c.volume,
           timestamp: new Date(c.date),
         }))
-        .slice(-60);
+      );
+      candleHistory[tokenStr] = candleHistory[tokenStr].slice(-60);
     }
     console.log("✅ Preloaded session candles into candle history");
 
@@ -277,13 +302,33 @@ async function startLiveFeed(io) {
   candleInterval = setInterval(() => processBuffer(io), tickIntervalMs);
   setInterval(() => processAlignedCandles(io), 60000); // Process aligned candles every 1 min
 
-  // 🧠 Load initial session data into candle history
+  // 🧠 Load intraday data again in case ticker took time to connect
   try {
+    if (historicalSessionData) {
+      for (const token in historicalSessionData) {
+        const tokenStr = token;
+        if (tokenStr === "_id") continue;
+        if (!candleHistory[tokenStr]) candleHistory[tokenStr] = [];
+        candleHistory[tokenStr].push(
+          ...historicalSessionData[token].map((c) => ({
+            open: c.open,
+            high: c.high,
+            low: c.low,
+            close: c.close,
+            volume: c.volume,
+            timestamp: new Date(c.date),
+          }))
+        );
+        candleHistory[tokenStr] = candleHistory[tokenStr].slice(-60);
+      }
+    }
+
     for (const token in sessionData) {
       const tokenStr = token;
       if (tokenStr === "_id") continue; // Skip MongoDB _id field
-      candleHistory[tokenStr] = sessionData[token]
-        .map((c) => ({
+      if (!candleHistory[tokenStr]) candleHistory[tokenStr] = [];
+      candleHistory[tokenStr].push(
+        ...sessionData[token].map((c) => ({
           open: c.open,
           high: c.high,
           low: c.low,
@@ -291,7 +336,8 @@ async function startLiveFeed(io) {
           volume: c.volume,
           timestamp: new Date(c.date),
         }))
-        .slice(-60);
+      );
+      candleHistory[tokenStr] = candleHistory[tokenStr].slice(-60);
     }
     console.log("✅ Preloaded session candles into candle history");
   } catch (err) {
@@ -1034,6 +1080,7 @@ export {
   updateInstrumentTokens,
   setTickInterval,
   fetchHistoricalData,
+  fetchHistoricalIntradayData,
   fetchSessionData,
   getMA,
   getATR,

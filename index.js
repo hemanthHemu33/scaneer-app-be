@@ -12,6 +12,7 @@ import {
   isMarketOpen,
   setStockSymbol,
   initSession,
+  fetchHistoricalIntradayData,
 } from "./kite.js";
 import { sendSignal } from "./telegram.js";
 import {
@@ -330,6 +331,18 @@ app.post("/set-interval", (req, res) => {
     res.json({ status: "Interval updated", interval });
   } else {
     res.status(400).json({ error: "Invalid interval" });
+  }
+});
+
+// Trigger historical intraday data fetch
+app.post("/fetch-intraday-data", async (req, res) => {
+  const { interval = "minute", days = 3 } = req.body || {};
+  try {
+    await fetchHistoricalIntradayData(interval, days);
+    res.json({ status: "success" });
+  } catch (err) {
+    console.error("❌ Intraday fetch error:", err.message);
+    res.status(500).json({ error: "Failed to fetch intraday data" });
   }
 });
 
