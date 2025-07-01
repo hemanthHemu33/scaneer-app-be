@@ -1,12 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
+const riskMock = test.mock.module('../riskValidator.js', {
+  namedExports: { validateRR: () => ({ valid: true, rr: 2, minRR: 1 }) }
+});
+
 import {
   calculateDynamicStopLoss,
   calculateLotSize,
   checkExposureCap,
   adjustRiskBasedOnDrawdown,
 } from '../dynamicRiskModel.js';
+
+riskMock.restore();
 
 test('calculateDynamicStopLoss uses ATR multiplier', () => {
   const sl = calculateDynamicStopLoss({ atr: 2, entry: 100, direction: 'Long' });
