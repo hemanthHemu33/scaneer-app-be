@@ -232,14 +232,26 @@ async function getOpenPositions() {
   }
 }
 
+let warmupDone = false;
+async function warmupCandleHistory() {
+  if (warmupDone) return;
+  const now = new Date(
+    new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" })
+  );
+  if (now.getHours() !== 9 || now.getMinutes() > 1) return;
+  await fetchHistoricalIntradayData("minute", 3);
+  await loadHistoricalSessionData();
+  warmupDone = true;
+  console.log("✅ Warmup candle history completed");
+}
+
 async function startLiveFeed(io) {
   globalIO = io;
 
   const accessToken = await initSession();
   if (!accessToken) return logError("Live feed start failed: No access token");
 
-  await fetchHistoricalIntradayData("minute", 3);
-  await loadHistoricalSessionData();
+  await warmupCandleHistory();
 
   // 🧠 Load historical intraday data then today's session data into candle history
   try {
@@ -1075,6 +1087,9 @@ setInterval(() => {
   if (!isMarketOpen()) initSession(); // token refresh only
   else fetchSessionData(); // full session + candle pull
 }, 3 * 60 * 1000);
+
+// Periodically check if the warmup task should run
+setInterval(warmupCandleHistory, 60 * 1000);
 
 function getMA(token, period) {
   // const data = JSON.parse(fs.readFileSync(historicalDataPath, "utf-8"))[token];
