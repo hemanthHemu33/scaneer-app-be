@@ -13,6 +13,8 @@ import {
   setStockSymbol,
   initSession,
   fetchHistoricalIntradayData,
+  getSupportResistanceLevels,
+  rebuildThreeMinCandlesFromOneMin,
 } from "./kite.js";
 import { sendSignal } from "./telegram.js";
 import {
@@ -343,6 +345,29 @@ app.post("/fetch-intraday-data", async (req, res) => {
   } catch (err) {
     console.error("❌ Intraday fetch error:", err.message);
     res.status(500).json({ error: "Failed to fetch intraday data" });
+  }
+});
+
+app.get("/support-resistance/:symbol", (req, res) => {
+  const { symbol } = req.params;
+  if (!symbol) return res.status(400).json({ error: "Missing symbol" });
+  try {
+    const levels = getSupportResistanceLevels(symbol);
+    res.json({ status: "success", ...levels });
+  } catch (err) {
+    console.error("❌ Support/resistance error:", err.message);
+    res.status(500).json({ error: "Failed to compute levels" });
+  }
+});
+
+app.get("/rebuild-3min/:token", async (req, res) => {
+  const { token } = req.params;
+  try {
+    const candles = await rebuildThreeMinCandlesFromOneMin(token);
+    res.json({ status: "success", candles });
+  } catch (err) {
+    console.error("❌ 3m rebuild error:", err.message);
+    res.status(500).json({ error: "Failed to rebuild candles" });
   }
 });
 
