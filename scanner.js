@@ -12,7 +12,10 @@ import {
   calculateExpiryMinutes,
 } from "./util.js";
 
-import { getHigherTimeframeData } from "./kite.js";
+import {
+  getHigherTimeframeData,
+  getSupportResistanceLevels,
+} from "./kite.js";
 import { evaluateStrategies } from "./strategies.js";
 import { candleHistory } from "./kite.js";
 import { RISK_REWARD_RATIO, calculatePositionSize } from "./positionSizing.js";
@@ -408,6 +411,7 @@ export async function analyzeCandles(
 
     const ma20Val = getMAForSymbol(symbol, 20);
     const ma50Val = getMAForSymbol(symbol, 50);
+    const { support, resistance } = getSupportResistanceLevels(symbol);
 
     const stratResults = evaluateStrategies(validCandles, { rvol }, { topN: 5 });
     const filtered = filterStrategiesByRegime(stratResults, marketContext);
@@ -431,6 +435,9 @@ export async function analyzeCandles(
       rsi: parseFloat(rsi.toFixed(2)),
       ma20: ma20Val !== null ? parseFloat(ma20Val.toFixed(2)) : null,
       ma50: ma50Val !== null ? parseFloat(ma50Val.toFixed(2)) : null,
+      support: support !== null ? parseFloat(support.toFixed(2)) : null,
+      resistance:
+        resistance !== null ? parseFloat(resistance.toFixed(2)) : null,
       ema9: parseFloat(ema9.toFixed(2)),
       ema21: parseFloat(ema21.toFixed(2)),
       ema50: parseFloat(ema50.toFixed(2)),
@@ -467,6 +474,7 @@ export async function analyzeCandles(
         marketTrend: isUptrend ? "bullish" : isDowntrend ? "bearish" : "sideways"
       },
       context: { volatility: atrValue.toFixed(2) },
+      levels: { support, resistance },
       confidenceScore: strategyConfidence,
       executionWindow: {
         validFrom: signal.generatedAt,
