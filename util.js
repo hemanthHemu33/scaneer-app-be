@@ -1,18 +1,34 @@
 // util.js
 import { getMA } from "./kite.js"; // Reuse kite.js
 
+// Simple in-memory caches for intraday indicator calculations
+const emaCache = new Map();
+
 export function calculateMA(prices, length) {
   if (prices.length < length) return null;
   const sum = prices.slice(-length).reduce((a, b) => a + b, 0);
   return sum / length;
 }
 
-export function calculateEMA(prices, length) {
+// Calculate EMA with optional memoisation key. When a key is provided the
+// function reuses the last computed EMA value for that key to avoid
+// recalculating from the start of the array on every tick.
+export function calculateEMA(prices, length, key) {
+  if (!prices || prices.length === 0) return null;
   const k = 2 / (length + 1);
-  let ema = prices[0];
-  for (let i = 1; i < prices.length; i++) {
+  let ema;
+  let start = 0;
+  if (key && emaCache.has(key)) {
+    const cached = emaCache.get(key);
+    ema = cached.value;
+    start = cached.index + 1;
+  } else {
+    ema = prices[0];
+  }
+  for (let i = start; i < prices.length; i++) {
     ema = prices[i] * k + ema * (1 - k);
   }
+  if (key) emaCache.set(key, { value: ema, index: prices.length - 1 });
   return ema;
 }
 
@@ -40,6 +56,11 @@ export function getMAForSymbol(symbol, period) {
   return getMA(symbol, period);
 }
 
+// Clear indicator caches - useful at the start of a new trading session
+export function resetIndicatorCache() {
+  emaCache.clear();
+}
+
 export function getATR(data, period = 14) {
   if (!data || data.length < period) return null;
   let trSum = 0;
@@ -59,12 +80,17 @@ export function getATR(data, period = 14) {
 
 export function calculateVWAP(candles) {
   if (!candles || candles.length === 0) return null;
+  const last = candles[candles.length - 1];
+  const refDate = new Date(last.timestamp || last.date);
+  refDate.setHours(0, 0, 0, 0);
   let totalPV = 0,
     totalVolume = 0;
   candles.forEach((c) => {
+    const ts = new Date(c.timestamp || c.date);
+    if (ts < refDate) return;
     const typicalPrice = (c.high + c.low + c.close) / 3;
-    totalPV += typicalPrice * c.volume;
-    totalVolume += c.volume;
+    totalPV += typicalPrice * (c.volume || 0);
+    totalVolume += c.volume || 0;
   });
   return totalVolume > 0 ? totalPV / totalVolume : null;
 }
