@@ -15,11 +15,10 @@ import {
 import { getHigherTimeframeData } from "./kite.js";
 import { evaluateStrategies } from "./strategies.js";
 import { candleHistory } from "./kite.js";
-import { RISK_REWARD_RATIO } from "./positionSizing.js";
-import { validatePreExecution } from "./riskValidator.js";
+import { RISK_REWARD_RATIO, calculatePositionSize } from "./positionSizing.js";
+import { validatePreExecution, adjustStopLoss } from "./riskValidator.js";
 import {
   calculateDynamicStopLoss,
-  calculateLotSize,
   adjustRiskBasedOnDrawdown,
 } from "./dynamicRiskModel.js";
 import {
@@ -340,15 +339,23 @@ export async function analyzeCandles(
       stopLoss = dynamicSL;
     }
 
+    stopLoss = adjustStopLoss({
+      price: last.close,
+      stopLoss,
+      direction: pattern.direction,
+      atr: atrValue,
+    });
+
     const baseRisk = Math.abs(entry - stopLoss);
     const riskAmount = accountBalance * riskPerTradePercentage;
-    let qty = calculateLotSize({
+    let qty = calculatePositionSize({
       capital: accountBalance,
-      riskAmount,
-      entry,
-      stopLoss,
+      risk: riskAmount,
+      slPoints: baseRisk,
+      price: entry,
       volatility: atrValue,
-      capUtil: 1,
+      lotSize: 1,
+      utilizationCap: 1,
     });
 
     const drawdown = accountBalance
