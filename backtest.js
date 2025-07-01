@@ -43,7 +43,7 @@ const DELAY_MS = 10;
 // 🗓️ Set test date manually
 const testDate = dayjs("20/6/2025", "D/M/YYYY");
 
-async function runBacktest(symbol = SYMBOL) {
+export async function backtestStrategy(symbol = SYMBOL) {
   const token = symbolTokenMap[symbol];
 
   if (!token || !combinedSessionData[token]) {
@@ -152,4 +152,6 @@ async function runBacktest(symbol = SYMBOL) {
   );
 }
 
-runBacktest();
+if (process.env.NODE_ENV !== 'test') {
+  backtestStrategy();
+}
