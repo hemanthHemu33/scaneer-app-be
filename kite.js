@@ -30,7 +30,7 @@ const instruments = await db.collection("instruments").find({}).toArray();
 const tokensData = await db.collection("tokens").findOne({});
 const historicalData = await db.collection("historical_data").findOne({});
 const sessionData = await db.collection("session_data").findOne({});
-const historicalSessionData = await db
+let historicalSessionData = await db
   .collection("historical_session_data")
   .findOne({});
 
@@ -66,14 +66,17 @@ async function setStockSymbol(symbol) {
     { upsert: true }
   );
   console.log(`✅ Stock symbol "${symbol}" saved to database`);
+  await fetchHistoricalIntradayData("minute", 3);
 }
 
 const tokenSymbolMap = {}; // token: symbol
+const symbolTokenMap = {}; // symbol: token
 
 for (const inst of instruments) {
   const key = `${inst.exchange}:${inst.tradingsymbol}`;
   if (stockSymbols.includes(key)) {
     tokenSymbolMap[inst.instrument_token] = key;
+    symbolTokenMap[key] = inst.instrument_token;
   }
 }
 
@@ -176,7 +179,17 @@ async function getMarginForToken() {
 async function getMarginForStock(order) {
   try {
     const response = await kc.orderMargins(order);
-    return response;
+    const token = symbolTokenMap[order.tradingsymbol];
+    const hist = historicalCache[token] || [];
+    const avgRange =
+      hist.length > 1
+        ?
+          hist
+            .slice(-20)
+            .reduce((a, b) => a + (b.high - b.low), 0) /
+          Math.min(hist.length, 20)
+        : 0;
+    return { ...response, avgRange };
   } catch (err) {
     logError("Error fetching margin", err);
     return null;
@@ -221,6 +234,11 @@ async function startLiveFeed(io) {
 
   const accessToken = await initSession();
   if (!accessToken) return logError("Live feed start failed: No access token");
+
+  await fetchHistoricalIntradayData("minute", 3);
+  historicalSessionData = await db
+    .collection("historical_session_data")
+    .findOne({});
 
   // 🧠 Load historical intraday data then today's session data into candle history
   try {
@@ -268,6 +286,7 @@ async function startLiveFeed(io) {
         `🔍 History loaded for ${token}: ${candleHistory[token].length} candles`
       );
     }
+    console.log("✅ Candle history initialized");
   } catch (err) {
     console.warn("⚠️ Could not preload session data:", err.message);
   }
@@ -301,6 +320,9 @@ async function startLiveFeed(io) {
   clearInterval(candleInterval);
   candleInterval = setInterval(() => processBuffer(io), tickIntervalMs);
   setInterval(() => processAlignedCandles(io), 60000); // Process aligned candles every 1 min
+  setInterval(() => {
+    if (isMarketOpen()) fetchHistoricalIntradayData("minute", 3);
+  }, 60 * 60 * 1000);
 
   // 🧠 Load intraday data again in case ticker took time to connect
   try {
@@ -340,6 +362,7 @@ async function startLiveFeed(io) {
       candleHistory[tokenStr] = candleHistory[tokenStr].slice(-60);
     }
     console.log("✅ Preloaded session candles into candle history");
+    console.log("✅ Candle history initialized");
   } catch (err) {
     console.warn("⚠️ Could not preload session data:", err.message);
   }
@@ -347,6 +370,25 @@ async function startLiveFeed(io) {
 
 // 🕒 Aligned tick storage
 let alignedTickStorage = {};
+async function ensureCandleHistory(tokenStr) {
+  if (candleHistory[tokenStr] && candleHistory[tokenStr].length) return;
+  if (!historicalSessionData || !historicalSessionData[tokenStr]) {
+    await fetchHistoricalIntradayData("minute", 3);
+    historicalSessionData = await db
+      .collection("historical_session_data")
+      .findOne({});
+  }
+  const data = historicalSessionData?.[tokenStr] || [];
+  candleHistory[tokenStr] = data.map((c) => ({
+    open: c.open,
+    high: c.high,
+    low: c.low,
+    close: c.close,
+    volume: c.volume,
+    timestamp: new Date(c.date),
+  }));
+  candleHistory[tokenStr] = candleHistory[tokenStr].slice(-60);
+}
 function storeTickAligned(tick) {
   const token = tick.instrument_token;
   const ts = new Date(tick.timestamp || Date.now());
@@ -431,6 +473,7 @@ export async function processAlignedCandles(io) {
             : 0;
 
           const tokenStr = String(token);
+          await ensureCandleHistory(tokenStr);
           const symbol = tokenSymbolMap[tokenStr];
           if (!symbol) {
             logError(`❌ Missing symbol for token ${token}`);
@@ -582,6 +625,7 @@ async function processBuffer(io) {
       : 0;
 
     const tokenStr = String(token);
+    await ensureCandleHistory(tokenStr);
     const symbol = tokenSymbolMap[tokenStr];
     if (!symbol) {
       logError(`❌ Missing symbol for token ${token} in tokenSymbolMap`);
@@ -643,10 +687,34 @@ async function processBuffer(io) {
 }
 
 // Risk Management
+function intradayATR(candles, period = 14) {
+  if (!candles || candles.length < period) return 0;
+  let sum = 0;
+  for (let i = candles.length - period + 1; i < candles.length; i++) {
+    const c = candles[i];
+    const prev = candles[i - 1] || c;
+    const tr = Math.max(
+      c.high - c.low,
+      Math.abs(c.high - prev.close),
+      Math.abs(c.low - prev.close)
+    );
+    sum += tr;
+  }
+  return sum / period;
+}
+
+function checkMarketVolatility(tokenStr, threshold = 5) {
+  const candles = candleHistory[tokenStr] || [];
+  const atr = intradayATR(candles, 14);
+  return atr <= threshold;
+}
+
 function checkRisk(signal) {
   if (riskState.dailyLoss >= riskState.maxDailyLoss) return false;
   if (riskState.consecutiveLosses >= riskState.maxConsecutiveLosses)
     return false;
+  const tokenStr = symbolTokenMap[signal.stock] || signal.instrument_token;
+  if (tokenStr && !checkMarketVolatility(String(tokenStr))) return false;
   return true;
 }
 
@@ -797,7 +865,27 @@ async function fetchHistoricalIntradayData(interval = "minute", daysBack = 3) {
     .collection("historical_session_data")
     .updateOne({}, { $set: historicalData }, { upsert: true });
 
+  const tokenCount = Object.keys(historicalData).length;
+  console.log(
+    `✅ Fetched ${daysBack} days of ${interval} candles for ${tokenCount} tokens`
+  );
   console.log("✅ historical_session_data updated successfully");
+
+  // refresh in-memory history
+  for (const token in historicalData) {
+    const tokenStr = String(token);
+    const candles = historicalData[token].map((c) => ({
+      open: c.open,
+      high: c.high,
+      low: c.low,
+      close: c.close,
+      volume: c.volume,
+      timestamp: new Date(c.date),
+    }));
+    if (!candleHistory[tokenStr]) candleHistory[tokenStr] = [];
+    candleHistory[tokenStr].push(...candles);
+    candleHistory[tokenStr] = candleHistory[tokenStr].slice(-60);
+  }
 }
 
 // Get past trading dates excluding weekends
@@ -821,8 +909,6 @@ function getPastTradingDates(refDate, count) {
 
   return dates.reverse(); // Oldest first
 }
-
-fetchHistoricalIntradayData("minute", 3);
 
 fetchHistoricalData();
 // Session & Historical Data
@@ -1075,6 +1161,18 @@ export async function getHigherTimeframeData(symbol, timeframe = "15minute") {
   }
 }
 
+export function getSupportResistanceLevels(symbol) {
+  const token = symbolTokenMap[symbol];
+  const candles = candleHistory[token] || [];
+  if (!candles.length) return { support: null, resistance: null };
+  const lows = candles.map((c) => c.low);
+  const highs = candles.map((c) => c.high);
+  return {
+    support: Math.min(...lows),
+    resistance: Math.max(...highs),
+  };
+}
+
 export {
   startLiveFeed,
   updateInstrumentTokens,
@@ -1085,6 +1183,7 @@ export {
   getMA,
   getATR,
   getAverageVolume,
+  getSupportResistanceLevels,
   candleHistory,
   isMarketOpen,
   setStockSymbol,
