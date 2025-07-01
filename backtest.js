@@ -29,7 +29,11 @@ for (const inst of instruments) {
 // const sessionData = JSON.parse(
 //   fs.readFileSync("./historical_data.json", "utf-8")
 // );
+const historicalSessionData = await db
+  .collection("historical_session_data")
+  .findOne({});
 const sessionData = await db.collection("session_data").findOne({});
+const combinedSessionData = { ...historicalSessionData, ...sessionData };
 
 // 🧠 CONFIG
 const SYMBOL = "NSE:ADANIENT";
@@ -42,13 +46,13 @@ const testDate = dayjs("20/6/2025", "D/M/YYYY");
 async function runBacktest(symbol = SYMBOL) {
   const token = symbolTokenMap[symbol];
 
-  if (!token || !sessionData[token]) {
+  if (!token || !combinedSessionData[token]) {
     console.error(`❌ No data found for symbol: ${symbol}`);
     return;
   }
 
   // ✅ Convert timestamps properly
-  const allCandles = sessionData[token].map((c) => ({
+  const allCandles = combinedSessionData[token].map((c) => ({
     open: c.open,
     high: c.high,
     low: c.low,
