@@ -68,7 +68,10 @@ async function setStockSymbol(symbol) {
     { upsert: true }
   );
   console.log(`✅ Stock symbol "${symbol}" saved to database`);
-  await fetchHistoricalIntradayData("minute", 3);
+  await fetchHistoricalData([symbol]);
+  await fetchHistoricalIntradayData("minute", 3, [symbol]);
+  await loadHistoricalCache();
+  await loadHistoricalSessionData();
 }
 
 const tokenSymbolMap = {}; // token: symbol
@@ -168,6 +171,16 @@ async function getTokensForSymbols(symbols) {
 }
 
 let warmupDone = false;
+async function ensureHistoricalData() {
+  const historicalCount = await db.collection("historical_data").countDocuments();
+  if (historicalCount === 0) {
+    await fetchHistoricalData();
+    await loadHistoricalCache();
+  } else if (!Object.keys(historicalCache).length) {
+    await loadHistoricalCache();
+  }
+}
+
 async function warmupCandleHistory() {
   if (warmupDone) return;
   const now = new Date(
@@ -177,6 +190,7 @@ async function warmupCandleHistory() {
   if (count === 0 || (now.getHours() === 9 && now.getMinutes() <= 1)) {
     await fetchHistoricalIntradayData("minute", 3);
   }
+  await ensureHistoricalData();
   await loadHistoricalSessionData();
   warmupDone = true;
   console.log("✅ Warmup candle history completed");
@@ -729,7 +743,11 @@ async function emitUnifiedSignal(signal, source, io) {
 }
 
 // FETCH HISTORICAL MINUTESS DATA
-async function fetchHistoricalIntradayData(interval = "minute", daysBack = 3) {
+async function fetchHistoricalIntradayData(
+  interval = "minute",
+  daysBack = 3,
+  symbols = stockSymbols
+) {
   const accessToken = await initSession();
   if (!accessToken) {
     console.error("❌ Cannot fetch historical intraday data: no access token");
@@ -742,7 +760,7 @@ async function fetchHistoricalIntradayData(interval = "minute", daysBack = 3) {
 
   for (const dateStr of tradingDates) {
     console.log(`📆 Fetching ${interval} data for: ${dateStr}`);
-    for (const symbol of stockSymbols) {
+    for (const symbol of symbols) {
       try {
         // 1) Lookup instrument token
         const ltp = await kc.getLTP([symbol]);
@@ -845,7 +863,7 @@ function getPastTradingDates(refDate, count) {
 fetchHistoricalData();
 // Session & Historical Data
 
-async function fetchHistoricalData() {
+async function fetchHistoricalData(symbols = stockSymbols) {
   const accessToken = await initSession();
 
   if (!isMarketOpen()) {
@@ -858,7 +876,7 @@ async function fetchHistoricalData() {
   const startStr = startDate.toISOString().split("T")[0];
   const endStr = new Date().toISOString().split("T")[0];
   const historicalData = {};
-  for (const symbol of stockSymbols) {
+  for (const symbol of symbols) {
     try {
       const ltp = await kc.getLTP([symbol]);
       const token = ltp[symbol]?.instrument_token;
@@ -1188,6 +1206,19 @@ export async function rebuildThreeMinCandlesFromOneMin(token) {
   return result;
 }
 
+function resetInMemoryData() {
+  stockSymbols = [];
+  Object.keys(tokenSymbolMap).forEach((k) => delete tokenSymbolMap[k]);
+  Object.keys(symbolTokenMap).forEach((k) => delete symbolTokenMap[k]);
+  instrumentTokens = [];
+  tickBuffer = {};
+  candleHistory = {};
+  alignedTickStorage = {};
+  historicalCache = {};
+  historicalSessionData = {};
+  warmupDone = false;
+}
+
 export {
   startLiveFeed,
   updateInstrumentTokens,
@@ -1202,4 +1233,5 @@ export {
   isMarketOpen,
   setStockSymbol,
   initSession,
+  resetInMemoryData,
 };
