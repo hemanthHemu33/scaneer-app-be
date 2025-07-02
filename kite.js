@@ -56,22 +56,23 @@ async function setStockSymbol(symbol) {
     stockSymbols.push(symbol);
     console.log(`🔍 Stock symbol added to memory: ${symbol}`);
   }
-  const existingSymbols = await db.collection("stock_symbols").findOne({});
-  if (!existingSymbols) {
-    await db.collection("stock_symbols").insertOne({ symbols: [symbol] });
-    console.log("✅ Stock symbol saved to database (new record)");
-    return;
-  }
+
   await db.collection("stock_symbols").updateOne(
     {},
-    { $addToSet: { symbols: symbol } }, // avoids duplicates
+    { $addToSet: { symbols: symbol } },
     { upsert: true }
   );
   console.log(`✅ Stock symbol "${symbol}" saved to database`);
-  await fetchHistoricalData([symbol]);
-  await fetchHistoricalIntradayData("minute", 3, [symbol]);
-  await loadHistoricalCache();
-  await loadHistoricalSessionData();
+
+  // Subscribe to ticker immediately
+  subscribeSymbol(symbol).catch((err) =>
+    console.error("❌ subscribeSymbol failed:", err.message)
+  );
+
+  // Kick off data fetch asynchronously if needed
+  ensureDataForSymbol(symbol).catch((err) =>
+    console.error("❌ ensureDataForSymbol failed:", err.message)
+  );
 }
 
 // REMOVE STOCK SYMBOL FROM MEMORY AND DB
@@ -1212,6 +1213,40 @@ function getAverageVolume(token, period) {
     : "NA";
 }
 
+async function subscribeSymbol(symbol) {
+  const tokens = await getTokensForSymbols([symbol]);
+  if (!tokens.length) {
+    console.warn(`⚠️ Token not found for ${symbol}`);
+    return;
+  }
+  const token = tokens[0];
+  tokenSymbolMap[token] = symbol;
+  symbolTokenMap[symbol] = token;
+  if (!instrumentTokens.includes(token)) {
+    updateInstrumentTokens([...instrumentTokens, token]);
+  }
+}
+
+async function ensureDataForSymbol(symbol) {
+  try {
+    const ltp = await kc.getLTP([symbol]);
+    const token = ltp[symbol]?.instrument_token;
+    if (!token) return;
+
+    const doc = await db.collection("historical_data").findOne({});
+    if (!doc || !doc[String(token)]) {
+      console.log(`📥 Fetching historical data for ${symbol}`);
+      await fetchHistoricalData([symbol]);
+      await fetchHistoricalIntradayData("minute", 3, [symbol]);
+    }
+
+    await loadHistoricalCache();
+    await loadHistoricalSessionData();
+  } catch (err) {
+    console.error(`❌ Error ensuring data for ${symbol}:`, err.message);
+  }
+}
+
 function updateInstrumentTokens(tokens) {
   if (ticker) {
     ticker.unsubscribe(instrumentTokens);
@@ -1326,6 +1361,8 @@ export {
   preloadStockData,
   isMarketOpen,
   setStockSymbol,
+  subscribeSymbol,
+  ensureDataForSymbol,
   removeStockSymbol,
   initSession,
   resetInMemoryData,

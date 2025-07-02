@@ -88,20 +88,9 @@ app.post("/addStockSymbol", async (req, res) => {
     return res.status(400).json({ error: "Invalid symbol" });
   }
   try {
-    const existingSymbols = await db.collection("stock_symbols").findOne({});
-    if (!existingSymbols) {
-      // ADD SYMBOLS WITH NSE PREFIX
-      await setStockSymbol(`NSE:${symbol}`);
-      await db
-        .collection("stock_symbols")
-        .insertOne({ symbols: [`NSE:${symbol}`] });
-    } else {
-      await db
-        .collection("stock_symbols")
-        .updateOne({}, { $addToSet: { symbols: `NSE:${symbol}` } });
-    }
+    await setStockSymbol(`NSE:${symbol}`);
     const updated = await db.collection("stock_symbols").findOne({});
-    res.json({ status: "success", symbols: updated.symbols }); // ⬅ send updated list
+    res.json({ status: "success", symbols: updated?.symbols || [] });
   } catch (err) {
     console.error("❌ Error:", err.message);
     res.status(500).json({ error: "Failed to update symbols" });
