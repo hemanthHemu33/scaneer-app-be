@@ -5,12 +5,19 @@ const riskMock = test.mock.module('../riskValidator.js', {
   namedExports: { validateRR: () => ({ valid: true, rr: 2, minRR: 1 }) }
 });
 
-import {
+const dbMock = test.mock.module('../db.js', {
+  defaultExport: {},
+  namedExports: { connectDB: async () => ({}) }
+});
+
+const {
   calculateDynamicStopLoss,
   calculateLotSize,
   checkExposureCap,
   adjustRiskBasedOnDrawdown,
-} from '../dynamicRiskModel.js';
+} = await import('../dynamicRiskModel.js');
+
+dbMock.restore();
 
 riskMock.restore();
 

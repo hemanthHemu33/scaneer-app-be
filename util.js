@@ -701,3 +701,32 @@ export function detectAllPatterns(candles, atrValue, lookback = 5) {
 
   return patterns;
 }
+
+export function confirmRetest(candles, breakout, direction = 'Long') {
+  if (!Array.isArray(candles) || candles.length < 2 || !breakout) return false;
+  const test = candles[candles.length - 2];
+  const confirm = candles[candles.length - 1];
+  const thresh = breakout * 0.002;
+  const touched =
+    direction === 'Long'
+      ? test.low <= breakout + thresh && test.high >= breakout - thresh
+      : test.high >= breakout - thresh && test.low <= breakout + thresh;
+  if (!touched) return false;
+  const volumeOk =
+    typeof confirm.volume === 'number' &&
+    typeof test.volume === 'number' &&
+    confirm.volume >= test.volume;
+  const wickPct =
+    direction === 'Long'
+      ? (breakout - test.low) / Math.max(test.high - test.low, 1)
+      : (test.high - breakout) / Math.max(test.high - test.low, 1);
+  const wickOk = wickPct > 0.25;
+  const body = Math.abs(confirm.close - confirm.open);
+  const range = confirm.high - confirm.low || 1;
+  const bodyOk = body > range * 0.5;
+  const closeStrong =
+    direction === 'Long'
+      ? confirm.close > confirm.open && confirm.close > breakout
+      : confirm.close < confirm.open && confirm.close < breakout;
+  return touched && closeStrong && (volumeOk || wickOk || bodyOk);
+}
