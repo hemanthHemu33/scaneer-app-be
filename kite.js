@@ -74,6 +74,44 @@ async function setStockSymbol(symbol) {
   await loadHistoricalSessionData();
 }
 
+// REMOVE STOCK SYMBOL FROM MEMORY AND DB
+async function removeStockSymbol(symbol) {
+  const withPrefix = symbol.includes(':') ? symbol : `NSE:${symbol}`;
+  const cleaned = withPrefix.split(':')[1];
+
+  // In-memory list update
+  stockSymbols = stockSymbols.filter((s) => s !== withPrefix);
+
+  const token = symbolTokenMap[withPrefix];
+  if (token) {
+    instrumentTokens = instrumentTokens.filter((t) => t !== token);
+    delete symbolTokenMap[withPrefix];
+    delete tokenSymbolMap[token];
+    delete tickBuffer[token];
+    delete candleHistory[token];
+    delete alignedTickStorage[token];
+    delete historicalCache[token];
+    delete historicalSessionData[token];
+    delete sessionData[token];
+    if (ticker) ticker.unsubscribe([token]);
+    updateInstrumentTokens(instrumentTokens);
+  }
+
+  await db
+    .collection('stock_symbols')
+    .updateOne({}, { $pull: { symbols: withPrefix } }, { upsert: true });
+
+  const instrument = await db
+    .collection('instruments')
+    .findOne({ tradingsymbol: cleaned, exchange: 'NSE' });
+
+  if (instrument?.instrument_token) {
+    const tokenStr = String(instrument.instrument_token);
+    await db.collection('historical_data').updateOne({}, { $unset: { [tokenStr]: '' } });
+    await db.collection('session_data').updateOne({}, { $unset: { [tokenStr]: '' } });
+  }
+}
+
 const tokenSymbolMap = {}; // token: symbol
 const symbolTokenMap = {}; // symbol: token
 
@@ -1232,6 +1270,7 @@ export {
   candleHistory,
   isMarketOpen,
   setStockSymbol,
+  removeStockSymbol,
   initSession,
   resetInMemoryData,
 };

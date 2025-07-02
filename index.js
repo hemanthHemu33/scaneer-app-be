@@ -11,6 +11,7 @@ import {
   getAverageVolume,
   isMarketOpen,
   setStockSymbol,
+  removeStockSymbol,
   initSession,
   fetchHistoricalIntradayData,
   getSupportResistanceLevels,
@@ -124,60 +125,9 @@ app.delete("/stockSymbols/:symbol", async (req, res) => {
     return res.status(400).json({ error: "Invalid stock symbol" });
   }
 
-  // ✅ Extract actual tradingsymbol (remove "NSE:" prefix if present)
-  const cleanedSymbol = symbol.includes(":") ? symbol.split(":")[1] : symbol;
-
   try {
-    // Step 1: Remove from stock_symbols list
-    const result = await db
-      .collection("stock_symbols")
-      .updateOne(
-        {},
-        { $pull: { symbols: `NSE:${cleanedSymbol}` } },
-        { upsert: true }
-      );
-
-    // Step 2: Find instrument using cleaned symbol
-    const instrument = await db
-      .collection("instruments")
-      .findOne({ tradingsymbol: cleanedSymbol, exchange: "NSE" });
-
-    console.log("Trying to delete symbol:", symbol);
-    console.log("Cleaned symbol for lookup:", cleanedSymbol);
-    console.log("Instrument found:", instrument);
-
-    // Step 3: If instrument found, delete historical data
-    if (instrument && instrument.instrument_token) {
-      const instrumentToken = String(instrument.instrument_token);
-      const deleteResult = await db
-        .collection("historical_data")
-        .updateOne({}, { $unset: { [instrumentToken]: "" } });
-      //  delete the session_data for that instrument token
-      const deleteSessionResult = await db
-        .collection("session_data")
-        .updateOne({}, { $unset: { [instrumentToken]: "" } });
-      // Log the deletion result
-      console.log(
-        `🗑️ Deleted historical data for instrument "${cleanedSymbol}":`,
-        deleteResult.modifiedCount
-      );
-      console.log(
-        `📉 Removed token "${instrumentToken}" from historical_data:`,
-        deleteResult.modifiedCount
-      );
-    } else {
-      console.warn(
-        `❗Instrument not found for symbol "${cleanedSymbol}" on NSE`
-      );
-    }
-
-    // Step 4: Final response
-    if (result.modifiedCount > 0) {
-      console.log(`🗑️ Stock symbol "${cleanedSymbol}" deleted successfully.`);
-      res.json({ status: "success", deletedSymbol: `NSE:${cleanedSymbol}` });
-    } else {
-      res.status(404).json({ error: "Stock symbol not found in list" });
-    }
+    await removeStockSymbol(symbol);
+    res.json({ status: "success", deletedSymbol: symbol.includes(":" ) ? symbol : `NSE:${symbol}` });
   } catch (err) {
     console.error("❌ Error deleting stock symbol:", err);
     res.status(500).json({ error: "Failed to delete stock symbol" });
