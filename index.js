@@ -4,6 +4,7 @@ import http from "http";
 import { Server } from "socket.io";
 import cors from "cors";
 import { analyzeCandles, getSignalHistory } from "./scanner.js";
+import cron from "node-cron";
 import {
   startLiveFeed,
   updateInstrumentTokens,
@@ -17,6 +18,7 @@ import {
   getSupportResistanceLevels,
   rebuildThreeMinCandlesFromOneMin,
   resetInMemoryData,
+  preloadStockData,
 } from "./kite.js";
 import { sendSignal } from "./telegram.js";
 import {
@@ -375,5 +377,21 @@ server.listen(3000, () => {
     const dummyBroker = { getPositions: async () => [] };
     trackOpenPositions(dummyBroker);
     setInterval(() => trackOpenPositions(dummyBroker), 60 * 1000);
+  }
+
+  cron.schedule(
+    "30 8 * * 1-5",
+    () => {
+      preloadStockData();
+    },
+    { timezone: "Asia/Kolkata" }
+  );
+
+  const now = new Date(
+    new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" })
+  );
+  const minutes = now.getHours() * 60 + now.getMinutes();
+  if (minutes >= 510 && minutes <= 540) {
+    preloadStockData();
   }
 });

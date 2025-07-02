@@ -277,6 +277,17 @@ async function warmupCandleHistory() {
   console.log("✅ Warmup candle history completed");
 }
 
+async function preloadStockData() {
+  console.log("⏳ Morning preload starting...");
+  try {
+    await warmupCandleHistory();
+    await fetchSessionData();
+    console.log("✅ Morning preload completed");
+  } catch (err) {
+    console.error("❌ Morning preload error:", err.message);
+  }
+}
+
 async function startLiveFeed(io) {
   globalIO = io;
 
@@ -1311,6 +1322,8 @@ export {
   getATR,
   getAverageVolume,
   candleHistory,
+  warmupCandleHistory,
+  preloadStockData,
   isMarketOpen,
   setStockSymbol,
   removeStockSymbol,
