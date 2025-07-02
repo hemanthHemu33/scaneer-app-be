@@ -29,6 +29,11 @@ import {
   marketContext,
   filterStrategiesByRegime,
 } from "./smartStrategySelector.js";
+import {
+  computeConfidenceScore,
+  getStrategyHitRate,
+  signalQualityScore,
+} from "./confidence.js";
 
 // 📊 Signal history tracking
 const signalHistory = {};
@@ -107,6 +112,7 @@ export async function analyzeCandles(
     const atrValue = getDailyATR(validCandles) || 1;
     const expiryMinutes = calculateExpiryMinutes({ atr: atrValue, rvol });
     const expiresAt = new Date(Date.now() + expiryMinutes * 60 * 1000).toISOString();
+    const quality = signalQualityScore({ atr: atrValue, rvol });
 
     // ⚠️ Momentum filter
     if (rsi > 45 && rsi < 55 && atrValue < 1) {
@@ -312,6 +318,25 @@ export async function analyzeCandles(
       return null;
     }
 
+    // Dynamic confidence scoring
+    let confirmations = 0;
+    const hist = signalHistory[symbol] || {};
+    for (const arr of Object.values(hist)) {
+      confirmations += arr.filter(
+        (s) => Date.now() - s.timestamp < 5 * 60 * 1000 && s.direction === pattern.direction
+      ).length;
+    }
+    const baseScore = confidence === "High" ? 0.8 : confidence === "Medium" ? 0.6 : 0.4;
+    const hitRate = getStrategyHitRate(symbol, pattern.type);
+    const dynamicScore = computeConfidenceScore({
+      hitRate,
+      confirmations,
+      quality,
+      date: new Date(),
+    });
+    const finalScore = (baseScore + dynamicScore) / 2;
+    confidence = finalScore >= 0.75 ? "High" : finalScore >= 0.5 ? "Medium" : "Low";
+
 
 
     // Entry/SL/Target Calculation
@@ -421,7 +446,7 @@ export async function analyzeCandles(
     const filtered = filterStrategiesByRegime(stratResults, marketContext);
     const [topStrategy] = filtered;
     const strategyName = topStrategy ? topStrategy.name : pattern.type;
-    const strategyConfidence = topStrategy ? topStrategy.confidence : (confidence === "High" ? 0.8 : confidence === "Medium" ? 0.6 : 0.4);
+    const strategyConfidence = topStrategy ? topStrategy.confidence : finalScore;
 
     // Debounce logic now that strategy name is known
     const conflictWindow = 3 * 60 * 1000;
@@ -465,6 +490,7 @@ export async function analyzeCandles(
       spread: parseFloat(spread.toFixed(2)),
       liquidity,
       confidence,
+      confidenceScore: finalScore,
       liveTickData: liveTick,
       depth,
       expiresAt,
