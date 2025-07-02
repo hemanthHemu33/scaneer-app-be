@@ -173,8 +173,10 @@ async function warmupCandleHistory() {
   const now = new Date(
     new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" })
   );
-  if (now.getHours() !== 9 || now.getMinutes() > 1) return;
-  await fetchHistoricalIntradayData("minute", 3);
+  const count = await db.collection("historical_session_data").countDocuments();
+  if (count === 0 || (now.getHours() === 9 && now.getMinutes() <= 1)) {
+    await fetchHistoricalIntradayData("minute", 3);
+  }
   await loadHistoricalSessionData();
   warmupDone = true;
   console.log("✅ Warmup candle history completed");
