@@ -295,6 +295,33 @@ function detectGapOpeningRangeBreakout(candles) {
   return null;
 }
 
+export function detectGapUpOrDown({ dailyHistory, sessionCandles }) {
+  if (!Array.isArray(dailyHistory) || dailyHistory.length < 2) return null;
+  if (!Array.isArray(sessionCandles) || !sessionCandles[0]) return null;
+  const yesterdayClose = dailyHistory[dailyHistory.length - 2]?.close;
+  const todayOpen = sessionCandles[0].open;
+  if (typeof yesterdayClose !== "number" || typeof todayOpen !== "number")
+    return null;
+  const gapPercent = ((todayOpen - yesterdayClose) / yesterdayClose) * 100;
+  if (gapPercent >= 1.5)
+    return {
+      type: "Gap-Up Breakout",
+      direction: "Long",
+      gapPercent,
+      breakout: todayOpen,
+      stopLoss: yesterdayClose,
+    };
+  if (gapPercent <= -1.5)
+    return {
+      type: "Gap-Down Reversal",
+      direction: "Short",
+      gapPercent,
+      breakout: todayOpen,
+      stopLoss: yesterdayClose,
+    };
+  return null;
+}
+
 function detectVwapBounce(candles) {
   if (candles.length < 10) return null;
   const vwap = calculateVWAP(candles.slice(-10));
