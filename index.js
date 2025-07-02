@@ -15,6 +15,7 @@ import {
   fetchHistoricalIntradayData,
   getSupportResistanceLevels,
   rebuildThreeMinCandlesFromOneMin,
+  resetInMemoryData,
 } from "./kite.js";
 import { sendSignal } from "./telegram.js";
 import {
@@ -199,6 +200,8 @@ app.delete("/reset", async (req, res) => {
     // Recreate the stock_symbols collection with an empty array
     await db.collection("stock_symbols").deleteMany({});
     await db.collection("stock_symbols").insertOne({ symbols: [] });
+
+    resetInMemoryData();
     res.json({ status: "success", message: "Collections reset successfully" });
   } catch (err) {
     console.error("❌ Error resetting collections:", err);
