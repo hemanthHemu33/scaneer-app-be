@@ -1365,5 +1365,7 @@ export {
   ensureDataForSymbol,
   removeStockSymbol,
   initSession,
+  symbolTokenMap,
+  historicalCache,
   resetInMemoryData,
 };
