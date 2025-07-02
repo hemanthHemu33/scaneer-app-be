@@ -120,14 +120,16 @@ app.get("/stockSymbols", async (req, res) => {
 // DELETE stock symbol and its historical data
 app.delete("/stockSymbols/:symbol", async (req, res) => {
   const { symbol } = req.params;
-
   if (!symbol || typeof symbol !== "string") {
     return res.status(400).json({ error: "Invalid stock symbol" });
   }
 
   try {
     await removeStockSymbol(symbol);
-    res.json({ status: "success", deletedSymbol: symbol.includes(":" ) ? symbol : `NSE:${symbol}` });
+    res.json({
+      status: "success",
+      deletedSymbol: symbol.includes(":") ? symbol : `NSE:${symbol}`,
+    });
   } catch (err) {
     console.error("❌ Error deleting stock symbol:", err);
     res.status(500).json({ error: "Failed to delete stock symbol" });
@@ -190,7 +192,8 @@ app.post("/candles", async (req, res) => {
   if (marketData) {
     detectMarketRegime(marketData);
     if (typeof marketData.vix === "number") applyVIXThresholds(marketData.vix);
-    if (Array.isArray(marketData.events)) handleEconomicEvents(marketData.events);
+    if (Array.isArray(marketData.events))
+      handleEconomicEvents(marketData.events);
   }
 
   const token = candles[0]?.symbol || "UNKNOWN";
@@ -237,7 +240,9 @@ app.post("/candles", async (req, res) => {
         });
 
       if (!allowed) {
-        notifyExposureEvents(`Signal for ${symbol} rejected by portfolio rules`);
+        notifyExposureEvents(
+          `Signal for ${symbol} rejected by portfolio rules`
+        );
       } else {
         console.log("🚀 Emitting tradeSignal:", signal);
         io.emit("tradeSignal", signal);
@@ -366,7 +371,7 @@ server.listen(3000, () => {
     console.log("⏸ Market is closed. Skipping live feed start.");
   }
 
-  if (process.env.NODE_ENV !== 'test') {
+  if (process.env.NODE_ENV !== "test") {
     const dummyBroker = { getPositions: async () => [] };
     trackOpenPositions(dummyBroker);
     setInterval(() => trackOpenPositions(dummyBroker), 60 * 1000);

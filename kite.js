@@ -76,8 +76,8 @@ async function setStockSymbol(symbol) {
 
 // REMOVE STOCK SYMBOL FROM MEMORY AND DB
 async function removeStockSymbol(symbol) {
-  const withPrefix = symbol.includes(':') ? symbol : `NSE:${symbol}`;
-  const cleaned = withPrefix.split(':')[1];
+  const withPrefix = symbol.includes(":") ? symbol : `NSE:${symbol}`;
+  const cleaned = withPrefix.split(":")[1];
 
   // In-memory list update
   stockSymbols = stockSymbols.filter((s) => s !== withPrefix);
@@ -98,30 +98,35 @@ async function removeStockSymbol(symbol) {
   }
 
   await db
-    .collection('stock_symbols')
+    .collection("stock_symbols")
     .updateOne({}, { $pull: { symbols: withPrefix } }, { upsert: true });
 
   const instrument = await db
-    .collection('instruments')
-    .findOne({ tradingsymbol: cleaned, exchange: 'NSE' });
+    .collection("instruments")
+    .findOne({ tradingsymbol: cleaned, exchange: "NSE" });
 
   if (instrument?.instrument_token) {
     const tokenStr = String(instrument.instrument_token);
-    await db.collection('historical_data').updateOne({}, { $unset: { [tokenStr]: '' } });
-    await db.collection('session_data').updateOne({}, { $unset: { [tokenStr]: '' } });
-    await db.collection('historical_session_data').deleteMany({ token: Number(tokenStr) });
-    await db.collection('tick_data').deleteMany({ token: Number(tokenStr) });
+    await db
+      .collection("historical_data")
+      .updateOne({}, { $unset: { [tokenStr]: "" } });
+    // await db.collection('session_data').updateOne({}, { $unset: { [tokenStr]: '' } });
+    await db.collection("session_data").deleteOne({ token: Number(tokenStr) });
+    await db
+      .collection("historical_session_data")
+      .deleteMany({ token: Number(tokenStr) });
+    await db.collection("tick_data").deleteMany({ token: Number(tokenStr) });
 
     const collections = await db.collections();
     const keep = [
-      'instruments',
-      'nifty100qualitystocksymbols',
-      'nifty50stocksymbols',
-      'stock_symbols',
-      'historical_data',
-      'session_data',
-      'historical_session_data',
-      'tick_data',
+      "instruments",
+      "nifty100qualitystocksymbols",
+      "nifty50stocksymbols",
+      "stock_symbols",
+      "historical_data",
+      "session_data",
+      "historical_session_data",
+      "tick_data",
     ];
 
     for (const col of collections) {
@@ -135,8 +140,8 @@ async function removeStockSymbol(symbol) {
           { tradingsymbol: cleaned },
           { token: Number(tokenStr) },
           { instrument_token: Number(tokenStr) },
-          { 'signal.stock': cleaned },
-          { 'signal.stock': withPrefix },
+          { "signal.stock": cleaned },
+          { "signal.stock": withPrefix },
         ],
       };
       try {
@@ -246,7 +251,9 @@ async function getTokensForSymbols(symbols) {
 
 let warmupDone = false;
 async function ensureHistoricalData() {
-  const historicalCount = await db.collection("historical_data").countDocuments();
+  const historicalCount = await db
+    .collection("historical_data")
+    .countDocuments();
   if (historicalCount === 0) {
     await fetchHistoricalData();
     await loadHistoricalCache();
