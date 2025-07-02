@@ -109,6 +109,42 @@ async function removeStockSymbol(symbol) {
     const tokenStr = String(instrument.instrument_token);
     await db.collection('historical_data').updateOne({}, { $unset: { [tokenStr]: '' } });
     await db.collection('session_data').updateOne({}, { $unset: { [tokenStr]: '' } });
+    await db.collection('historical_session_data').deleteMany({ token: Number(tokenStr) });
+    await db.collection('tick_data').deleteMany({ token: Number(tokenStr) });
+
+    const collections = await db.collections();
+    const keep = [
+      'instruments',
+      'nifty100qualitystocksymbols',
+      'nifty50stocksymbols',
+      'stock_symbols',
+      'historical_data',
+      'session_data',
+      'historical_session_data',
+      'tick_data',
+    ];
+
+    for (const col of collections) {
+      if (keep.includes(col.collectionName)) continue;
+      const query = {
+        $or: [
+          { symbol: cleaned },
+          { symbol: withPrefix },
+          { stock: cleaned },
+          { stock: withPrefix },
+          { tradingsymbol: cleaned },
+          { token: Number(tokenStr) },
+          { instrument_token: Number(tokenStr) },
+          { 'signal.stock': cleaned },
+          { 'signal.stock': withPrefix },
+        ],
+      };
+      try {
+        await col.deleteMany(query);
+      } catch (err) {
+        console.error(`Error cleaning ${col.collectionName}:`, err.message);
+      }
+    }
   }
 }
 
