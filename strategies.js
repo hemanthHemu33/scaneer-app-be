@@ -4,6 +4,7 @@ import {
   calculateSupertrend,
   calculateVWAP,
   getATR,
+  confirmRetest,
 } from "./util.js";
 
 // Default thresholds used by strategy detectors. These can be overridden
@@ -62,14 +63,8 @@ function detectEmaCrossover(candles, _ctx = {}, config = DEFAULT_CONFIG) {
 
 function detectBreakoutRetest(candles) {
   if (candles.length < 7) return null;
-  const last = candles.at(-1);
-  const prev = candles.at(-2);
-  const priorHigh = Math.max(...candles.slice(-6, -1).map((c) => c.high));
-  if (
-    last.close > priorHigh &&
-    prev.high >= priorHigh &&
-    prev.close < priorHigh
-  ) {
+  const breakout = Math.max(...candles.slice(-7, -2).map((c) => c.high));
+  if (confirmRetest(candles.slice(-2), breakout, 'Long')) {
     return { name: "Breakout + Retest", confidence: 0.7 };
   }
   return null;

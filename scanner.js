@@ -10,6 +10,7 @@ import {
   debounceSignal,
   detectAllPatterns,
   calculateExpiryMinutes,
+  confirmRetest,
 } from "./util.js";
 
 import {
@@ -148,6 +149,14 @@ export async function analyzeCandles(
     if (typeof pattern.stopLoss !== "number" || isNaN(pattern.stopLoss)) {
       pattern.stopLoss =
         pattern.direction === "Long" ? last.low : last.high;
+    }
+
+    if (
+      pattern.type === "Breakout" &&
+      !confirmRetest(validCandles.slice(-2), pattern.breakout, pattern.direction)
+    ) {
+      console.log(`[SKIP] ${symbol} - Breakout retest not confirmed`);
+      return null;
     }
 
     if (
