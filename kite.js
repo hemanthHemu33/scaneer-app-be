@@ -1,6 +1,6 @@
 // kite.js
 import { KiteConnect, KiteTicker } from "kiteconnect";
-import { calculateEMA, calculateSupertrend } from "./util.js";
+import { calculateEMA, calculateSupertrend } from "./featureEngine.js";
 import fs from "fs";
 import path from "path";
 import dotenv from "dotenv";
