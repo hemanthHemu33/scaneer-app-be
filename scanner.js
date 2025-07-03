@@ -24,7 +24,8 @@ import { candleHistory, symbolTokenMap } from "./dataEngine.js";
 import { detectGapUpOrDown } from "./strategies.js";
 import { evaluateAllStrategies } from "./strategyEngine.js";
 import { RISK_REWARD_RATIO, calculatePositionSize } from "./positionSizing.js";
-import { validatePreExecution, adjustStopLoss } from "./riskValidator.js";
+import { adjustStopLoss } from "./riskValidator.js";
+import { isSignalValid } from "./riskEngine.js";
 import {
   calculateDynamicStopLoss,
   adjustRiskBasedOnDrawdown,
@@ -592,12 +593,15 @@ export async function analyzeCandles(
     };
     signal.algoSignal = advancedSignal;
 
-    const ok = validatePreExecution(signal, {
+    const ok = isSignalValid(signal, {
       avgAtr: atrValue,
       indexTrend: isUptrend ? 'up' : isDowntrend ? 'down' : 'sideways',
       timeSinceSignal: 0,
       volume: liquidity,
       currentPrice: liveTick ? liveTick.last_price : last.close,
+      marketRegime: marketContext.regime,
+      minATR: FILTERS.atrThreshold,
+      maxATR: FILTERS.maxATR,
     });
     if (!ok) return null;
 

@@ -1,6 +1,6 @@
 // tradeLifecycle.js
 import { placeOrder, cancelOrder, getAllOrders } from './orderExecution.js';
-import { validatePreExecution } from './riskValidator.js';
+import { isSignalValid } from './riskEngine.js';
 import { calculatePositionSize } from './positionSizing.js';
 import {
   checkExposureLimits,
@@ -63,7 +63,7 @@ export async function monitorBracketOrders(slId, targetId, interval = 1000) {
  */
 export async function executeSignal(signal, opts = {}) {
   const symbol = signal.stock || signal.symbol;
-  if (!validatePreExecution(signal, opts.market || {})) return null;
+  if (!isSignalValid(signal, opts.market || {})) return null;
   const tradeValue = signal.entry * (signal.qty || 1);
   const allowed =
     checkExposureLimits({
