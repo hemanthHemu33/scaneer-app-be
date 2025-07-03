@@ -1,3 +1,5 @@
+// STRATEGIES.JS
+
 import {
   calculateEMA,
   calculateRSI,
@@ -64,7 +66,7 @@ function detectEmaCrossover(candles, _ctx = {}, config = DEFAULT_CONFIG) {
 function detectBreakoutRetest(candles) {
   if (candles.length < 7) return null;
   const breakout = Math.max(...candles.slice(-7, -2).map((c) => c.high));
-  if (confirmRetest(candles.slice(-2), breakout, 'Long')) {
+  if (confirmRetest(candles.slice(-2), breakout, "Long")) {
     return { name: "Breakout + Retest", confidence: 0.7 };
   }
   return null;
