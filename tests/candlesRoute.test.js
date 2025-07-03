@@ -23,7 +23,14 @@ const openAIMock = test.mock.module('../openAI.js', {
   namedExports: { fetchAIData: async () => null }
 });
 const kiteMock = test.mock.module('../kite.js', {
-  namedExports: { getAverageVolume: () => 1000 }
+  namedExports: {
+    getAverageVolume: () => 1000,
+    initSession: async () => 'token',
+    kc: { getLTP: async (syms) => ({ [syms[0]]: { last_price: 100, instrument_token: 123 } }) },
+    tickBuffer: {},
+    candleHistory: {},
+    symbolTokenMap: {}
+  }
 });
 
 const { analyzeCandles } = await import('../scanner.js');
