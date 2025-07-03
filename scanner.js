@@ -21,7 +21,8 @@ import {
   historicalCache,
 } from "./kite.js";
 import { candleHistory, symbolTokenMap } from "./dataEngine.js";
-import { evaluateStrategies, detectGapUpOrDown } from "./strategies.js";
+import { detectGapUpOrDown } from "./strategies.js";
+import { evaluateAllStrategies } from "./strategyEngine.js";
 import { RISK_REWARD_RATIO, calculatePositionSize } from "./positionSizing.js";
 import { validatePreExecution, adjustStopLoss } from "./riskValidator.js";
 import {
@@ -498,7 +499,7 @@ export async function analyzeCandles(
     const ma50Val = getMAForSymbol(symbol, 50);
     const { support, resistance } = getSupportResistanceLevels(symbol);
 
-    const stratResults = evaluateStrategies(validCandles, { rvol }, { topN: 5 });
+    const stratResults = evaluateAllStrategies({ candles: validCandles, rvol });
     const filtered = filterStrategiesByRegime(stratResults, marketContext);
     const [topStrategy] = filtered;
     const strategyName = topStrategy ? topStrategy.name : pattern.type;
