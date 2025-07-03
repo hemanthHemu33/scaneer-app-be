@@ -2,7 +2,7 @@ import fs from "fs";
 import dayjs from "dayjs";
 import customParseFormat from "dayjs/plugin/customParseFormat.js";
 import { analyzeCandles } from "./scanner.js";
-import { candleHistory } from "./kite.js";
+import { candleHistory } from "./dataEngine.js";
 import db from "./db.js";
 import { logBacktestReference } from "./auditLogger.js";
 
