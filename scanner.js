@@ -4,9 +4,11 @@ import {
   calculateEMA,
   calculateRSI,
   calculateSupertrend,
+  getATR as getDailyATR,
+} from "./featureEngine.js";
+import {
   // detectPatterns,
   getMAForSymbol,
-  getATR as getDailyATR,
   debounceSignal,
   detectAllPatterns,
   calculateExpiryMinutes,
