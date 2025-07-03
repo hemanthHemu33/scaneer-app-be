@@ -9,6 +9,8 @@ const kiteMock = test.mock.module('../kite.js', {
       supertrend: { signal: 'Buy' }
     }),
     candleHistory: {},
+    historicalCache: {},
+    symbolTokenMap: {},
     getSupportResistanceLevels: () => ({ support: 90, resistance: 110 })
   }
 });

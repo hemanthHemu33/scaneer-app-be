@@ -40,6 +40,8 @@ import {
   supportUserOverrides,
   marketContext,
 } from "./smartStrategySelector.js";
+import { selectTopSignal } from "./signalRanker.js";
+import { logTrade } from "./tradeLogger.js";
 
 const app = express();
 const server = http.createServer(app);
@@ -214,7 +216,8 @@ app.post("/candles", async (req, res) => {
       liveTick
     );
 
-    if (signal) {
+    const bestSignal = signal ? selectTopSignal([signal]) : null;
+    if (bestSignal) {
       const tradeValue = signal.entry * (signal.qty || 1);
       const allowed =
         preventReEntry(symbol) &&
@@ -235,18 +238,19 @@ app.post("/candles", async (req, res) => {
           `Signal for ${symbol} rejected by portfolio rules`
         );
       } else {
-        console.log("🚀 Emitting tradeSignal:", signal);
-        io.emit("tradeSignal", signal);
-        sendSignal(signal); // Send signal to Telegram
-        addSignal(signal);
-        logSignalCreated(signal, {
+        console.log("🚀 Emitting tradeSignal:", bestSignal);
+        io.emit("tradeSignal", bestSignal);
+        sendSignal(bestSignal); // Send signal to Telegram
+        addSignal(bestSignal);
+        logSignalCreated(bestSignal, {
           vix: marketContext.vix,
           regime: marketContext.regime,
           breadth: marketContext.breadth,
         });
-        fetchAIData(signal)
+        logTrade({ symbol, type: 'signal', data: bestSignal });
+        fetchAIData(bestSignal)
           .then((ai) => {
-            signal.ai = ai;
+            bestSignal.ai = ai;
           })
           .catch((err) => console.error("AI enrichment", err));
       }
@@ -254,7 +258,7 @@ app.post("/candles", async (req, res) => {
       console.log("ℹ️ No signal generated for:", symbol);
     }
 
-    res.json({ status: "Processed", signal: signal || null });
+    res.json({ status: "Processed", signal: bestSignal || null });
   } catch (err) {
     console.error("❌ Error processing candles:", err);
     res.status(500).json({ error: "Signal generation failed" });
