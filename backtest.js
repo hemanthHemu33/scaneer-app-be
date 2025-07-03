@@ -29,10 +29,23 @@ for (const inst of instruments) {
 // const sessionData = JSON.parse(
 //   fs.readFileSync("./historical_data.json", "utf-8")
 // );
-const historicalSessionData = await db
+// historical_session_data and session_data contain one document per token
+// Instead of findOne, load all documents and map by token
+const historicalSessionDocs = await db
   .collection("historical_session_data")
-  .findOne({});
-const sessionData = await db.collection("session_data").findOne({});
+  .find({})
+  .toArray();
+const historicalSessionData = {};
+for (const doc of historicalSessionDocs) {
+  historicalSessionData[doc.token] = doc.candles || doc.data || [];
+}
+
+const sessionDocs = await db.collection("session_data").find({}).toArray();
+const sessionData = {};
+for (const doc of sessionDocs) {
+  sessionData[doc.token] = doc.candles || doc.data || [];
+}
+
 const combinedSessionData = { ...historicalSessionData, ...sessionData };
 
 // 🧠 CONFIG
