@@ -26,7 +26,7 @@ let orders = [];
 
 const execMock = test.mock.module('../orderExecution.js', {
   namedExports: {
-    placeOrder: async (variety, order) => {
+    sendOrder: async (variety, order) => {
       const id = `id${placed.length + 1}`;
       placed.push({ variety, order, id });
       orders.push({ order_id: id, status: 'COMPLETE' });

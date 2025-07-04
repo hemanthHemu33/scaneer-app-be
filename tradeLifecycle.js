@@ -1,5 +1,5 @@
 // tradeLifecycle.js
-import { placeOrder, cancelOrder, getAllOrders } from './orderExecution.js';
+import { sendOrder, cancelOrder, getAllOrders } from './orderExecution.js';
 import { isSignalValid } from './riskEngine.js';
 import { calculatePositionSize } from './positionSizing.js';
 import {
@@ -89,7 +89,7 @@ export async function executeSignal(signal, opts = {}) {
     });
   if (qty <= 0) return null;
 
-  const entryOrder = await placeOrder('regular', {
+  const entryOrder = await sendOrder('regular', {
     exchange: 'NSE',
     tradingsymbol: symbol,
     transaction_type: signal.direction === 'Long' ? 'BUY' : 'SELL',
@@ -103,7 +103,7 @@ export async function executeSignal(signal, opts = {}) {
   if (!filled) return null;
 
   const exitType = signal.direction === 'Long' ? 'SELL' : 'BUY';
-  const slOrder = await placeOrder('regular', {
+  const slOrder = await sendOrder('regular', {
     exchange: 'NSE',
     tradingsymbol: symbol,
     transaction_type: exitType,
@@ -113,7 +113,7 @@ export async function executeSignal(signal, opts = {}) {
     trigger_price: signal.stopLoss,
     product: 'MIS',
   });
-  const targetOrder = await placeOrder('regular', {
+  const targetOrder = await sendOrder('regular', {
     exchange: 'NSE',
     tradingsymbol: symbol,
     transaction_type: exitType,
