@@ -1005,10 +1005,12 @@ async function fetchHistoricalData(symbols = stockSymbols) {
 }
 async function loadHistoricalCache() {
   try {
-    historicalCache = await db.collection("historical_data").findOne({});
+    const data = await db.collection("historical_data").findOne({});
+    historicalCache = data || {};
     console.log("✅ historical_data.json loaded into cache");
   } catch (err) {
     console.warn("⚠️ Could not load historical data:", err.message);
+    historicalCache = {};
   }
 }
 fetchHistoricalData().then(() => loadHistoricalCache());
