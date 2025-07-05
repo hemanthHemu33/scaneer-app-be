@@ -1,62 +1,155 @@
-import { calculateEMA, calculateRSI, calculateSupertrend } from './featureEngine.js';
+import {
+  calculateEMA,
+  calculateRSI,
+  calculateSupertrend,
+  calculateVWAP,
+  getATR,
+  computeFeatures,
+} from './featureEngine.js';
+import { detectAllPatterns } from './util.js';
 
-export function strategySupertrend({ candles }) {
+export function strategySupertrend(context = {}) {
+  const { candles = [], features = computeFeatures(candles) } = context;
   if (!Array.isArray(candles) || candles.length < 20) return null;
-  const closes = candles.map(c => c.close);
-  const rsi = calculateRSI(closes, 14);
-  const st = calculateSupertrend(candles, 10);
+
+  const { rsi, supertrend } = features || {};
   const last = candles[candles.length - 1];
-  if (st?.signal === 'Buy' && rsi > 55) {
+
+  if (supertrend?.signal === 'Buy' && rsi > 55) {
+    const entry = last.close;
+    const stopLoss = last.low;
+    const risk = entry - stopLoss;
     return {
-      name: 'Supertrend',
+      entry,
+      stopLoss,
+      target1: entry + risk * 0.75,
+      target2: entry + risk * 1.5,
       direction: 'Long',
-      entry: last.close,
-      stopLoss: last.low,
+      strategy: 'Supertrend',
       confidence: 0.6,
     };
   }
-  if (st?.signal === 'Sell' && rsi < 45) {
+
+  if (supertrend?.signal === 'Sell' && rsi < 45) {
+    const entry = last.close;
+    const stopLoss = last.high;
+    const risk = stopLoss - entry;
     return {
-      name: 'Supertrend',
+      entry,
+      stopLoss,
+      target1: entry - risk * 0.75,
+      target2: entry - risk * 1.5,
       direction: 'Short',
-      entry: last.close,
-      stopLoss: last.high,
+      strategy: 'Supertrend',
       confidence: 0.6,
     };
   }
+
   return null;
 }
 
-export function strategyEMAReversal({ candles }) {
+export function strategyEMAReversal(context = {}) {
+  const { candles = [], features = computeFeatures(candles) } = context;
   if (!Array.isArray(candles) || candles.length < 20) return null;
+
   const closes = candles.map(c => c.close);
   const ema20 = calculateEMA(closes, 20);
   const ema50 = calculateEMA(closes, 50);
   const last = candles[candles.length - 1];
   const prev = candles[candles.length - 2];
+
   if (prev.close < ema20 && last.close > ema20 && ema20 > ema50) {
+    const entry = last.close;
+    const stopLoss = prev.low;
+    const risk = entry - stopLoss;
     return {
-      name: 'EMA Reversal',
+      entry,
+      stopLoss,
+      target1: entry + risk * 0.5,
+      target2: entry + risk * 1,
       direction: 'Long',
-      entry: last.close,
-      stopLoss: prev.low,
+      strategy: 'EMA Reversal',
       confidence: 0.55,
     };
   }
+
   if (prev.close > ema20 && last.close < ema20 && ema20 < ema50) {
+    const entry = last.close;
+    const stopLoss = prev.high;
+    const risk = stopLoss - entry;
     return {
-      name: 'EMA Reversal',
+      entry,
+      stopLoss,
+      target1: entry - risk * 0.5,
+      target2: entry - risk * 1,
       direction: 'Short',
-      entry: last.close,
-      stopLoss: prev.high,
+      strategy: 'EMA Reversal',
       confidence: 0.55,
     };
   }
+
   return null;
 }
 
+export function strategyTripleTop(context = {}) {
+  const { candles = [], features = computeFeatures(candles) } = context;
+  if (!Array.isArray(candles) || candles.length < 7) return null;
+
+  const atr = features?.atr ?? getATR(candles, 14);
+  const patterns = detectAllPatterns(candles, atr, 5);
+  const tripleTop = patterns.find(p => p.type === 'Triple Top');
+  if (!tripleTop) return null;
+
+  if (features?.rsi > 60) return null;
+
+  const entry = tripleTop.breakout;
+  const stopLoss = tripleTop.stopLoss;
+  const risk = stopLoss - entry;
+  return {
+    entry,
+    stopLoss,
+    target1: entry - risk * 0.5,
+    target2: entry - risk,
+    direction: 'Short',
+    strategy: 'Triple Top',
+    confidence: 0.6,
+  };
+}
+
+export function strategyVWAPReversal(context = {}) {
+  const { candles = [], features = computeFeatures(candles) } = context;
+  if (!Array.isArray(candles) || candles.length < 5) return null;
+
+  const atr = features?.atr ?? getATR(candles, 14);
+  const patterns = detectAllPatterns(candles, atr, 5);
+  const pattern = patterns.find(p => p.type === 'VWAP Reversal');
+  if (!pattern) return null;
+
+  const entry = pattern.breakout;
+  const stopLoss = pattern.stopLoss;
+  const risk = Math.abs(entry - stopLoss);
+  const direction = pattern.direction;
+
+  return {
+    entry,
+    stopLoss,
+    target1:
+      direction === 'Long' ? entry + risk * 0.5 : entry - risk * 0.5,
+    target2:
+      direction === 'Long' ? entry + risk : entry - risk,
+    direction,
+    strategy: 'VWAP Reversal',
+    confidence: 0.55,
+  };
+}
+
 export function evaluateAllStrategies(context = {}) {
-  const strategies = [strategySupertrend, strategyEMAReversal];
+  const strategies = [
+    strategySupertrend,
+    strategyEMAReversal,
+    strategyTripleTop,
+    strategyVWAPReversal,
+  ];
   const results = [];
   for (const fn of strategies) {
     const res = fn(context);
