@@ -2,7 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 const mod = await import('../exitManager.js');
-const { setTrailingPercent, applyTrailingSL, forceTimeExit, detectReversalExit, checkExitConditions } = mod;
+const {
+  setTrailingPercent,
+  applyTrailingSL,
+  forceTimeExit,
+  detectReversalExit,
+  checkExitConditions,
+} = mod;
 
 setTrailingPercent(10); // easier to test
 
@@ -28,5 +34,6 @@ test('detectReversalExit finds simple reversal', () => {
 
 test('checkExitConditions returns first matching reason', () => {
   const pos = { side: 'Long', entryPrice: 100, stopLoss: 90, lastPrice: 80 };
-  assert.equal(checkExitConditions(pos), 'trailing');
+  const res = checkExitConditions(pos);
+  assert.deepEqual(res, { shouldExit: true, reason: 'TrailingStop' });
 });

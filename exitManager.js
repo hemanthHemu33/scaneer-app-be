@@ -4,8 +4,9 @@ export function setTrailingPercent(pct) {
   trailingPct = pct;
 }
 
-export function getTrailingStop(entry, direction) {
-  const dist = entry * (trailingPct / 100);
+export function getTrailingStop(entry, direction, atr = 0) {
+  const pctDist = entry * (trailingPct / 100);
+  const dist = atr || pctDist;
   return direction === 'Long' ? entry - dist : entry + dist;
 }
 
@@ -16,14 +17,15 @@ export function getTrailingStop(entry, direction) {
  */
 export function applyTrailingSL(position) {
   if (!position || typeof position.lastPrice !== 'number') return false;
+  const dist = position.atr || (position.entryPrice * (trailingPct / 100));
   if (position.side === 'Long' || position.side === 'long') {
     position.highest = Math.max(position.highest ?? position.entryPrice, position.lastPrice);
-    const sl = position.highest * (1 - trailingPct / 100);
+    const sl = position.highest - dist;
     if (!position.stopLoss || sl > position.stopLoss) position.stopLoss = sl;
     return position.lastPrice <= position.stopLoss;
   }
   position.lowest = Math.min(position.lowest ?? position.entryPrice, position.lastPrice);
-  const sl = position.lowest * (1 + trailingPct / 100);
+  const sl = position.lowest + dist;
   if (!position.stopLoss || sl < position.stopLoss) position.stopLoss = sl;
   return position.lastPrice >= position.stopLoss;
 }
@@ -36,7 +38,7 @@ export function applyTrailingSL(position) {
 export function forceTimeExit(position) {
   if (!position?.openTime) return false;
   const hold = Date.now() - position.openTime;
-  const max = position.maxHoldMs ?? 6 * 60 * 60 * 1000; // default 6h
+  const max = position.maxHoldMs ?? 30 * 60 * 1000; // default 30 min
   return hold >= max;
 }
 
@@ -56,10 +58,10 @@ export function detectReversalExit(position) {
 }
 
 export function checkExitConditions(position) {
-  if (applyTrailingSL(position)) return 'trailing';
-  if (forceTimeExit(position)) return 'time';
-  if (detectReversalExit(position)) return 'reversal';
-  return null;
+  if (applyTrailingSL(position)) return { shouldExit: true, reason: 'TrailingStop' };
+  if (forceTimeExit(position)) return { shouldExit: true, reason: 'TimeBased' };
+  if (detectReversalExit(position)) return { shouldExit: true, reason: 'Reversal' };
+  return { shouldExit: false, reason: null };
 }
 
 export function shouldExit(signal, price, timeHeldMs) {
@@ -68,4 +70,30 @@ export function shouldExit(signal, price, timeHeldMs) {
   if (slHit) return true;
   if (signal.expiresAt && Date.now() > new Date(signal.expiresAt).getTime()) return true;
   return false;
+}
+
+/**
+ * Start periodic exit checks on a collection of active trades.
+ * @param {Iterable|Map} activeTrades - array or Map of open trades
+ * @param {Object} handlers
+ * @param {Function} [handlers.exitTrade]
+ * @param {Function} [handlers.logTradeExit]
+ * @param {number} [handlers.intervalMs]
+ * @returns {NodeJS.Timeout}
+ */
+export function startExitMonitor(
+  activeTrades,
+  { exitTrade, logTradeExit, intervalMs = 60 * 1000 } = {}
+) {
+  if (!activeTrades) return null;
+  return setInterval(() => {
+    const trades = activeTrades instanceof Map ? activeTrades.values() : activeTrades;
+    for (const openTrade of trades) {
+      const exitSignal = checkExitConditions(openTrade);
+      if (exitSignal.shouldExit) {
+        if (exitTrade) exitTrade(openTrade, exitSignal.reason);
+        if (logTradeExit) logTradeExit(openTrade, exitSignal.reason);
+      }
+    }
+  }, intervalMs);
 }
