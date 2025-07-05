@@ -155,6 +155,18 @@ export async function analyzeCandles(
     const features = computeFeatures(validCandles);
     if (!features) return null;
 
+    const context = {
+      symbol,
+      candles: validCandles,
+      features,
+      depth,
+      tick: liveTick,
+      spread,
+      liquidity,
+      totalBuy,
+      totalSell,
+    };
+
     const {
       ema9,
       ema21,
@@ -498,7 +510,7 @@ export async function analyzeCandles(
     const ma50Val = getMAForSymbol(symbol, 50);
     const { support, resistance } = getSupportResistanceLevels(symbol);
 
-    const stratResults = evaluateAllStrategies({ candles: validCandles, rvol });
+    const stratResults = evaluateAllStrategies(context);
     const filtered = filterStrategiesByRegime(stratResults, marketContext);
     const [topStrategy] = filtered;
     const strategyName = topStrategy ? topStrategy.name : pattern.type;
