@@ -84,31 +84,33 @@ export function resetIndicatorCache() {
 
 export function computeFeatures(candles = []) {
   if (!Array.isArray(candles) || candles.length === 0) return null;
+
   const closes = candles.map((c) => c.close);
+  const volumes = candles.map((c) => c.volume || 0);
 
   const ema9 = calculateEMA(closes, 9);
   const ema21 = calculateEMA(closes, 21);
   const ema50 = calculateEMA(closes, 50);
-  const rsi14 = calculateRSI(closes, 14);
-  const atr14 = getATR(candles, 14);
-  const supertrend = calculateSupertrend(candles, 14);
-  const vwap = calculateVWAP(candles);
+  const ema200 = calculateEMA(closes, 200);
+  const rsi = calculateRSI(closes, 14);
+  const atr = getATR(candles, 14);
+  const supertrend = calculateSupertrend(candles, 50);
 
-  const regime =
-    ema9 > ema21 && ema21 > ema50
-      ? "bullish"
-      : ema9 < ema21 && ema21 < ema50
-      ? "bearish"
-      : "neutral";
+  const avgVolume =
+    volumes.length > 1
+      ? volumes.slice(0, -1).reduce((a, b) => a + b, 0) / (volumes.length - 1)
+      : volumes[0] || 0;
+  const rvol = avgVolume ? volumes.at(-1) / avgVolume : 1;
 
   return {
     ema9,
     ema21,
     ema50,
-    rsi14,
-    atr14,
+    ema200,
+    rsi,
+    atr,
     supertrend,
-    vwap,
-    regime,
+    avgVolume,
+    rvol,
   };
 }
