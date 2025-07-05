@@ -170,114 +170,11 @@ app.get("/signals", async (req, res) => {
   }
 });
 
-// 🔥 Enhanced endpoint to process candle data and emit signals
-app.post("/candles", async (req, res) => {
-  const body = req.body;
-  const candles = Array.isArray(body) ? body : body.candles;
-  const marketData = Array.isArray(body) ? null : body.marketData;
-  const overrides = Array.isArray(body) ? null : body.overrides;
-
-  if (!Array.isArray(candles) || candles.length === 0) {
-    return res.status(400).json({ error: "No candles provided" });
-  }
-
-  if (overrides) supportUserOverrides(overrides);
-  if (marketData) {
-    detectMarketRegime(marketData);
-    if (typeof marketData.vix === "number") applyVIXThresholds(marketData.vix);
-    if (Array.isArray(marketData.events))
-      handleEconomicEvents(marketData.events);
-  }
-
-  const token = candles[0]?.symbol || "UNKNOWN";
-  const symbol = token; // Assuming symbol is sent as `symbol` in candles
-  const avgVol = getAverageVolume(token, 20);
-
-  // Temporary placeholders — real-time values can be optionally passed later
-  const depth = null;
-  const totalBuy = 0;
-  const totalSell = 0;
-  const slippage = 0.1;
-  const spread = 0.5;
-  const liquidity = avgVol || 5000; // fallback
-
-  const liveTick = null;
-
-  try {
-    const signal = await analyzeCandles(
-      candles,
-      symbol,
-      depth,
-      totalBuy,
-      totalSell,
-      slippage,
-      spread,
-      liquidity,
-      liveTick
-    );
-
-    const bestSignal = signal ? selectTopSignal([signal]) : null;
-    if (bestSignal) {
-      const tradeValue = signal.entry * (signal.qty || 1);
-      const allowed =
-        preventReEntry(symbol) &&
-        checkExposureLimits({
-          symbol,
-          tradeValue,
-          sector: signal.sector || "GEN",
-          totalCapital: TOTAL_CAPITAL,
-        }) &&
-        resolveSignalConflicts({
-          symbol,
-          side: signal.direction === "Long" ? "long" : "short",
-          strategy: signal.pattern,
-        });
-
-      if (!allowed) {
-        notifyExposureEvents(
-          `Signal for ${symbol} rejected by portfolio rules`
-        );
-      } else {
-        console.log("🚀 Emitting tradeSignal:", bestSignal);
-        io.emit("tradeSignal", bestSignal);
-        sendSignal(bestSignal); // Send signal to Telegram
-        addSignal(bestSignal);
-        logSignalCreated(bestSignal, {
-          vix: marketContext.vix,
-          regime: marketContext.regime,
-          breadth: marketContext.breadth,
-        });
-        logTrade({ symbol, type: 'signal', data: bestSignal });
-        fetchAIData(bestSignal)
-          .then((ai) => {
-            bestSignal.ai = ai;
-          })
-          .catch((err) => console.error("AI enrichment", err));
-      }
-    } else {
-      console.log("ℹ️ No signal generated for:", symbol);
-    }
-
-    res.json({ status: "Processed", signal: bestSignal || null });
-  } catch (err) {
-    console.error("❌ Error processing candles:", err);
-    res.status(500).json({ error: "Signal generation failed" });
-  }
-});
 
 app.get("/signal-history", (req, res) => {
   res.json(getSignalHistory());
 });
 
-app.post("/subscribe", (req, res) => {
-  const { tokens } = req.body;
-  if (Array.isArray(tokens) && tokens.length > 0) {
-    updateInstrumentTokens(tokens);
-    res.json({ status: "Subscribed", tokens });
-  } else {
-    res.status(400).json({ error: "Invalid tokens" });
-  }
-});
 
 app.post("/set-interval", (req, res) => {
   const { interval } = req.body;
@@ -301,28 +198,7 @@ app.post("/fetch-intraday-data", async (req, res) => {
   }
 });
 
-app.get("/support-resistance/:symbol", (req, res) => {
-  const { symbol } = req.params;
-  if (!symbol) return res.status(400).json({ error: "Missing symbol" });
-  try {
-    const levels = getSupportResistanceLevels(symbol);
-    res.json({ status: "success", ...levels });
-  } catch (err) {
-    console.error("❌ Support/resistance error:", err.message);
-    res.status(500).json({ error: "Failed to compute levels" });
-  }
-});
 
-app.get("/rebuild-3min/:token", async (req, res) => {
-  const { token } = req.params;
-  try {
-    const candles = await rebuildThreeMinCandlesFromOneMin(token);
-    res.json({ status: "success", candles });
-  } catch (err) {
-    console.error("❌ 3m rebuild error:", err.message);
-    res.status(500).json({ error: "Failed to rebuild candles" });
-  }
-});
 
 app.get("/kite-redirect", async (req, res) => {
   const requestToken = req.query.request_token;
