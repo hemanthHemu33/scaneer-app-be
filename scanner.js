@@ -1,11 +1,6 @@
 // scanner.js
 
-import {
-  calculateEMA,
-  calculateRSI,
-  calculateSupertrend,
-  getATR as getDailyATR,
-} from "./featureEngine.js";
+import { computeFeatures } from "./featureEngine.js";
 import {
   // detectPatterns,
   getMAForSymbol,
@@ -157,20 +152,20 @@ export async function analyzeCandles(
       (c) => c.open && c.high && c.low && c.close
     );
     if (validCandles.length < 5) return null;
-    const volumes = validCandles.map((c) => c.volume || 0);
-    const avgVolume = volumes.slice(0, -1).reduce((a, b) => a + b, 0) / Math.max(volumes.length - 1, 1);
-    const rvol = avgVolume ? volumes[volumes.length - 1] / avgVolume : 1;
+    const features = computeFeatures(validCandles);
+    if (!features) return null;
 
-
+    const {
+      ema9,
+      ema21,
+      ema50,
+      ema200,
+      rsi,
+      supertrend,
+      atr: atrValue = 1,
+      rvol,
+    } = features;
     const last = validCandles.at(-1);
-    const closePrices = validCandles.map((c) => c.close);
-    const ema9 = calculateEMA(closePrices, 9);
-    const ema21 = calculateEMA(closePrices, 21);
-    const ema50 = calculateEMA(closePrices, 50);
-    const ema200 = calculateEMA(closePrices, 200);
-    const rsi = calculateRSI(closePrices, 14);
-    const supertrend = calculateSupertrend(validCandles, 50);
-    const atrValue = getDailyATR(validCandles) || 1;
     const expiryMinutes = calculateExpiryMinutes({ atr: atrValue, rvol });
     const expiresAt = new Date(Date.now() + expiryMinutes * 60 * 1000).toISOString();
     const quality = signalQualityScore({ atr: atrValue, rvol });

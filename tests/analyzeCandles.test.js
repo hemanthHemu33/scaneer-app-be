@@ -20,19 +20,23 @@ const kiteMock = test.mock.module('../kite.js', {
 
 const featureMock = test.mock.module('../featureEngine.js', {
   namedExports: {
-    calculateEMA: (prices, period) => {
-      if (period === 9) return 105;
-      if (period === 21) return 100;
-      if (period === 50) return 95;
-      if (period === 200) return 90;
-      return 100;
-    },
+    calculateEMA: () => 100,
     calculateRSI: () => 60,
     calculateSupertrend: () => ({ signal: 'Buy' }),
     calculateVWAP: () => 100,
     getATR: () => 2.5,
-    resetIndicatorCache: () => {},
-    computeFeatures: () => ({})
+    computeFeatures: () => ({
+      ema9: 105,
+      ema21: 100,
+      ema50: 95,
+      ema200: 90,
+      rsi: 60,
+      atr: 2.5,
+      supertrend: { signal: 'Buy' },
+      avgVolume: 100,
+      rvol: 1.2
+    }),
+    resetIndicatorCache: () => {}
   }
 });
 
