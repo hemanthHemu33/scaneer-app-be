@@ -16,10 +16,9 @@ import {
 import {
   getHigherTimeframeData,
   getSupportResistanceLevels,
-  candleHistory,
-  symbolTokenMap,
   historicalCache,
 } from "./kite.js";
+import { candleHistory, symbolTokenMap } from "./dataEngine.js";
 import { evaluateStrategies, detectGapUpOrDown } from "./strategies.js";
 import { RISK_REWARD_RATIO, calculatePositionSize } from "./positionSizing.js";
 import { validatePreExecution, adjustStopLoss } from "./riskValidator.js";
