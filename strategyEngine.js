@@ -56,11 +56,9 @@ export function strategyEMAReversal({ candles }) {
 }
 
 export function evaluateAllStrategies(context = {}) {
-  const strategies = [strategySupertrend, strategyEMAReversal];
-  const results = [];
-  for (const fn of strategies) {
-    const res = fn(context);
-    if (res) results.push(res);
-  }
-  return results;
+  return [
+    strategySupertrend(context),
+    strategyEMAReversal(context),
+    // Add more strategy calls here
+  ].filter(Boolean);
 }
