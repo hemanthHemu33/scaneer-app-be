@@ -1,7 +1,7 @@
 // orderExecutor.js
 import { KiteConnect } from "kiteconnect";
 import dotenv from "dotenv";
-import { logError } from "./kite.js"; // or move logError to a common logger.js
+const logError = (ctx, err) => console.error(`[${ctx}]`, err?.message || err);
 import { symbolTokenMap, historicalCache } from "./kite.js"; // to access token mapping and cache
 import { calculateDynamicStopLoss } from "./dynamicRiskModel.js";
 
@@ -257,3 +257,30 @@ export async function placeOrder(signal, maxRetries = 3) {
     ? { entryId: entry.order_id, slId: slOrder.order_id, targetId: tgtOrder.order_id }
     : null;
 }
+
+// --- Execution facade ---
+export const openTrades = new Map();
+
+/**
+ * Send trading signal to execution layer.
+ * In live mode uses placeOrder; in tests/sim mode just logs and tracks.
+ * @param {Object} signal
+ * @param {Object} [opts]
+ * @param {boolean} [opts.simulate]
+ * @returns {Promise<Object|null>}
+ */
+export async function sendToExecution(signal, opts = {}) {
+  const simulate = opts.simulate ?? process.env.NODE_ENV === 'test';
+  if (simulate) {
+    const simId = `SIM-${Date.now()}`;
+    openTrades.set(simId, { signal, status: 'SIMULATED' });
+    console.log(`[SIM] Executing signal for ${signal.stock || signal.symbol}`);
+    return { entryId: simId, slId: simId, targetId: simId };
+  }
+  const orders = await placeOrder(signal);
+  if (orders) {
+    openTrades.set(orders.entryId, { signal, status: 'OPEN', ...orders });
+  }
+  return orders;
+}
+
