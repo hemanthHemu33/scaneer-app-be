@@ -190,13 +190,6 @@ export async function analyzeCandles(
       return null;
     }
 
-    if (atrValue < filters.atrThreshold) return null;
-    if (atrValue > filters.maxATR) {
-      console.log(
-        `[SKIP] ${symbol} - ATR ${atrValue.toFixed(2)} exceeds limit`
-      );
-      return null;
-    }
 
     const possiblePatterns = detectAllPatterns(validCandles, atrValue);
     if (!possiblePatterns || possiblePatterns.length === 0) return null;
@@ -480,13 +473,6 @@ export async function analyzeCandles(
       (pattern.direction === "Long" ? 1 : -1) * (rrMultiplier * 0.5) * baseRisk;
     let target2 =
       entry + (pattern.direction === "Long" ? 1 : -1) * rrMultiplier * baseRisk;
-
-    const rr = Math.abs((target2 - entry) / baseRisk);
-    if (rr < RISK_REWARD_RATIO) {
-      console.log(`[SKIP] ${symbol} - R:R below 1:${RISK_REWARD_RATIO}. RR = ${rr.toFixed(2)}`);
-      return null;
-    }
-
     // Adjustments from live tick data
     if (liveTick) {
       const buyPressure = liveTick.total_buy_quantity || 0;
@@ -612,6 +598,7 @@ export async function analyzeCandles(
       marketRegime: marketContext.regime,
       minATR: FILTERS.atrThreshold,
       maxATR: FILTERS.maxATR,
+      minRR: RISK_REWARD_RATIO,
     });
     if (!ok) return null;
 
