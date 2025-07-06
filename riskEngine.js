@@ -35,6 +35,8 @@ export function isSignalValid(signal, ctx = {}) {
   const maxTrades = ctx.maxTradesPerDay ?? riskState.maxTradesPerDay;
   if (riskState.tradeCount >= maxTrades) return false;
 
+  if (signal.expiresAt && now > new Date(signal.expiresAt).getTime()) return false;
+
   const rr = validateRR({
     strategy: signal.algoSignal?.strategy || signal.pattern,
     entry: signal.entry,
@@ -43,6 +45,7 @@ export function isSignalValid(signal, ctx = {}) {
     winrate: ctx.winrate || 0,
   });
   if (!rr.valid) return false;
+  if (typeof ctx.minRR === 'number' && rr.rr < ctx.minRR) return false;
 
   if (typeof ctx.minATR === 'number' && signal.atr < ctx.minATR) return false;
   if (typeof ctx.maxATR === 'number' && signal.atr > ctx.maxATR) return false;
