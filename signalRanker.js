@@ -1,4 +1,5 @@
 import { getStrategyHitRate, timeOfDayScore } from './confidence.js';
+import { marketContext } from './smartStrategySelector.js';
 
 function confidenceLevelScore(level) {
   if (typeof level === 'number') return Math.max(0, Math.min(level, 1));
@@ -10,6 +11,40 @@ function patternStrengthScore(strength) {
   if (typeof strength === 'number') return Math.max(0, Math.min(strength, 1));
   const map = { strong: 1, medium: 0.6, weak: 0.3 };
   return map[(strength || '').toLowerCase()] ?? 0.5;
+}
+
+function marketRegimeScore(signal, ctx = marketContext) {
+  const reg = ctx.regime || 'sideways';
+  const pat = (signal.pattern || '').toLowerCase();
+  if (reg === 'trending') {
+    if (pat.includes('trend') || pat.includes('momentum') || pat.includes('breakout')) return 1;
+    if (pat.includes('reversion') || pat.includes('mean')) return 0.4;
+    if (pat.includes('scalp')) return 0.5;
+    return 0.6;
+  }
+  if (reg === 'choppy') {
+    if (pat.includes('reversion') || pat.includes('scalp')) return 1;
+    if (pat.includes('breakout')) return 0.5;
+    if (pat.includes('trend') || pat.includes('momentum')) return 0.3;
+    return 0.6;
+  }
+  return 0.7;
+}
+
+function volatilityFitScore(atr, ctx = marketContext) {
+  const vol = ctx.volatility || 'normal';
+  if (!atr) return 0.5;
+  if (vol === 'high') {
+    if (atr >= 2) return 1;
+    if (atr >= 1.2) return 0.8;
+    return 0.4;
+  }
+  if (vol === 'low') {
+    if (atr <= 1) return 1;
+    if (atr <= 2) return 0.7;
+    return 0.3;
+  }
+  return 0.8;
 }
 
 function rrPotentialScore(signal) {
@@ -32,13 +67,17 @@ function scoreSignal(signal = {}) {
       : getStrategyHitRate(signal.stock || '', signal.pattern || '');
   const rrScore = rrPotentialScore(signal);
   const patternScore = patternStrengthScore(signal.patternStrength);
+  const regimeScore = marketRegimeScore(signal);
+  const volScore = volatilityFitScore(signal.atr);
 
   return (
-    confScore * 0.3 +
-    todScore * 0.1 +
+    confScore * 0.25 +
     hitRate * 0.25 +
-    rrScore * 0.2 +
-    patternScore * 0.15
+    rrScore * 0.15 +
+    patternScore * 0.1 +
+    regimeScore * 0.15 +
+    volScore * 0.1 +
+    todScore * 0.1
   );
 }
 

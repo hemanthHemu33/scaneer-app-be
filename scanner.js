@@ -1,11 +1,6 @@
 // scanner.js
 
-import {
-  calculateEMA,
-  calculateRSI,
-  calculateSupertrend,
-  getATR as getDailyATR,
-} from "./featureEngine.js";
+import { computeFeatures } from "./featureEngine.js";
 import {
   // detectPatterns,
   getMAForSymbol,
@@ -157,20 +152,32 @@ export async function analyzeCandles(
       (c) => c.open && c.high && c.low && c.close
     );
     if (validCandles.length < 5) return null;
-    const volumes = validCandles.map((c) => c.volume || 0);
-    const avgVolume = volumes.slice(0, -1).reduce((a, b) => a + b, 0) / Math.max(volumes.length - 1, 1);
-    const rvol = avgVolume ? volumes[volumes.length - 1] / avgVolume : 1;
+    const features = computeFeatures(validCandles);
+    if (!features) return null;
 
+    const context = {
+      symbol,
+      candles: validCandles,
+      features,
+      depth,
+      tick: liveTick,
+      spread,
+      liquidity,
+      totalBuy,
+      totalSell,
+    };
 
+    const {
+      ema9,
+      ema21,
+      ema50,
+      ema200,
+      rsi,
+      supertrend,
+      atr: atrValue = 1,
+      rvol,
+    } = features;
     const last = validCandles.at(-1);
-    const closePrices = validCandles.map((c) => c.close);
-    const ema9 = calculateEMA(closePrices, 9);
-    const ema21 = calculateEMA(closePrices, 21);
-    const ema50 = calculateEMA(closePrices, 50);
-    const ema200 = calculateEMA(closePrices, 200);
-    const rsi = calculateRSI(closePrices, 14);
-    const supertrend = calculateSupertrend(validCandles, 50);
-    const atrValue = getDailyATR(validCandles) || 1;
     const expiryMinutes = calculateExpiryMinutes({ atr: atrValue, rvol });
     const expiresAt = new Date(Date.now() + expiryMinutes * 60 * 1000).toISOString();
     const quality = signalQualityScore({ atr: atrValue, rvol });
@@ -183,13 +190,6 @@ export async function analyzeCandles(
       return null;
     }
 
-    if (atrValue < filters.atrThreshold) return null;
-    if (atrValue > filters.maxATR) {
-      console.log(
-        `[SKIP] ${symbol} - ATR ${atrValue.toFixed(2)} exceeds limit`
-      );
-      return null;
-    }
 
     const possiblePatterns = detectAllPatterns(validCandles, atrValue);
     if (!possiblePatterns || possiblePatterns.length === 0) return null;
@@ -473,13 +473,6 @@ export async function analyzeCandles(
       (pattern.direction === "Long" ? 1 : -1) * (rrMultiplier * 0.5) * baseRisk;
     let target2 =
       entry + (pattern.direction === "Long" ? 1 : -1) * rrMultiplier * baseRisk;
-
-    const rr = Math.abs((target2 - entry) / baseRisk);
-    if (rr < RISK_REWARD_RATIO) {
-      console.log(`[SKIP] ${symbol} - R:R below 1:${RISK_REWARD_RATIO}. RR = ${rr.toFixed(2)}`);
-      return null;
-    }
-
     // Adjustments from live tick data
     if (liveTick) {
       const buyPressure = liveTick.total_buy_quantity || 0;
@@ -503,7 +496,7 @@ export async function analyzeCandles(
     const ma50Val = getMAForSymbol(symbol, 50);
     const { support, resistance } = getSupportResistanceLevels(symbol);
 
-    const stratResults = evaluateAllStrategies({ candles: validCandles, rvol });
+    const stratResults = evaluateAllStrategies(context);
     const filtered = filterStrategiesByRegime(stratResults, marketContext);
     const [topStrategy] = filtered;
     const strategyName = topStrategy ? topStrategy.name : pattern.type;
@@ -605,6 +598,7 @@ export async function analyzeCandles(
       marketRegime: marketContext.regime,
       minATR: FILTERS.atrThreshold,
       maxATR: FILTERS.maxATR,
+      minRR: RISK_REWARD_RATIO,
     });
     if (!ok) return null;
 

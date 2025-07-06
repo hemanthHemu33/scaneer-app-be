@@ -10,6 +10,12 @@ import { sendSignal } from "./telegram.js";
 import { fetchAIData } from "./openAI.js";
 import { addSignal } from "./signalManager.js";
 import { logSignalCreated } from "./auditLogger.js";
+import {
+  checkExposureLimits,
+  preventReEntry,
+  resolveSignalConflicts,
+  notifyExposureEvents,
+} from "./portfolioContext.js";
 dotenv.config();
 
 import db from "./db.js"; // 🧠 Import database module for future use
@@ -20,6 +26,7 @@ const __dirname = path.dirname(__filename);
 const apiKey = process.env.KITE_API_KEY;
 const apiSecret = process.env.KITE_API_SECRET;
 const kc = new KiteConnect({ api_key: apiKey });
+const TOTAL_CAPITAL = Number(process.env.TOTAL_CAPITAL) || 100000;
 
 const instruments = await db.collection("instruments").find({}).toArray();
 
@@ -814,6 +821,25 @@ async function emitUnifiedSignal(signal, source, io) {
   }
   lastSignalMap[key] = now;
   if (!checkRisk(signal)) return;
+  const symbol = signal.stock || signal.symbol;
+  const tradeValue = signal.entry * (signal.qty || 1);
+  const allowed =
+    preventReEntry(symbol) &&
+    checkExposureLimits({
+      symbol,
+      tradeValue,
+      sector: signal.sector || "GEN",
+      totalCapital: TOTAL_CAPITAL,
+    }) &&
+    resolveSignalConflicts({
+      symbol,
+      side: signal.direction === "Long" ? "long" : "short",
+      strategy: signal.pattern,
+    });
+  if (!allowed) {
+    notifyExposureEvents(`Signal for ${symbol} rejected by portfolio rules`);
+    return;
+  }
   console.log(`🚀 Emitting ${source} Signal:`, signal);
   io.emit("tradeSignal", signal);
   logTrade(signal);
