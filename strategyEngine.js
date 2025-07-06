@@ -151,9 +151,14 @@ export function evaluateAllStrategies(context = {}) {
     strategyVWAPReversal,
   ];
   const results = [];
+  const symbol = context.symbol || 'UNKNOWN';
+  const ts = context.candles?.at(-1)?.timestamp || Date.now();
   for (const fn of strategies) {
     const res = fn(context);
-    if (res) results.push(res);
+    if (res) {
+      res.signalId = `${symbol}-${res.strategy}-${ts}`;
+      results.push(res);
+    }
   }
   return results;
 }
