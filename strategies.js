@@ -6,8 +6,8 @@ import {
   calculateSupertrend,
   calculateVWAP,
   getATR,
-  confirmRetest,
-} from "./util.js";
+} from "./featureEngine.js";
+import { confirmRetest } from "./util.js";
 
 // Default thresholds used by strategy detectors. These can be overridden
 // via the optional `config` parameter in `evaluateStrategies`.

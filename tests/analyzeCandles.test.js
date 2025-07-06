@@ -18,7 +18,7 @@ const kiteMock = test.mock.module('../kite.js', {
   }
 });
 
-const utilMock = test.mock.module('../util.js', {
+const featureMock = test.mock.module('../featureEngine.js', {
   namedExports: {
     calculateEMA: (prices, period) => {
       if (period === 9) return 105;
@@ -30,8 +30,15 @@ const utilMock = test.mock.module('../util.js', {
     calculateRSI: () => 60,
     calculateSupertrend: () => ({ signal: 'Buy' }),
     calculateVWAP: () => 100,
-    getMAForSymbol: () => 100,
     getATR: () => 2.5,
+    resetIndicatorCache: () => {},
+    computeFeatures: () => ({})
+  }
+});
+
+const utilMock = test.mock.module('../util.js', {
+  namedExports: {
+    getMAForSymbol: () => 100,
     calculateExpiryMinutes: () => 10,
     debounceSignal: () => true,
     confirmRetest: () => true,
@@ -85,6 +92,7 @@ test('analyzeCandles returns a signal for valid data', async () => {
   assert.equal(signal.support, 90);
   assert.equal(signal.resistance, 110);
   kiteMock.restore();
+  featureMock.restore();
   utilMock.restore();
   dbMock.restore();
 });

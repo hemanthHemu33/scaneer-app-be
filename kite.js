@@ -1,6 +1,6 @@
 // kite.js
 import { KiteConnect, KiteTicker } from "kiteconnect";
-import { calculateEMA, calculateSupertrend } from "./util.js";
+import { calculateEMA, calculateSupertrend } from "./featureEngine.js";
 import fs from "fs";
 import path from "path";
 import dotenv from "dotenv";
@@ -1005,10 +1005,12 @@ async function fetchHistoricalData(symbols = stockSymbols) {
 }
 async function loadHistoricalCache() {
   try {
-    historicalCache = await db.collection("historical_data").findOne({});
+    const data = await db.collection("historical_data").findOne({});
+    historicalCache = data || {};
     console.log("✅ historical_data.json loaded into cache");
   } catch (err) {
     console.warn("⚠️ Could not load historical data:", err.message);
+    historicalCache = {};
   }
 }
 fetchHistoricalData().then(() => loadHistoricalCache());

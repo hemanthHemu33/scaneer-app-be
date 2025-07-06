@@ -4,9 +4,11 @@ import {
   calculateEMA,
   calculateRSI,
   calculateSupertrend,
+  getATR as getDailyATR,
+} from "./featureEngine.js";
+import {
   // detectPatterns,
   getMAForSymbol,
-  getATR as getDailyATR,
   debounceSignal,
   detectAllPatterns,
   calculateExpiryMinutes,
@@ -19,9 +21,14 @@ import {
   historicalCache,
 } from "./kite.js";
 import { candleHistory, symbolTokenMap } from "./dataEngine.js";
-import { evaluateStrategies, detectGapUpOrDown } from "./strategies.js";
+import { detectGapUpOrDown } from "./strategies.js";
+import { evaluateAllStrategies } from "./strategyEngine.js";
 import { RISK_REWARD_RATIO, calculatePositionSize } from "./positionSizing.js";
-import { validatePreExecution, adjustStopLoss } from "./riskValidator.js";
+import { adjustStopLoss } from "./riskValidator.js";
+import { isSignalValid } from "./riskEngine.js";
+import { startExitMonitor } from "./exitManager.js";
+import { openPositions, recordExit } from "./portfolioContext.js";
+import { logTrade } from "./tradeLogger.js";
 import {
   calculateDynamicStopLoss,
   adjustRiskBasedOnDrawdown,
@@ -496,7 +503,7 @@ export async function analyzeCandles(
     const ma50Val = getMAForSymbol(symbol, 50);
     const { support, resistance } = getSupportResistanceLevels(symbol);
 
-    const stratResults = evaluateStrategies(validCandles, { rvol }, { topN: 5 });
+    const stratResults = evaluateAllStrategies({ candles: validCandles, rvol });
     const filtered = filterStrategiesByRegime(stratResults, marketContext);
     const [topStrategy] = filtered;
     const strategyName = topStrategy ? topStrategy.name : pattern.type;
@@ -589,12 +596,15 @@ export async function analyzeCandles(
     };
     signal.algoSignal = advancedSignal;
 
-    const ok = validatePreExecution(signal, {
+    const ok = isSignalValid(signal, {
       avgAtr: atrValue,
       indexTrend: isUptrend ? 'up' : isDowntrend ? 'down' : 'sideways',
       timeSinceSignal: 0,
       volume: liquidity,
       currentPrice: liveTick ? liveTick.last_price : last.close,
+      marketRegime: marketContext.regime,
+      minATR: FILTERS.atrThreshold,
+      maxATR: FILTERS.maxATR,
     });
     if (!ok) return null;
 
@@ -610,4 +620,16 @@ export async function analyzeCandles(
 
 export function getSignalHistory() {
   return signalHistory;
+}
+
+function handleExit(trade, reason) {
+  recordExit(trade.symbol);
+  logTrade({ symbol: trade.symbol, reason, event: 'exit' });
+}
+
+if (process.env.NODE_ENV !== 'test') {
+  startExitMonitor(openPositions, {
+    exitTrade: handleExit,
+    logTradeExit: handleExit,
+  });
 }
