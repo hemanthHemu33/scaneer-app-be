@@ -1,5 +1,8 @@
 // positionSizing.js
 
+import { calculateDynamicStopLoss, adjustRiskBasedOnDrawdown } from './dynamicRiskModel.js';
+import { adjustStopLoss } from './riskValidator.js';
+
 // Zerodha intraday margin (approx. 20% of trade value)
 const ZERODHA_INTRADAY_MARGIN = 0.2;
 
@@ -89,5 +92,80 @@ export function calculatePositionSize({
 
   return qty > 0 ? qty : lotSize;
 }
+
+/**
+ * Calculate trade parameters including stop loss, quantity and targets.
+ * Handles dynamic and fallback stop losses, RR based target calculation
+ * and drawdown based quantity adjustment.
+ *
+ * @param {Object} opts
+ * @param {number} opts.entry       Trade entry price
+ * @param {number} [opts.stopLoss]  Pattern provided stop loss
+ * @param {'Long'|'Short'} opts.direction Trade direction
+ * @param {number} opts.atr         Current ATR value
+ * @param {number} opts.capital     Trading capital
+ * @param {number} [opts.drawdown]  Current drawdown percentage (0-1)
+ * @returns {Object} { stopLoss, qty, target1, target2 }
+ */
+export function calculateTradeParameters({
+  entry,
+  stopLoss,
+  direction,
+  atr,
+  capital,
+  drawdown = 0,
+}) {
+  const dynamicSL = calculateDynamicStopLoss({ atr, entry, direction });
+
+  let finalSL = dynamicSL;
+
+  if (typeof stopLoss === 'number') {
+    const patternSL = stopLoss;
+    const distDyn = Math.abs(entry - dynamicSL);
+    const distPat = Math.abs(entry - patternSL);
+    finalSL =
+      direction === 'Long'
+        ? Math.max(finalSL, patternSL)
+        : Math.min(finalSL, patternSL);
+    if (distPat < distDyn) finalSL = patternSL;
+  }
+
+  if (
+    (direction === 'Long' && finalSL >= entry) ||
+    (direction === 'Short' && finalSL <= entry)
+  ) {
+    finalSL = dynamicSL;
+  }
+
+  finalSL = adjustStopLoss({
+    price: entry,
+    stopLoss: finalSL,
+    direction,
+    atr,
+  });
+
+  const baseRisk = Math.abs(entry - finalSL);
+  const riskAmount = capital * 0.01;
+  let qty = calculatePositionSize({
+    capital,
+    risk: riskAmount,
+    slPoints: baseRisk,
+    price: entry,
+    volatility: atr,
+    lotSize: 1,
+    utilizationCap: 1,
+  });
+
+  qty = adjustRiskBasedOnDrawdown({ drawdown, lotSize: qty });
+
+  const rrMultiplier = atr > 2 ? RISK_REWARD_RATIO + 0.5 : RISK_REWARD_RATIO;
+  const target1 =
+    entry + (direction === 'Long' ? 1 : -1) * (rrMultiplier * 0.5) * baseRisk;
+  const target2 =
+    entry + (direction === 'Long' ? 1 : -1) * rrMultiplier * baseRisk;
+
+  return { stopLoss: finalSL, qty, target1, target2 };
+}
+
 
 
