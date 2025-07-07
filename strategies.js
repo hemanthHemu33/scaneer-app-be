@@ -4,8 +4,9 @@ import {
   calculateSupertrend,
   calculateVWAP,
   getATR,
+  computeFeatures,
 } from "./featureEngine.js";
-import { confirmRetest } from "./util.js";
+import { confirmRetest, detectAllPatterns } from "./util.js";
 
 // Default thresholds used by strategy detectors. These can be overridden
 // via the optional `config` parameter in `evaluateStrategies`.
@@ -320,6 +321,64 @@ export function detectGapUpOrDown({ dailyHistory, sessionCandles }) {
       stopLoss: yesterdayClose,
     };
   return null;
+}
+
+export function detectAndScorePattern(context = {}) {
+  const { candles = [], features = computeFeatures(candles) } = context;
+  if (!Array.isArray(candles) || candles.length < 5) return null;
+
+  const { ema9, ema21, ema200, rsi } = features;
+  const patterns = detectAllPatterns(candles, features.atr, 5);
+  if (!patterns || patterns.length === 0) return null;
+
+  let best = null;
+  let bestScore = 0;
+  for (const p of patterns) {
+    const score = (p.strength || 1) *
+      (p.confidence === 'High' ? 1 : p.confidence === 'Medium' ? 0.6 : 0.3);
+    if (score > bestScore) {
+      best = p;
+      bestScore = score;
+    }
+  }
+  if (!best) return null;
+
+  const last = candles.at(-1);
+  if (typeof best.breakout !== 'number' || isNaN(best.breakout)) {
+    best.breakout = last.close;
+  }
+  if (typeof best.stopLoss !== 'number' || isNaN(best.stopLoss)) {
+    best.stopLoss =
+      best.direction === 'Long' ? last.low : last.high;
+  }
+
+  if (
+    best.type === 'Breakout' &&
+    !confirmRetest(candles.slice(-2), best.breakout, best.direction)
+  ) {
+    return null;
+  }
+
+  if (
+    (best.direction === 'Long' && rsi > 75) ||
+    (best.direction === 'Short' && rsi < 25)
+  ) {
+    return null;
+  }
+
+  if (best.type === 'VWAP Reversal') {
+    const slope = ema9 - ema21;
+    if (Math.abs(slope) < 0.05) return null;
+  }
+
+  if (
+    (best.direction === 'Long' && last.close < ema200) ||
+    (best.direction === 'Short' && last.close > ema200)
+  ) {
+    return null;
+  }
+
+  return best;
 }
 
 function detectVwapBounce(candles) {

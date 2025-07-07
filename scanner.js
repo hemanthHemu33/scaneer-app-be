@@ -5,9 +5,7 @@ import {
   // detectPatterns,
   getMAForSymbol,
   debounceSignal,
-  detectAllPatterns,
   calculateExpiryMinutes,
-  confirmRetest,
 } from "./util.js";
 
 import {
@@ -16,7 +14,7 @@ import {
   historicalCache,
 } from "./kite.js";
 import { candleHistory, symbolTokenMap } from "./dataEngine.js";
-import { detectGapUpOrDown } from "./strategies.js";
+import { detectGapUpOrDown, detectAndScorePattern } from "./strategies.js";
 import { evaluateAllStrategies } from "./strategyEngine.js";
 import { RISK_REWARD_RATIO, calculatePositionSize } from "./positionSizing.js";
 import { adjustStopLoss } from "./riskValidator.js";
@@ -192,66 +190,8 @@ export async function analyzeCandles(
     }
 
 
-    const possiblePatterns = detectAllPatterns(validCandles, atrValue);
-    if (!possiblePatterns || possiblePatterns.length === 0) return null;
-
-    // 🗳️ Pick best pattern
-    let pattern = null;
-    let bestScore = 0;
-    for (const p of possiblePatterns) {
-      const score =
-        (p.strength || 1) *
-        (p.confidence === "High" ? 1 : p.confidence === "Medium" ? 0.6 : 0.3);
-      if (score > bestScore) {
-        pattern = p;
-        bestScore = score;
-      }
-    }
-
+    const pattern = detectAndScorePattern({ candles: validCandles, features });
     if (!pattern) return null;
-
-    // Fallback breakout/stopLoss if missing
-    if (typeof pattern.breakout !== "number" || isNaN(pattern.breakout)) {
-      pattern.breakout = last.close;
-    }
-    if (typeof pattern.stopLoss !== "number" || isNaN(pattern.stopLoss)) {
-      pattern.stopLoss =
-        pattern.direction === "Long" ? last.low : last.high;
-    }
-
-    if (
-      pattern.type === "Breakout" &&
-      !confirmRetest(validCandles.slice(-2), pattern.breakout, pattern.direction)
-    ) {
-      console.log(`[SKIP] ${symbol} - Breakout retest not confirmed`);
-      return null;
-    }
-
-    if (
-      (pattern.direction === "Long" && rsi > 75) ||
-      (pattern.direction === "Short" && rsi < 25)
-    ) {
-      console.log(`[SKIP] ${symbol} - RSI ${rsi.toFixed(2)} too extreme`);
-      return null;
-    }
-
-    // VWAP Reversal flat EMA rejection
-    if (pattern.type === "VWAP Reversal") {
-      const slope = ema9 - ema21;
-      if (Math.abs(slope) < 0.05) {
-        console.log(`[SKIP] ${symbol} - VWAP Reversal with flat slope`);
-        return null;
-      }
-    }
-
-    // 200 EMA confirmation filter
-    if (
-      (pattern.direction === "Long" && last.close < ema200) ||
-      (pattern.direction === "Short" && last.close > ema200)
-    ) {
-      console.log(`[SKIP] ${symbol} - Price against 200 EMA filter`);
-      return null;
-    }
 
     // Trend alignment
     const isUptrend = ema9 > ema21 && ema21 > ema50;
@@ -563,7 +503,7 @@ export async function analyzeCandles(
       targets: [signal.target1, signal.target2],
       quantity: qty,
       risk: {
-        rrRatio: parseFloat(rr.toFixed(2)),
+        rrRatio: parseFloat(rrMultiplier.toFixed(2)),
         slDistance: parseFloat(Math.abs(signal.entry - signal.stopLoss).toFixed(2)),
         capitalRequired: parseFloat((signal.entry * qty).toFixed(2)),
       },
