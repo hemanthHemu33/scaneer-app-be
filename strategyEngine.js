@@ -7,6 +7,7 @@ import {
   computeFeatures,
 } from './featureEngine.js';
 import { detectAllPatterns } from './util.js';
+import { detectGapUpOrDown } from './strategies.js';
 import { RISK_REWARD_RATIO, calculatePositionSize } from './positionSizing.js';
 
 export function strategySupertrend(context = {}) {
@@ -327,9 +328,59 @@ export function patternBasedStrategy(context = {}) {
   };
 }
 
+export function strategyGapUpDown(context = {}) {
+  const {
+    symbol,
+    dailyHistory = [],
+    sessionCandles = [],
+    accountBalance = 0,
+    riskPerTradePercentage = 0.01,
+    spread = 0,
+    liquidity = 0,
+  } = context;
+
+  const pattern = detectGapUpOrDown({ dailyHistory, sessionCandles });
+  if (!pattern) return null;
+
+  const entry = pattern.breakout;
+  const stopLoss = pattern.stopLoss;
+  const risk = Math.abs(entry - stopLoss);
+  const qty = calculatePositionSize({
+    capital: accountBalance,
+    risk: accountBalance * riskPerTradePercentage,
+    slPoints: risk,
+    price: entry,
+    volatility: risk,
+  });
+  const target1 =
+    entry + (pattern.direction === 'Long' ? 1 : -1) * risk * RISK_REWARD_RATIO * 0.5;
+  const target2 =
+    entry + (pattern.direction === 'Long' ? 1 : -1) * risk * RISK_REWARD_RATIO;
+
+  return {
+    stock: symbol,
+    strategy: pattern.type,
+    pattern: pattern.type,
+    direction: pattern.direction,
+    entry,
+    stopLoss,
+    target1,
+    target2,
+    qty,
+    atr: risk,
+    spread,
+    liquidity,
+    confidence: 0.7,
+    generatedAt: new Date().toISOString(),
+    source: 'strategyGapUpDown',
+    gapPercent: pattern.gapPercent,
+  };
+}
+
 export function evaluateAllStrategies(context = {}) {
   const strategies = [
     patternBasedStrategy,
+    strategyGapUpDown,
     strategySupertrend,
     strategyEMAReversal,
     strategyTripleTop,
