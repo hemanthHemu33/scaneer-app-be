@@ -88,6 +88,8 @@ export async function getHoldings() {
 export async function getAccountMargin() {
   try {
     const response = await kc.getMargins("equity");
+    // console the account margin details
+    console.log("Account Margin:", response);
     return response;
   } catch (err) {
     logError("Error fetching account margin", err);
@@ -223,7 +225,8 @@ export async function placeOrder(signal, maxRetries = 3) {
     });
   const risk = Math.abs(signal.entry - stopLoss);
   const target =
-    signal.target2 || signal.target ||
+    signal.target2 ||
+    signal.target ||
     (signal.direction === "Long"
       ? signal.entry + risk * 2
       : signal.entry - risk * 2);
@@ -254,7 +257,11 @@ export async function placeOrder(signal, maxRetries = 3) {
   if (tgtOrder) trackOrder(tgtOrder.order_id, { type: "TARGET", symbol });
 
   return slOrder && tgtOrder && entry
-    ? { entryId: entry.order_id, slId: slOrder.order_id, targetId: tgtOrder.order_id }
+    ? {
+        entryId: entry.order_id,
+        slId: slOrder.order_id,
+        targetId: tgtOrder.order_id,
+      }
     : null;
 }
 
@@ -270,17 +277,16 @@ export const openTrades = new Map();
  * @returns {Promise<Object|null>}
  */
 export async function sendToExecution(signal, opts = {}) {
-  const simulate = opts.simulate ?? process.env.NODE_ENV === 'test';
+  const simulate = opts.simulate ?? process.env.NODE_ENV === "test";
   if (simulate) {
     const simId = `SIM-${Date.now()}`;
-    openTrades.set(simId, { signal, status: 'SIMULATED' });
+    openTrades.set(simId, { signal, status: "SIMULATED" });
     console.log(`[SIM] Executing signal for ${signal.stock || signal.symbol}`);
     return { entryId: simId, slId: simId, targetId: simId };
   }
   const orders = await placeOrder(signal);
   if (orders) {
-    openTrades.set(orders.entryId, { signal, status: 'OPEN', ...orders });
+    openTrades.set(orders.entryId, { signal, status: "OPEN", ...orders });
   }
   return orders;
 }
-
