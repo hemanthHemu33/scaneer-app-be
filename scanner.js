@@ -2,20 +2,17 @@
 
 import { computeFeatures } from "./featureEngine.js";
 import {
-  // detectPatterns,
-  getMAForSymbol,
   debounceSignal,
   calculateExpiryMinutes,
 } from "./util.js";
 
 import { getSupportResistanceLevels, historicalCache } from "./kite.js";
 import { candleHistory, symbolTokenMap } from "./dataEngine.js";
-import { detectGapUpOrDown, detectAndScorePattern } from "./strategies.js";
+import { detectGapUpOrDown } from "./strategies.js";
 import { evaluateAllStrategies } from "./strategyEngine.js";
 import {
   RISK_REWARD_RATIO,
   calculatePositionSize,
-  calculateTradeParameters,
 } from "./positionSizing.js";
 import { isSignalValid } from "./riskEngine.js";
 import { startExitMonitor } from "./exitManager.js";
@@ -25,9 +22,8 @@ import {
   marketContext,
   filterStrategiesByRegime,
 } from "./smartStrategySelector.js";
-import { signalQualityScore, evaluateTrendConfidence } from "./confidence.js";
+import { signalQualityScore } from "./confidence.js";
 import { sendToExecution } from "./orderExecution.js";
-import { buildSignal } from "./signalBuilder.js";
 // 📊 Signal history tracking
 const signalHistory = {};
 let accountBalance = 10000;
@@ -170,7 +166,6 @@ export async function analyzeCandles(
     const last = validCandles.at(-1);
     const expiryMinutes = calculateExpiryMinutes({ atr: atrValue, rvol });
     const expiresAt = new Date(Date.now() + expiryMinutes * 60 * 1000).toISOString();
-    const quality = signalQualityScore({ atr: atrValue, rvol });
 
     const isUptrend = ema9 > ema21 && ema21 > ema50;
     const isDowntrend = ema9 < ema21 && ema21 < ema50;
@@ -184,88 +179,19 @@ export async function analyzeCandles(
     }
 
 
-    const pattern = detectAndScorePattern({ candles: validCandles, features });
-    if (!pattern) return null;
-
-    const { confidence, score: finalScore } = await evaluateTrendConfidence(
-      { ...context, last, quality, filters, history: signalHistory },
-      pattern
-    );
-    if (confidence === "Low") {
-      console.log(`[SKIP] ${symbol} - Confidence LOW`);
-      return null;
-    }
-    if (confidence === "Medium" && pattern.strength < 2) {
-      console.log(
-        `[SKIP] ${symbol} - Weak pattern strength + medium confidence`
-      );
-      return null;
-    }
-
-
-
-    // Entry/SL/Target Calculation
-    let entry =
-      pattern.breakout + (pattern.direction === "Long" ? slippage : -slippage);
-    const patternSL =
-      pattern.stopLoss - (pattern.direction === "Long" ? slippage : -slippage);
-
-    const drawdown = accountBalance
-      ? riskState.dailyLoss / accountBalance
-      : 0;
-
-    const riskAmount = accountBalance * riskPerTradePercentage;
-
-    let { stopLoss, qty, target1, target2 } = calculateTradeParameters({
-      entry,
-      stopLoss: patternSL,
-      direction: pattern.direction,
-      atr: atrValue,
-      capital: accountBalance,
-      drawdown,
-    });
-
-    let rrMultiplier = RISK_REWARD_RATIO;
-    if (
-      atrValue > 2 ||
-      (liveTick &&
-        ((pattern.direction === "Long" &&
-          liveTick.total_buy_quantity > liveTick.total_sell_quantity * 1.5) ||
-          (pattern.direction === "Short" &&
-            liveTick.total_sell_quantity > liveTick.total_buy_quantity * 1.5)))
-    ) {
-      rrMultiplier = RISK_REWARD_RATIO + 0.5;
-    }
-
-    const baseRisk = Math.abs(entry - stopLoss);
-    // Adjustments from live tick data
-    if (liveTick) {
-      const buyPressure = liveTick.total_buy_quantity || 0;
-      const sellPressure = liveTick.total_sell_quantity || 0;
-      const priceDev = Math.abs(liveTick.last_price - last.close);
-
-      if (buyPressure > sellPressure && pattern.direction === "Long") {
-        target1 += baseRisk * 0.5;
-        target2 += baseRisk * 1;
-      } else if (sellPressure > buyPressure && pattern.direction === "Short") {
-        target1 -= baseRisk * 0.5;
-        target2 -= baseRisk * 1;
-      }
-
-      if (priceDev > atrValue * 0.5) {
-        stopLoss += (pattern.direction === "Long" ? -1 : 1) * baseRisk * 0.2;
-      }
-    }
-
-    const ma20Val = getMAForSymbol(symbol, 20);
-    const ma50Val = getMAForSymbol(symbol, 50);
     const { support, resistance } = getSupportResistanceLevels(symbol);
 
-    const stratResults = evaluateAllStrategies(context);
+    const stratResults = evaluateAllStrategies({
+      ...context,
+      expiresAt,
+      support,
+      resistance,
+      accountBalance,
+      riskPerTradePercentage,
+    });
     const filtered = filterStrategiesByRegime(stratResults, marketContext);
-    const [topStrategy] = filtered;
-    const strategyName = topStrategy ? topStrategy.name : pattern.type;
-    const strategyConfidence = topStrategy ? topStrategy.confidence : finalScore;
+    const [signal] = filtered;
+    if (!signal) return null;
 
     // Debounce logic now that strategy name is known
     const conflictWindow = 3 * 60 * 1000;
@@ -273,20 +199,15 @@ export async function analyzeCandles(
       !debounceSignal(
         signalHistory,
         symbol,
-        pattern.direction,
-        strategyName,
+        signal.direction,
+        signal.strategy,
         conflictWindow
       )
     )
       return null;
-
-    const { signal, advancedSignal } = buildSignal(
-      { symbol, ma20Val, ma50Val, ema9, ema21, ema50, ema200, rsi, supertrend, atrValue, slippage, spread, liquidity, liveTick, depth, rrMultiplier, rvol, isUptrend, isDowntrend, strategyName, strategyConfidence, support, resistance, finalScore, expiresAt, riskAmount, accountBalance, baseRisk },
-      pattern,
-      { entry, stopLoss, target1, target2, qty },
-      confidence
-    );
-    signal.algoSignal = advancedSignal;
+    signal.support = support;
+    signal.resistance = resistance;
+    signal.expiresAt = expiresAt;
 
     const ok = isSignalValid(signal, {
       avgAtr: atrValue,
@@ -300,8 +221,6 @@ export async function analyzeCandles(
       minRR: RISK_REWARD_RATIO,
     });
     if (!ok) return null;
-
-    // AI enrichment will be handled asynchronously after the signal is emitted
     signal.ai = null;
 
     return signal;
