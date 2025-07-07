@@ -17,9 +17,13 @@ import {
 } from "./smartStrategySelector.js";
 import { signalQualityScore } from "./confidence.js";
 import { sendToExecution } from "./orderExecution.js";
+import { initAccountBalance, getAccountBalance } from "./account.js";
 // 📊 Signal history tracking
 const signalHistory = {};
-let accountBalance = 10000;
+let accountBalance = 0;
+initAccountBalance().then((bal) => {
+  accountBalance = bal;
+});
 const riskPerTradePercentage = 0.01;
 
 // 🚦 Risk control state
@@ -202,3 +206,5 @@ export async function rankAndExecute(signals = []) {
   }
   return top;
 }
+
+export { getAccountBalance, initAccountBalance };
