@@ -42,10 +42,8 @@ const featureMock = test.mock.module('../featureEngine.js', {
 
 const utilMock = test.mock.module('../util.js', {
   namedExports: {
-    getMAForSymbol: () => 100,
     calculateExpiryMinutes: () => 10,
     debounceSignal: () => true,
-    confirmRetest: () => true,
     detectAllPatterns: () => [
       {
         type: 'Breakout',
@@ -91,7 +89,7 @@ test('analyzeCandles returns a signal for valid data', async () => {
   );
   assert.ok(signal);
   assert.equal(signal.stock, 'TEST');
-  assert.equal(signal.pattern, 'Breakout');
+  assert.equal(signal.strategy, 'Breakout');
   assert.ok(signal.expiresAt);
   assert.equal(signal.support, 90);
   assert.equal(signal.resistance, 110);

@@ -7,26 +7,51 @@ import {
   computeFeatures,
 } from './featureEngine.js';
 import { detectAllPatterns } from './util.js';
+import { detectGapUpOrDown } from './strategies.js';
+import { RISK_REWARD_RATIO, calculatePositionSize } from './positionSizing.js';
 
 export function strategySupertrend(context = {}) {
-  const { candles = [], features = computeFeatures(candles) } = context;
+  const {
+    candles = [],
+    features = computeFeatures(candles),
+    symbol,
+    accountBalance = 0,
+    riskPerTradePercentage = 0.01,
+    spread = 0,
+    liquidity = 0,
+  } = context;
   if (!Array.isArray(candles) || candles.length < 20) return null;
 
-  const { rsi, supertrend } = features || {};
+  const { rsi, supertrend, atr = getATR(candles, 14) } = features || {};
   const last = candles[candles.length - 1];
 
   if (supertrend?.signal === 'Buy' && rsi > 55) {
     const entry = last.close;
     const stopLoss = last.low;
     const risk = entry - stopLoss;
+    const qty = calculatePositionSize({
+      capital: accountBalance,
+      risk: accountBalance * riskPerTradePercentage,
+      slPoints: risk,
+      price: entry,
+      volatility: atr,
+    });
     return {
+      stock: symbol,
+      strategy: 'Supertrend',
+      pattern: 'Supertrend',
+      direction: 'Long',
       entry,
       stopLoss,
       target1: entry + risk * 0.75,
       target2: entry + risk * 1.5,
-      direction: 'Long',
-      strategy: 'Supertrend',
+      qty,
+      atr,
+      spread,
+      liquidity,
       confidence: 0.6,
+      generatedAt: new Date().toISOString(),
+      source: 'strategySupertrend',
     };
   }
 
@@ -34,14 +59,29 @@ export function strategySupertrend(context = {}) {
     const entry = last.close;
     const stopLoss = last.high;
     const risk = stopLoss - entry;
+    const qty = calculatePositionSize({
+      capital: accountBalance,
+      risk: accountBalance * riskPerTradePercentage,
+      slPoints: risk,
+      price: entry,
+      volatility: atr,
+    });
     return {
+      stock: symbol,
+      strategy: 'Supertrend',
+      pattern: 'Supertrend',
+      direction: 'Short',
       entry,
       stopLoss,
       target1: entry - risk * 0.75,
       target2: entry - risk * 1.5,
-      direction: 'Short',
-      strategy: 'Supertrend',
+      qty,
+      atr,
+      spread,
+      liquidity,
       confidence: 0.6,
+      generatedAt: new Date().toISOString(),
+      source: 'strategySupertrend',
     };
   }
 
@@ -49,7 +89,15 @@ export function strategySupertrend(context = {}) {
 }
 
 export function strategyEMAReversal(context = {}) {
-  const { candles = [], features = computeFeatures(candles) } = context;
+  const {
+    candles = [],
+    features = computeFeatures(candles),
+    symbol,
+    accountBalance = 0,
+    riskPerTradePercentage = 0.01,
+    spread = 0,
+    liquidity = 0,
+  } = context;
   if (!Array.isArray(candles) || candles.length < 20) return null;
 
   const closes = candles.map(c => c.close);
@@ -62,14 +110,29 @@ export function strategyEMAReversal(context = {}) {
     const entry = last.close;
     const stopLoss = prev.low;
     const risk = entry - stopLoss;
+    const qty = calculatePositionSize({
+      capital: accountBalance,
+      risk: accountBalance * riskPerTradePercentage,
+      slPoints: risk,
+      price: entry,
+      volatility: risk,
+    });
     return {
+      stock: symbol,
+      strategy: 'EMA Reversal',
+      pattern: 'EMA Reversal',
+      direction: 'Long',
       entry,
       stopLoss,
       target1: entry + risk * 0.5,
       target2: entry + risk * 1,
-      direction: 'Long',
-      strategy: 'EMA Reversal',
+      qty,
+      atr: risk,
+      spread,
+      liquidity,
       confidence: 0.55,
+      generatedAt: new Date().toISOString(),
+      source: 'strategyEMAReversal',
     };
   }
 
@@ -77,14 +140,29 @@ export function strategyEMAReversal(context = {}) {
     const entry = last.close;
     const stopLoss = prev.high;
     const risk = stopLoss - entry;
+    const qty = calculatePositionSize({
+      capital: accountBalance,
+      risk: accountBalance * riskPerTradePercentage,
+      slPoints: risk,
+      price: entry,
+      volatility: risk,
+    });
     return {
+      stock: symbol,
+      strategy: 'EMA Reversal',
+      pattern: 'EMA Reversal',
+      direction: 'Short',
       entry,
       stopLoss,
       target1: entry - risk * 0.5,
       target2: entry - risk * 1,
-      direction: 'Short',
-      strategy: 'EMA Reversal',
+      qty,
+      atr: risk,
+      spread,
+      liquidity,
       confidence: 0.55,
+      generatedAt: new Date().toISOString(),
+      source: 'strategyEMAReversal',
     };
   }
 
@@ -92,7 +170,15 @@ export function strategyEMAReversal(context = {}) {
 }
 
 export function strategyTripleTop(context = {}) {
-  const { candles = [], features = computeFeatures(candles) } = context;
+  const {
+    candles = [],
+    features = computeFeatures(candles),
+    symbol,
+    accountBalance = 0,
+    riskPerTradePercentage = 0.01,
+    spread = 0,
+    liquidity = 0,
+  } = context;
   if (!Array.isArray(candles) || candles.length < 7) return null;
 
   const atr = features?.atr ?? getATR(candles, 14);
@@ -105,19 +191,42 @@ export function strategyTripleTop(context = {}) {
   const entry = tripleTop.breakout;
   const stopLoss = tripleTop.stopLoss;
   const risk = stopLoss - entry;
+  const qty = calculatePositionSize({
+    capital: accountBalance,
+    risk: accountBalance * riskPerTradePercentage,
+    slPoints: risk,
+    price: entry,
+    volatility: atr,
+  });
   return {
+    stock: symbol,
+    strategy: 'Triple Top',
+    pattern: 'Triple Top',
+    direction: 'Short',
     entry,
     stopLoss,
     target1: entry - risk * 0.5,
     target2: entry - risk,
-    direction: 'Short',
-    strategy: 'Triple Top',
+    qty,
+    atr,
+    spread,
+    liquidity,
     confidence: 0.6,
+    generatedAt: new Date().toISOString(),
+    source: 'strategyTripleTop',
   };
 }
 
 export function strategyVWAPReversal(context = {}) {
-  const { candles = [], features = computeFeatures(candles) } = context;
+  const {
+    candles = [],
+    features = computeFeatures(candles),
+    symbol,
+    accountBalance = 0,
+    riskPerTradePercentage = 0.01,
+    spread = 0,
+    liquidity = 0,
+  } = context;
   if (!Array.isArray(candles) || candles.length < 5) return null;
 
   const atr = features?.atr ?? getATR(candles, 14);
@@ -129,31 +238,155 @@ export function strategyVWAPReversal(context = {}) {
   const stopLoss = pattern.stopLoss;
   const risk = Math.abs(entry - stopLoss);
   const direction = pattern.direction;
+  const qty = calculatePositionSize({
+    capital: accountBalance,
+    risk: accountBalance * riskPerTradePercentage,
+    slPoints: risk,
+    price: entry,
+    volatility: atr,
+  });
 
   return {
+    stock: symbol,
+    strategy: 'VWAP Reversal',
+    pattern: 'VWAP Reversal',
+    direction,
     entry,
     stopLoss,
     target1:
       direction === 'Long' ? entry + risk * 0.5 : entry - risk * 0.5,
     target2:
       direction === 'Long' ? entry + risk : entry - risk,
-    direction,
-    strategy: 'VWAP Reversal',
+    qty,
+    atr,
+    spread,
+    liquidity,
     confidence: 0.55,
+    generatedAt: new Date().toISOString(),
+    source: 'strategyVWAPReversal',
+  };
+}
+
+export function patternBasedStrategy(context = {}) {
+  const {
+    candles = [],
+    features = computeFeatures(candles),
+    symbol,
+    accountBalance = 0,
+    riskPerTradePercentage = 0.01,
+    spread = 0,
+    liquidity = 0,
+  } = context;
+  if (!Array.isArray(candles) || candles.length < 5) return null;
+
+  const atr = features?.atr ?? getATR(candles, 14);
+  const patterns = detectAllPatterns(candles, atr, 5);
+  if (!patterns || patterns.length === 0) return null;
+
+  let best = null;
+  let bestScore = 0;
+  for (const p of patterns) {
+    const score = (p.strength || 1) *
+      (p.confidence === 'High' ? 1 : p.confidence === 'Medium' ? 0.6 : 0.3);
+    if (score > bestScore) {
+      best = p;
+      bestScore = score;
+    }
+  }
+  if (!best) return null;
+
+  const entry = best.breakout;
+  const stopLoss = best.stopLoss;
+  const direction = best.direction;
+  const risk = Math.abs(entry - stopLoss);
+  const qty = calculatePositionSize({
+    capital: accountBalance,
+    risk: accountBalance * riskPerTradePercentage,
+    slPoints: risk,
+    price: entry,
+    volatility: atr,
+  });
+  const target1 = entry + (direction === 'Long' ? 1 : -1) * risk * 1.5;
+  const target2 = entry + (direction === 'Long' ? 1 : -1) * risk * 2;
+
+  return {
+    stock: symbol,
+    strategy: best.type,
+    pattern: best.type,
+    direction,
+    entry,
+    stopLoss,
+    target1,
+    target2,
+    qty,
+    atr,
+    spread,
+    liquidity,
+    confidence: best.confidence,
+    generatedAt: new Date().toISOString(),
+    source: 'patternBasedStrategy',
+  };
+}
+
+export function strategyGapUpDown(context = {}) {
+  const {
+    symbol,
+    dailyHistory = [],
+    sessionCandles = [],
+    accountBalance = 0,
+    riskPerTradePercentage = 0.01,
+    spread = 0,
+    liquidity = 0,
+  } = context;
+
+  const pattern = detectGapUpOrDown({ dailyHistory, sessionCandles });
+  if (!pattern) return null;
+
+  const entry = pattern.breakout;
+  const stopLoss = pattern.stopLoss;
+  const risk = Math.abs(entry - stopLoss);
+  const qty = calculatePositionSize({
+    capital: accountBalance,
+    risk: accountBalance * riskPerTradePercentage,
+    slPoints: risk,
+    price: entry,
+    volatility: risk,
+  });
+  const target1 =
+    entry + (pattern.direction === 'Long' ? 1 : -1) * risk * RISK_REWARD_RATIO * 0.5;
+  const target2 =
+    entry + (pattern.direction === 'Long' ? 1 : -1) * risk * RISK_REWARD_RATIO;
+
+  return {
+    stock: symbol,
+    strategy: pattern.type,
+    pattern: pattern.type,
+    direction: pattern.direction,
+    entry,
+    stopLoss,
+    target1,
+    target2,
+    qty,
+    atr: risk,
+    spread,
+    liquidity,
+    confidence: 0.7,
+    generatedAt: new Date().toISOString(),
+    source: 'strategyGapUpDown',
+    gapPercent: pattern.gapPercent,
   };
 }
 
 export function evaluateAllStrategies(context = {}) {
   const strategies = [
+    patternBasedStrategy,
+    strategyGapUpDown,
     strategySupertrend,
     strategyEMAReversal,
     strategyTripleTop,
     strategyVWAPReversal,
   ];
-  const results = [];
-  for (const fn of strategies) {
-    const res = fn(context);
-    if (res) results.push(res);
-  }
-  return results;
+  return strategies
+    .map((fn) => fn(context))
+    .filter(Boolean);
 }
