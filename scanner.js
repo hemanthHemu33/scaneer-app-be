@@ -12,16 +12,15 @@ import { getSupportResistanceLevels, historicalCache } from "./kite.js";
 import { candleHistory, symbolTokenMap } from "./dataEngine.js";
 import { detectGapUpOrDown, detectAndScorePattern } from "./strategies.js";
 import { evaluateAllStrategies } from "./strategyEngine.js";
-import { RISK_REWARD_RATIO, calculatePositionSize } from "./positionSizing.js";
-import { adjustStopLoss } from "./riskValidator.js";
+import {
+  RISK_REWARD_RATIO,
+  calculatePositionSize,
+  calculateTradeParameters,
+} from "./positionSizing.js";
 import { isSignalValid } from "./riskEngine.js";
 import { startExitMonitor } from "./exitManager.js";
 import { openPositions, recordExit } from "./portfolioContext.js";
 import { logTrade } from "./tradeLogger.js";
-import {
-  calculateDynamicStopLoss,
-  adjustRiskBasedOnDrawdown,
-} from "./dynamicRiskModel.js";
 import {
   marketContext,
   filterStrategiesByRegime,
@@ -211,55 +210,20 @@ export async function analyzeCandles(
     const patternSL =
       pattern.stopLoss - (pattern.direction === "Long" ? slippage : -slippage);
 
-    const dynamicSL = calculateDynamicStopLoss({
-      atr: atrValue,
-      entry,
-      direction: pattern.direction,
-      setupType:
-        confidence === "High" && pattern.type === "Breakout"
-          ? "breakout"
-          : "conservative",
-    });
-
-    let stopLoss = dynamicSL;
-    if (patternSL) {
-      const distDyn = Math.abs(entry - dynamicSL);
-      const distPat = Math.abs(entry - patternSL);
-      stopLoss = pattern.direction === "Long" ? Math.max(stopLoss, patternSL) : Math.min(stopLoss, patternSL);
-      // Prefer tighter stop when pattern provides closer SL
-      if (distPat < distDyn) stopLoss = patternSL;
-    }
-
-    if (
-      (pattern.direction === "Long" && stopLoss >= entry) ||
-      (pattern.direction === "Short" && stopLoss <= entry)
-    ) {
-      stopLoss = dynamicSL;
-    }
-
-    stopLoss = adjustStopLoss({
-      price: last.close,
-      stopLoss,
-      direction: pattern.direction,
-      atr: atrValue,
-    });
-
-    const baseRisk = Math.abs(entry - stopLoss);
-    const riskAmount = accountBalance * riskPerTradePercentage;
-    let qty = calculatePositionSize({
-      capital: accountBalance,
-      risk: riskAmount,
-      slPoints: baseRisk,
-      price: entry,
-      volatility: atrValue,
-      lotSize: 1,
-      utilizationCap: 1,
-    });
-
     const drawdown = accountBalance
       ? riskState.dailyLoss / accountBalance
       : 0;
-    qty = adjustRiskBasedOnDrawdown({ drawdown, lotSize: qty });
+
+    const riskAmount = accountBalance * riskPerTradePercentage;
+
+    let { stopLoss, qty, target1, target2 } = calculateTradeParameters({
+      entry,
+      stopLoss: patternSL,
+      direction: pattern.direction,
+      atr: atrValue,
+      capital: accountBalance,
+      drawdown,
+    });
 
     let rrMultiplier = RISK_REWARD_RATIO;
     if (
@@ -273,11 +237,7 @@ export async function analyzeCandles(
       rrMultiplier = RISK_REWARD_RATIO + 0.5;
     }
 
-    let target1 =
-      entry +
-      (pattern.direction === "Long" ? 1 : -1) * (rrMultiplier * 0.5) * baseRisk;
-    let target2 =
-      entry + (pattern.direction === "Long" ? 1 : -1) * rrMultiplier * baseRisk;
+    const baseRisk = Math.abs(entry - stopLoss);
     // Adjustments from live tick data
     if (liveTick) {
       const buyPressure = liveTick.total_buy_quantity || 0;
