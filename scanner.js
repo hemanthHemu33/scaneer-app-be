@@ -41,7 +41,7 @@ let riskState = {
 };
 
 // ⚙️ Scanner mode toggle
-const MODE = "strict"; // Options: "strict" | "relaxed"
+const MODE = "relaxed"; // Options: "strict" | "relaxed"
 const FILTERS = {
   atrThreshold: MODE === "strict" ? 2 : 0.4,
   minBuySellRatio: MODE === "strict" ? 0.8 : 0.6,
@@ -169,7 +169,9 @@ export async function analyzeCandles(
     } = features;
     const last = validCandles.at(-1);
     const expiryMinutes = calculateExpiryMinutes({ atr: atrValue, rvol });
-    const expiresAt = new Date(Date.now() + expiryMinutes * 60 * 1000).toISOString();
+    const expiresAt = new Date(
+      Date.now() + expiryMinutes * 60 * 1000
+    ).toISOString();
     const quality = signalQualityScore({ atr: atrValue, rvol });
 
     const isUptrend = ema9 > ema21 && ema21 > ema50;
@@ -182,7 +184,6 @@ export async function analyzeCandles(
       );
       return null;
     }
-
 
     const pattern = detectAndScorePattern({ candles: validCandles, features });
     if (!pattern) return null;
@@ -202,17 +203,13 @@ export async function analyzeCandles(
       return null;
     }
 
-
-
     // Entry/SL/Target Calculation
     let entry =
       pattern.breakout + (pattern.direction === "Long" ? slippage : -slippage);
     const patternSL =
       pattern.stopLoss - (pattern.direction === "Long" ? slippage : -slippage);
 
-    const drawdown = accountBalance
-      ? riskState.dailyLoss / accountBalance
-      : 0;
+    const drawdown = accountBalance ? riskState.dailyLoss / accountBalance : 0;
 
     const riskAmount = accountBalance * riskPerTradePercentage;
 
@@ -265,7 +262,9 @@ export async function analyzeCandles(
     const filtered = filterStrategiesByRegime(stratResults, marketContext);
     const [topStrategy] = filtered;
     const strategyName = topStrategy ? topStrategy.name : pattern.type;
-    const strategyConfidence = topStrategy ? topStrategy.confidence : finalScore;
+    const strategyConfidence = topStrategy
+      ? topStrategy.confidence
+      : finalScore;
 
     // Debounce logic now that strategy name is known
     const conflictWindow = 3 * 60 * 1000;
@@ -281,7 +280,36 @@ export async function analyzeCandles(
       return null;
 
     const { signal, advancedSignal } = buildSignal(
-      { symbol, ma20Val, ma50Val, ema9, ema21, ema50, ema200, rsi, supertrend, atrValue, slippage, spread, liquidity, liveTick, depth, rrMultiplier, rvol, isUptrend, isDowntrend, strategyName, strategyConfidence, support, resistance, finalScore, expiresAt, riskAmount, accountBalance, baseRisk },
+      {
+        symbol,
+        ma20Val,
+        ma50Val,
+        ema9,
+        ema21,
+        ema50,
+        ema200,
+        rsi,
+        supertrend,
+        atrValue,
+        slippage,
+        spread,
+        liquidity,
+        liveTick,
+        depth,
+        rrMultiplier,
+        rvol,
+        isUptrend,
+        isDowntrend,
+        strategyName,
+        strategyConfidence,
+        support,
+        resistance,
+        finalScore,
+        expiresAt,
+        riskAmount,
+        accountBalance,
+        baseRisk,
+      },
       pattern,
       { entry, stopLoss, target1, target2, qty },
       confidence
@@ -290,7 +318,7 @@ export async function analyzeCandles(
 
     const ok = isSignalValid(signal, {
       avgAtr: atrValue,
-      indexTrend: isUptrend ? 'up' : isDowntrend ? 'down' : 'sideways',
+      indexTrend: isUptrend ? "up" : isDowntrend ? "down" : "sideways",
       timeSinceSignal: 0,
       volume: liquidity,
       currentPrice: liveTick ? liveTick.last_price : last.close,
@@ -317,10 +345,10 @@ export function getSignalHistory() {
 
 function handleExit(trade, reason) {
   recordExit(trade.symbol);
-  logTrade({ symbol: trade.symbol, reason, event: 'exit' });
+  logTrade({ symbol: trade.symbol, reason, event: "exit" });
 }
 
-if (process.env.NODE_ENV !== 'test') {
+if (process.env.NODE_ENV !== "test") {
   startExitMonitor(openPositions, {
     exitTrade: handleExit,
     logTradeExit: handleExit,
@@ -336,4 +364,3 @@ export async function rankAndExecute(signals = []) {
   }
   return top;
 }
-
