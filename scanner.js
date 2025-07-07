@@ -8,11 +8,7 @@ import {
   calculateExpiryMinutes,
 } from "./util.js";
 
-import {
-  getHigherTimeframeData,
-  getSupportResistanceLevels,
-  historicalCache,
-} from "./kite.js";
+import { getSupportResistanceLevels, historicalCache } from "./kite.js";
 import { candleHistory, symbolTokenMap } from "./dataEngine.js";
 import { detectGapUpOrDown, detectAndScorePattern } from "./strategies.js";
 import { evaluateAllStrategies } from "./strategyEngine.js";
@@ -30,11 +26,7 @@ import {
   marketContext,
   filterStrategiesByRegime,
 } from "./smartStrategySelector.js";
-import {
-  computeConfidenceScore,
-  getStrategyHitRate,
-  signalQualityScore,
-} from "./confidence.js";
+import { signalQualityScore, evaluateTrendConfidence } from "./confidence.js";
 import { sendToExecution } from "./orderExecution.js";
 
 // 📊 Signal history tracking
@@ -181,6 +173,9 @@ export async function analyzeCandles(
     const expiresAt = new Date(Date.now() + expiryMinutes * 60 * 1000).toISOString();
     const quality = signalQualityScore({ atr: atrValue, rvol });
 
+    const isUptrend = ema9 > ema21 && ema21 > ema50;
+    const isDowntrend = ema9 < ema21 && ema21 < ema50;
+
     // ⚠️ Momentum filter
     if (rsi > 45 && rsi < 55 && atrValue < 1) {
       console.log(
@@ -193,151 +188,20 @@ export async function analyzeCandles(
     const pattern = detectAndScorePattern({ candles: validCandles, features });
     if (!pattern) return null;
 
-    // Trend alignment
-    const isUptrend = ema9 > ema21 && ema21 > ema50;
-    const isDowntrend = ema9 < ema21 && ema21 < ema50;
-    const isTrendClean =
-      (pattern.direction === "Long" && isUptrend) ||
-      (pattern.direction === "Short" && isDowntrend);
-
-    let confidence = "High";
-    if (!isTrendClean) {
-      confidence = "Medium";
-      console.log(`[WEAK TREND] ${symbol} has unclear trend structure`);
-    }
-
-    // 🧠 Live Volume Spike Check
-    if (liveTick?.volume_traded && liquidity && liquidity !== "NA") {
-      const volumeSpikeRatio = liveTick.volume_traded / liquidity;
-
-      if (volumeSpikeRatio > 2.5) {
-        if (
-          pattern.direction === "Long" &&
-          liveTick.total_buy_quantity > liveTick.total_sell_quantity * 1.5
-        ) {
-          confidence = "High";
-          console.log(
-            `[BOOST] ${symbol} - Volume Spike BUY Ratio ${volumeSpikeRatio.toFixed(
-              2
-            )}x`
-          );
-        } else if (
-          pattern.direction === "Short" &&
-          liveTick.total_sell_quantity > liveTick.total_buy_quantity * 1.5
-        ) {
-          confidence = "High";
-          console.log(
-            `[BOOST] ${symbol} - Volume Spike SELL Ratio ${volumeSpikeRatio.toFixed(
-              2
-            )}x`
-          );
-        }
-      }
-
-      if (volumeSpikeRatio < 0.3) {
-        console.log(
-          `[SKIP] ${symbol} - Weak live volume (${volumeSpikeRatio.toFixed(
-            2
-          )}x)`
-        );
-        return null;
-      }
-    }
-
-    if (
-      (pattern.direction === "Long" && ema9 < ema21 * 0.98) ||
-      (pattern.direction === "Short" && ema9 > ema21 * 1.02)
-    ) {
-      confidence = "Medium";
-    }
-
-    if (
-      (pattern.direction === "Long" && supertrend.signal === "Sell") ||
-      (pattern.direction === "Short" && supertrend.signal === "Buy")
-    ) {
-      confidence = "Low";
-    }
-
-    if (
-      (pattern.direction === "Long" && totalBuy < totalSell * 0.9) ||
-      (pattern.direction === "Short" && totalSell < totalBuy * 0.9)
-    ) {
-      confidence = "Low";
-    }
-
-    const higherTF = await getHigherTimeframeData(symbol, "15minute");
-    if (!higherTF) return null;
-
-    const { ema50: higherEMA50, supertrend: higherSuper } = higherTF;
-    const higherTrendOk =
-      (pattern.direction === "Long" &&
-        higherSuper.signal === "Buy" &&
-        last.close > higherEMA50 * 0.98) ||
-      (pattern.direction === "Short" &&
-        higherSuper.signal === "Sell" &&
-        last.close < higherEMA50 * 1.02);
-
-    if (!higherTrendOk && confidence !== "Low") confidence = "Medium";
-
-    if (depth) {
-      const bestBid = depth.buy?.[0]?.price || 0;
-      const bestAsk = depth.sell?.[0]?.price || 0;
-      const buySellRatio = totalBuy / (totalSell || 1);
-
-      if (
-        (pattern.direction === "Long" && bestBid < last.close * 0.995) ||
-        (pattern.direction === "Short" && bestAsk > last.close * 1.005)
-      ) {
-        confidence = "Low";
-      }
-
-      if (
-        (pattern.direction === "Long" &&
-          buySellRatio < filters.minBuySellRatio) ||
-        (pattern.direction === "Short" &&
-          buySellRatio > 1 / filters.minBuySellRatio)
-      ) {
-        confidence = "Low";
-      }
-    }
-
-    if (
-      spread > filters.maxSpread ||
-      liquidity < Math.max(filters.minLiquidity, liquidity * 0.6)
-    ) {
-      confidence = "Low";
-    }
-
+    const { confidence, score: finalScore } = await evaluateTrendConfidence(
+      { ...context, last, quality, filters, history: signalHistory },
+      pattern
+    );
     if (confidence === "Low") {
       console.log(`[SKIP] ${symbol} - Confidence LOW`);
       return null;
     }
-
     if (confidence === "Medium" && pattern.strength < 2) {
       console.log(
         `[SKIP] ${symbol} - Weak pattern strength + medium confidence`
       );
       return null;
     }
-
-    // Dynamic confidence scoring
-    let confirmations = 0;
-    const hist = signalHistory[symbol] || {};
-    for (const arr of Object.values(hist)) {
-      confirmations += arr.filter(
-        (s) => Date.now() - s.timestamp < 5 * 60 * 1000 && s.direction === pattern.direction
-      ).length;
-    }
-    const baseScore = confidence === "High" ? 0.8 : confidence === "Medium" ? 0.6 : 0.4;
-    const hitRate = getStrategyHitRate(symbol, pattern.type);
-    const dynamicScore = computeConfidenceScore({
-      hitRate,
-      confirmations,
-      quality,
-      date: new Date(),
-    });
-    const finalScore = (baseScore + dynamicScore) / 2;
-    confidence = finalScore >= 0.75 ? "High" : finalScore >= 0.5 ? "Medium" : "Low";
 
 
 
