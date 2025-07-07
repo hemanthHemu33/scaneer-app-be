@@ -37,6 +37,7 @@ import {
   getStrategyHitRate,
   signalQualityScore,
 } from "./confidence.js";
+import { sendToExecution } from "./orderExecution.js";
 
 // 📊 Signal history tracking
 const signalHistory = {};
@@ -627,3 +628,14 @@ if (process.env.NODE_ENV !== 'test') {
     logTradeExit: handleExit,
   });
 }
+
+// Rank signals and send top one to execution
+export async function rankAndExecute(signals = []) {
+  const { selectTopSignal } = await import("./signalRanker.js");
+  const top = selectTopSignal(signals);
+  if (top) {
+    await sendToExecution(top);
+  }
+  return top;
+}
+
