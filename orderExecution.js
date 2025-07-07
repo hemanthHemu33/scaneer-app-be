@@ -200,6 +200,17 @@ export async function placeOrder(signal, maxRetries = 3) {
     product: "MIS",
   };
 
+  const marginInfo = await getAccountMargin();
+  const available = marginInfo?.equity?.available?.cash ?? 0;
+  const req = await getMarginForStock(entryParams);
+  const required = Array.isArray(req) ? req[0]?.total : req?.total;
+  if (required && required > available) {
+    console.log(
+      `[MARGIN] Insufficient funds for ${symbol}: required ${required}, available ${available}`
+    );
+    return null;
+  }
+
   let attempt = 0;
   let entry;
   while (attempt < maxRetries) {
