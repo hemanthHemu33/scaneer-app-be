@@ -8,7 +8,6 @@ import {
 
 import { getSupportResistanceLevels, historicalCache } from "./kite.js";
 import { candleHistory, symbolTokenMap } from "./dataEngine.js";
-import { detectGapUpOrDown } from "./strategies.js";
 import { evaluateAllStrategies } from "./strategyEngine.js";
 import {
   RISK_REWARD_RATIO,
@@ -81,58 +80,6 @@ export async function analyzeCandles(
       return null;
     }
 
-    // 🔍 Early Gap Up/Down detection (9:15-9:20 AM)
-    const nowIST = new Date(
-      new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" })
-    );
-    const minutes = nowIST.getHours() * 60 + nowIST.getMinutes();
-    if (minutes >= 555 && minutes <= 560) {
-      const token = symbolTokenMap[symbol];
-      const dailyHistory = historicalCache[token] || [];
-      const sessionData = candleHistory[token] || candles;
-      const gapPattern = detectGapUpOrDown({
-        dailyHistory,
-        sessionCandles: sessionData,
-      });
-      if (gapPattern) {
-        const entry = gapPattern.breakout;
-        const stopLoss = gapPattern.stopLoss;
-        const baseRisk = Math.abs(entry - stopLoss);
-        const riskAmount = accountBalance * riskPerTradePercentage;
-        const qty = calculatePositionSize({
-          capital: accountBalance,
-          risk: riskAmount,
-          slPoints: baseRisk,
-          price: entry,
-          volatility: baseRisk,
-        });
-        const target1 =
-          entry +
-          (gapPattern.direction === "Long" ? 1 : -1) *
-            (RISK_REWARD_RATIO * 0.5) *
-            baseRisk;
-        const target2 =
-          entry +
-          (gapPattern.direction === "Long" ? 1 : -1) *
-            RISK_REWARD_RATIO *
-            baseRisk;
-        return {
-          stock: symbol,
-          pattern: gapPattern.type,
-          strength: 3,
-          direction: gapPattern.direction,
-          entry: parseFloat(entry.toFixed(2)),
-          stopLoss: parseFloat(stopLoss.toFixed(2)),
-          target1: parseFloat(target1.toFixed(2)),
-          target2: parseFloat(target2.toFixed(2)),
-          qty,
-          confidence: "High",
-          expiresAt: new Date(nowIST.getTime() + 5 * 60 * 1000).toISOString(),
-          gapPercent: parseFloat(gapPattern.gapPercent.toFixed(2)),
-          source: "gapStrategy",
-        };
-      }
-    }
 
     const validCandles = candles.filter(
       (c) => c.open && c.high && c.low && c.close
@@ -140,6 +87,10 @@ export async function analyzeCandles(
     if (validCandles.length < 5) return null;
     const features = computeFeatures(validCandles);
     if (!features) return null;
+
+    const token = symbolTokenMap[symbol];
+    const dailyHistory = historicalCache[token] || [];
+    const sessionData = candleHistory[token] || validCandles;
 
     const context = {
       symbol,
@@ -151,6 +102,8 @@ export async function analyzeCandles(
       liquidity,
       totalBuy,
       totalSell,
+      dailyHistory,
+      sessionCandles: sessionData,
     };
 
     const {
