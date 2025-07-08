@@ -1,11 +1,17 @@
 // scanner.js
 
 import { computeFeatures } from "./featureEngine.js";
-import { debounceSignal, calculateExpiryMinutes } from "./util.js";
+import {
+  debounceSignal,
+  calculateExpiryMinutes,
+  toISTISOString,
+  getMAForSymbol,
+} from "./util.js";
 
 import { getSupportResistanceLevels, historicalCache } from "./kite.js";
 import { candleHistory, symbolTokenMap } from "./dataEngine.js";
 import { evaluateAllStrategies } from "./strategyEngine.js";
+import { evaluateStrategies } from "./strategies.js";
 import { RISK_REWARD_RATIO, calculatePositionSize } from "./positionSizing.js";
 import { isSignalValid } from "./riskEngine.js";
 import { startExitMonitor } from "./exitManager.js";
@@ -18,6 +24,7 @@ import {
 import { signalQualityScore } from "./confidence.js";
 import { sendToExecution } from "./orderExecution.js";
 import { initAccountBalance, getAccountBalance } from "./account.js";
+import { buildSignal } from "./signalBuilder.js";
 // 📊 Signal history tracking
 const signalHistory = {};
 let accountBalance = 0;
@@ -140,9 +147,17 @@ export async function analyzeCandles(
       accountBalance,
       riskPerTradePercentage,
     });
+    const altStrategies = evaluateStrategies(validCandles, {
+      topN: 1,
+    });
     const filtered = filterStrategiesByRegime(stratResults, marketContext);
-    const [signal] = filtered;
-    if (!signal) return null;
+    const [base] = filtered;
+    if (!base) return null;
+
+    if (altStrategies && altStrategies[0]) {
+      base.strategy = altStrategies[0].name;
+      base.confidence = altStrategies[0].confidence;
+    }
 
     // Debounce logic now that strategy name is known
     const conflictWindow = 3 * 60 * 1000;
@@ -150,15 +165,55 @@ export async function analyzeCandles(
       !debounceSignal(
         signalHistory,
         symbol,
-        signal.direction,
-        signal.strategy,
+        base.direction,
+        base.strategy,
         conflictWindow
       )
     )
       return null;
-    signal.support = support;
-    signal.resistance = resistance;
-    signal.expiresAt = expiresAt;
+    const tradeParams = {
+      entry: base.entry,
+      stopLoss: base.stopLoss,
+      target1: base.target1,
+      target2: base.target2,
+      qty: base.qty,
+    };
+
+    const contextForBuild = {
+      symbol,
+      instrumentToken: token,
+      ma20Val: getMAForSymbol(String(token), 20),
+      ma50Val: getMAForSymbol(String(token), 50),
+      ema9,
+      ema21,
+      ema50,
+      ema200,
+      rsi,
+      supertrend,
+      atrValue,
+      slippage,
+      spread,
+      liquidity,
+      liveTick,
+      depth,
+      rrMultiplier: RISK_REWARD_RATIO,
+      rvol,
+      isUptrend,
+      isDowntrend,
+      strategyName: base.strategy,
+      strategyConfidence: base.confidence,
+      support,
+      resistance,
+      finalScore: signalQualityScore({ atr: atrValue, rvol }),
+      expiresAt,
+      riskAmount: accountBalance * riskPerTradePercentage,
+      accountBalance,
+      baseRisk: Math.abs(base.entry - base.stopLoss),
+    };
+
+    const { signal } = buildSignal(contextForBuild, { type: base.strategy, strength: base.confidence, direction: base.direction }, tradeParams, base.confidence);
+
+    signal.expiresAt = toISTISOString(expiresAt);
 
     const ok = isSignalValid(signal, {
       avgAtr: atrValue,
