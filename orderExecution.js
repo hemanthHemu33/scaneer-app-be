@@ -117,6 +117,33 @@ export async function getMarginForStock(order) {
   }
 }
 
+export async function canPlaceTrade(signal, sampleQty = 10) {
+  const marginInfo = await getAccountMargin();
+  const available = marginInfo?.equity?.available?.cash ?? 0;
+  const order = {
+    exchange: "NSE",
+    tradingsymbol: signal.stock || signal.symbol,
+    transaction_type: signal.direction === "Long" ? "BUY" : "SELL",
+    quantity: sampleQty,
+    order_type: "MARKET",
+    product: "MIS",
+  };
+  const margin = await getMarginForStock(order);
+  const info = Array.isArray(margin) ? margin[0] : margin;
+  const required = info?.required ?? info?.total ?? 0;
+  const perUnit = sampleQty > 0 ? required / sampleQty : 0;
+  if (!perUnit || available < perUnit) {
+    return { canPlace: false, quantity: 0, required: perUnit, available };
+  }
+  const maxQty = Math.floor(available / perUnit);
+  return {
+    canPlace: maxQty > 0,
+    quantity: maxQty,
+    required: maxQty * perUnit,
+    available,
+  };
+}
+
 // Place a GTT (Good Till Triggered) order
 export async function placeGTTOrder(order) {
   try {
@@ -295,9 +322,17 @@ export async function sendToExecution(signal, opts = {}) {
     console.log(`[SIM] Executing signal for ${signal.stock || signal.symbol}`);
     return { entryId: simId, slId: simId, targetId: simId };
   }
-  const orders = await placeOrder(signal);
+  const marginCheck = await canPlaceTrade(signal);
+  if (!marginCheck.canPlace) {
+    console.log(
+      `[MARGIN] Cannot place trade for ${signal.stock || signal.symbol}: required ${marginCheck.required}, available ${marginCheck.available}`
+    );
+    return null;
+  }
+  const sizedSignal = { ...signal, qty: marginCheck.quantity };
+  const orders = await placeOrder(sizedSignal);
   if (orders) {
-    openTrades.set(orders.entryId, { signal, status: "OPEN", ...orders });
+    openTrades.set(orders.entryId, { signal: sizedSignal, status: "OPEN", ...orders });
   }
   return orders;
 }
