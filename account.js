@@ -1,5 +1,5 @@
 // account.js
-import { getAccountMargin } from './orderExecution.js';
+import { getAccountMargin } from "./orderExecution.js";
 
 let accountBalance = 0;
 
@@ -10,6 +10,7 @@ export function getAccountBalance() {
 export async function initAccountBalance() {
   try {
     const margin = await getAccountMargin();
+    // console.log("Account Margin:", margin);
     accountBalance = margin?.equity?.available?.cash ?? 0;
   } catch (err) {
     console.error(`[ACCOUNT] Failed to fetch margin`, err?.message || err);

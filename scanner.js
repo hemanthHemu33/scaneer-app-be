@@ -23,6 +23,7 @@ const signalHistory = {};
 let accountBalance = 0;
 initAccountBalance().then((bal) => {
   accountBalance = bal;
+  console.log(`[INIT] Account balance set to ${accountBalance}`);
 });
 const riskPerTradePercentage = 0.01;
 

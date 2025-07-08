@@ -88,6 +88,8 @@ export async function getHoldings() {
 export async function getAccountMargin() {
   try {
     const response = await kc.getMargins("equity");
+    console.log("Access token:", kc.access_token);
+
     // console the account margin details
     console.log("Account Margin:", response);
     return response;
@@ -325,14 +327,20 @@ export async function sendToExecution(signal, opts = {}) {
   const marginCheck = await canPlaceTrade(signal);
   if (!marginCheck.canPlace) {
     console.log(
-      `[MARGIN] Cannot place trade for ${signal.stock || signal.symbol}: required ${marginCheck.required}, available ${marginCheck.available}`
+      `[MARGIN] Cannot place trade for ${
+        signal.stock || signal.symbol
+      }: required ${marginCheck.required}, available ${marginCheck.available}`
     );
     return null;
   }
   const sizedSignal = { ...signal, qty: marginCheck.quantity };
   const orders = await placeOrder(sizedSignal);
   if (orders) {
-    openTrades.set(orders.entryId, { signal: sizedSignal, status: "OPEN", ...orders });
+    openTrades.set(orders.entryId, {
+      signal: sizedSignal,
+      status: "OPEN",
+      ...orders,
+    });
   }
   return orders;
 }
