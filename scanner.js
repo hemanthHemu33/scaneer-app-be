@@ -171,12 +171,48 @@ export async function analyzeCandles(
       )
     )
       return null;
+    // Step 5: Risk filter on raw strategy output
+    // Preliminary signal for risk validation (no sizing or meta info)
+    const preliminary = {
+      stock: symbol,
+      pattern: base.strategy,
+      direction: base.direction,
+      entry: base.entry,
+      stopLoss: base.stopLoss,
+      target2: base.target2,
+      atr: atrValue,
+      spread,
+      liquidity,
+    };
+
+    const riskOk = isSignalValid(preliminary, {
+      avgAtr: atrValue,
+      indexTrend: isUptrend ? "up" : isDowntrend ? "down" : "sideways",
+      timeSinceSignal: 0,
+      volume: liquidity,
+      currentPrice: liveTick ? liveTick.last_price : last.close,
+      marketRegime: marketContext.regime,
+      minATR: FILTERS.atrThreshold,
+      maxATR: FILTERS.maxATR,
+      minRR: RISK_REWARD_RATIO,
+    });
+    if (!riskOk) return null;
+
+    // Step 6: Position sizing after risk filter
+    const qty = calculatePositionSize({
+      capital: accountBalance,
+      risk: accountBalance * riskPerTradePercentage,
+      slPoints: Math.abs(base.entry - base.stopLoss),
+      price: base.entry,
+      volatility: atrValue,
+    });
+
     const tradeParams = {
       entry: base.entry,
       stopLoss: base.stopLoss,
       target1: base.target1,
       target2: base.target2,
-      qty: base.qty,
+      qty,
     };
 
     const contextForBuild = {
@@ -211,23 +247,16 @@ export async function analyzeCandles(
       baseRisk: Math.abs(base.entry - base.stopLoss),
     };
 
-    const { signal } = buildSignal(contextForBuild, { type: base.strategy, strength: base.confidence, direction: base.direction }, tradeParams, base.confidence);
+    // Step 7: Append meta information and build final signal
+    const { signal } = buildSignal(
+      contextForBuild,
+      { type: base.strategy, strength: base.confidence, direction: base.direction },
+      tradeParams,
+      base.confidence
+    );
 
     signal.expiresAt = toISTISOString(expiresAt);
-
-    const ok = isSignalValid(signal, {
-      avgAtr: atrValue,
-      indexTrend: isUptrend ? "up" : isDowntrend ? "down" : "sideways",
-      timeSinceSignal: 0,
-      volume: liquidity,
-      currentPrice: liveTick ? liveTick.last_price : last.close,
-      marketRegime: marketContext.regime,
-      minATR: FILTERS.atrThreshold,
-      maxATR: FILTERS.maxATR,
-      minRR: RISK_REWARD_RATIO,
-    });
-    if (!ok) return null;
-    signal.ai = null;
+    signal.ai = null; // Step 8: final enrichment placeholder
 
     return signal;
   } catch (err) {

@@ -544,6 +544,7 @@ export async function processAlignedCandles(io) {
           );
 
           if (signal) {
+            // Step 9: final checks and emit
             await emitUnifiedSignal(signal, "Aligned", io);
           }
         } catch (err) {
@@ -662,6 +663,7 @@ async function processBuffer(io) {
       );
 
       if (signal) {
+        // Step 9: final checks and emit
         await emitUnifiedSignal(signal, "TickBuffer", io);
       }
     } catch (err) {
