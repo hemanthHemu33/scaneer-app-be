@@ -1,7 +1,7 @@
 // orderExecutor.js
 import dotenv from "dotenv";
 const logError = (ctx, err) => console.error(`[${ctx}]`, err?.message || err);
-import { kc, symbolTokenMap, historicalCache } from "./kite.js"; // reuse shared Kite instance
+import { kc, symbolTokenMap, historicalCache, initSession } from "./kite.js"; // reuse shared Kite instance and session handler
 import { calculateDynamicStopLoss } from "./dynamicRiskModel.js";
 
 dotenv.config();
@@ -11,6 +11,7 @@ dotenv.config();
 // Place an order
 export async function sendOrder(variety = "regular", order) {
   try {
+    await initSession();
     const response = await kc.placeOrder({ variety, ...order });
     console.log("✅ Order placed:", response);
     return response;
@@ -23,6 +24,7 @@ export async function sendOrder(variety = "regular", order) {
 // Modify an existing order
 export async function modifyOrder(orderId, order) {
   try {
+    await initSession();
     const response = await kc.modifyOrder(orderId, order);
     console.log("✏️ Order modified:", response);
     return response;
@@ -35,6 +37,7 @@ export async function modifyOrder(orderId, order) {
 // Cancel an existing order
 export async function cancelOrder(variety, orderId) {
   try {
+    await initSession();
     const response = await kc.cancelOrder(variety, orderId);
     console.log("❌ Order cancelled:", response);
     return response;
@@ -47,6 +50,7 @@ export async function cancelOrder(variety, orderId) {
 // Fetch all orders
 export async function getAllOrders() {
   try {
+    await initSession();
     const orders = await kc.getOrders();
     return orders;
   } catch (err) {
@@ -58,6 +62,7 @@ export async function getAllOrders() {
 // Fetch open positions
 export async function getOpenPositions() {
   try {
+    await initSession();
     const positions = await kc.getPositions();
     return positions;
   } catch (err) {
@@ -69,6 +74,7 @@ export async function getOpenPositions() {
 // Get holding positions
 export async function getHoldings() {
   try {
+    await initSession();
     const holdings = await kc.getHoldings();
     return holdings;
   } catch (err) {
@@ -80,6 +86,7 @@ export async function getHoldings() {
 // Get margin available across equity
 export async function getAccountMargin() {
   try {
+    await initSession();
     const response = await kc.getMargins("equity");
     // console the account margin details
     console.log("Account Margin:", response);
@@ -93,6 +100,7 @@ export async function getAccountMargin() {
 // Get margin requirement for a specific stock order
 export async function getMarginForStock(order) {
   try {
+    await initSession();
     const response = await kc.orderMargins(order);
 
     const token = symbolTokenMap[order.tradingsymbol];
@@ -140,6 +148,7 @@ export async function canPlaceTrade(signal, sampleQty = 10) {
 // Place a GTT (Good Till Triggered) order
 export async function placeGTTOrder(order) {
   try {
+    await initSession();
     const response = await kc.placeGTT(order);
     console.log("✅ GTT Order placed:", response);
     return response;
@@ -161,6 +170,7 @@ export async function monitorOrder(orderId, timeout = 30000, interval = 1000) {
   const start = Date.now();
   while (Date.now() - start < timeout) {
     try {
+      await initSession();
       const orders = await kc.getOrders();
       const ord = orders.find((o) => o.order_id === orderId);
       if (!ord) {
@@ -179,6 +189,7 @@ export async function monitorOrder(orderId, timeout = 30000, interval = 1000) {
 
 export async function cancelStaleOrders(maxAgeMs = 60000) {
   const now = Date.now();
+  await initSession();
   const orders = await kc.getOrders();
   for (const ord of orders) {
     if (!activeOrders.has(ord.order_id)) continue;
