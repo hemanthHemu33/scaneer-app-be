@@ -1,19 +1,12 @@
 // orderExecutor.js
-import { KiteConnect } from "kiteconnect";
 import dotenv from "dotenv";
 const logError = (ctx, err) => console.error(`[${ctx}]`, err?.message || err);
-import { symbolTokenMap, historicalCache } from "./kite.js"; // to access token mapping and cache
+import { kc, symbolTokenMap, historicalCache } from "./kite.js"; // reuse shared Kite instance
 import { calculateDynamicStopLoss } from "./dynamicRiskModel.js";
 
 dotenv.config();
 
-const apiKey = process.env.KITE_API_KEY;
-const kc = new KiteConnect({ api_key: apiKey });
-
-// Ensure access token is loaded
-export function setAccessToken(token) {
-  kc.setAccessToken(token);
-}
+// kc instance and session handled in kite.js
 
 // Place an order
 export async function sendOrder(variety = "regular", order) {
