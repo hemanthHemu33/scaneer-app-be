@@ -1,6 +1,9 @@
+import { toISTISOString } from './util.js';
+
 export function buildSignal(context = {}, pattern = {}, tradeParams = {}, confidence = '') {
   const {
     symbol,
+    instrumentToken,
     ma20Val,
     ma50Val,
     ema9,
@@ -32,10 +35,11 @@ export function buildSignal(context = {}, pattern = {}, tradeParams = {}, confid
 
   const { entry, stopLoss, target1, target2, qty } = tradeParams;
 
-  const generatedAt = new Date().toISOString();
+  const generatedAt = toISTISOString();
 
   const signal = {
     stock: symbol,
+    instrument_token: instrumentToken,
     pattern: pattern.type,
     strength: pattern.strength,
     direction: pattern.direction,
@@ -65,13 +69,13 @@ export function buildSignal(context = {}, pattern = {}, tradeParams = {}, confid
     confidenceScore: finalScore,
     liveTickData: liveTick,
     depth,
-    expiresAt,
+    expiresAt: expiresAt ? toISTISOString(expiresAt) : undefined,
     generatedAt,
     source: 'analyzeCandles',
   };
 
   const advancedSignal = {
-    signalId: `${symbol}-1m-${strategyName.replace(/\s+/g, '-')}-${new Date().toISOString().replace(/[:.-]/g, '')}`,
+    signalId: `${symbol}-1m-${strategyName.replace(/\s+/g, '-')}-${toISTISOString().replace(/[:.-]/g, '')}`,
     symbol,
     timeframe: '1m',
     strategy: strategyName,
@@ -94,7 +98,7 @@ export function buildSignal(context = {}, pattern = {}, tradeParams = {}, confid
     confidenceScore: strategyConfidence,
     executionWindow: {
       validFrom: generatedAt,
-      validUntil: expiresAt,
+      validUntil: expiresAt ? toISTISOString(expiresAt) : undefined,
     },
     executionHint: {
       type: 'limitOrMarket',
@@ -103,7 +107,7 @@ export function buildSignal(context = {}, pattern = {}, tradeParams = {}, confid
       strategyRef: `id:${strategyName.toLowerCase().replace(/\s+/g, '-')}`,
     },
     status: 'active',
-    expiresAt,
+    expiresAt: expiresAt ? toISTISOString(expiresAt) : undefined,
     autoCancelOn: [],
   };
 

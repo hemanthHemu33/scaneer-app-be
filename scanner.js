@@ -1,11 +1,17 @@
 // scanner.js
 
 import { computeFeatures } from "./featureEngine.js";
-import { debounceSignal, calculateExpiryMinutes } from "./util.js";
+import {
+  debounceSignal,
+  calculateExpiryMinutes,
+  toISTISOString,
+  getMAForSymbol,
+} from "./util.js";
 
 import { getSupportResistanceLevels, historicalCache } from "./kite.js";
 import { candleHistory, symbolTokenMap } from "./dataEngine.js";
 import { evaluateAllStrategies } from "./strategyEngine.js";
+import { evaluateStrategies } from "./strategies.js";
 import { RISK_REWARD_RATIO, calculatePositionSize } from "./positionSizing.js";
 import { isSignalValid } from "./riskEngine.js";
 import { startExitMonitor } from "./exitManager.js";
@@ -18,6 +24,7 @@ import {
 import { signalQualityScore } from "./confidence.js";
 import { sendToExecution } from "./orderExecution.js";
 import { initAccountBalance, getAccountBalance } from "./account.js";
+import { buildSignal } from "./signalBuilder.js";
 // 📊 Signal history tracking
 const signalHistory = {};
 let accountBalance = 0;
@@ -141,9 +148,17 @@ export async function analyzeCandles(
       accountBalance,
       riskPerTradePercentage,
     });
+    const altStrategies = evaluateStrategies(validCandles, {
+      topN: 1,
+    });
     const filtered = filterStrategiesByRegime(stratResults, marketContext);
-    const [signal] = filtered;
-    if (!signal) return null;
+    const [base] = filtered;
+    if (!base) return null;
+
+    if (altStrategies && altStrategies[0]) {
+      base.strategy = altStrategies[0].name;
+      base.confidence = altStrategies[0].confidence;
+    }
 
     // Debounce logic now that strategy name is known
     const conflictWindow = 3 * 60 * 1000;
@@ -151,17 +166,27 @@ export async function analyzeCandles(
       !debounceSignal(
         signalHistory,
         symbol,
-        signal.direction,
-        signal.strategy,
+        base.direction,
+        base.strategy,
         conflictWindow
       )
     )
       return null;
-    signal.support = support;
-    signal.resistance = resistance;
-    signal.expiresAt = expiresAt;
+    // Step 5: Risk filter on raw strategy output
+    // Preliminary signal for risk validation (no sizing or meta info)
+    const preliminary = {
+      stock: symbol,
+      pattern: base.strategy,
+      direction: base.direction,
+      entry: base.entry,
+      stopLoss: base.stopLoss,
+      target2: base.target2,
+      atr: atrValue,
+      spread,
+      liquidity,
+    };
 
-    const ok = isSignalValid(signal, {
+    const riskOk = isSignalValid(preliminary, {
       avgAtr: atrValue,
       indexTrend: isUptrend ? "up" : isDowntrend ? "down" : "sideways",
       timeSinceSignal: 0,
@@ -172,8 +197,67 @@ export async function analyzeCandles(
       maxATR: FILTERS.maxATR,
       minRR: RISK_REWARD_RATIO,
     });
-    if (!ok) return null;
-    signal.ai = null;
+    if (!riskOk) return null;
+
+    // Step 6: Position sizing after risk filter
+    const qty = calculatePositionSize({
+      capital: accountBalance,
+      risk: accountBalance * riskPerTradePercentage,
+      slPoints: Math.abs(base.entry - base.stopLoss),
+      price: base.entry,
+      volatility: atrValue,
+    });
+
+    const tradeParams = {
+      entry: base.entry,
+      stopLoss: base.stopLoss,
+      target1: base.target1,
+      target2: base.target2,
+      qty,
+    };
+
+    const contextForBuild = {
+      symbol,
+      instrumentToken: token,
+      ma20Val: getMAForSymbol(String(token), 20),
+      ma50Val: getMAForSymbol(String(token), 50),
+      ema9,
+      ema21,
+      ema50,
+      ema200,
+      rsi,
+      supertrend,
+      atrValue,
+      slippage,
+      spread,
+      liquidity,
+      liveTick,
+      depth,
+      rrMultiplier: RISK_REWARD_RATIO,
+      rvol,
+      isUptrend,
+      isDowntrend,
+      strategyName: base.strategy,
+      strategyConfidence: base.confidence,
+      support,
+      resistance,
+      finalScore: signalQualityScore({ atr: atrValue, rvol }),
+      expiresAt,
+      riskAmount: accountBalance * riskPerTradePercentage,
+      accountBalance,
+      baseRisk: Math.abs(base.entry - base.stopLoss),
+    };
+
+    // Step 7: Append meta information and build final signal
+    const { signal } = buildSignal(
+      contextForBuild,
+      { type: base.strategy, strength: base.confidence, direction: base.direction },
+      tradeParams,
+      base.confidence
+    );
+
+    signal.expiresAt = toISTISOString(expiresAt);
+    signal.ai = null; // Step 8: final enrichment placeholder
 
     return signal;
   } catch (err) {

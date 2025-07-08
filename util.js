@@ -1,5 +1,11 @@
 // util.js
 import { getMA } from "./kite.js"; // Reuse kite.js
+import dayjs from "dayjs";
+import utc from "dayjs/plugin/utc.js";
+import timezone from "dayjs/plugin/timezone.js";
+
+dayjs.extend(utc);
+dayjs.extend(timezone);
 import {
   calculateEMA,
   calculateRSI,
@@ -31,6 +37,10 @@ export function calculateMA(prices, length) {
 
 export function getMAForSymbol(symbol, period) {
   return getMA(symbol, period);
+}
+
+export function toISTISOString(date = new Date()) {
+  return dayjs(date).tz("Asia/Kolkata").format();
 }
 
 export function analyzeHigherTimeframe(
