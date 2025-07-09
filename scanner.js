@@ -118,6 +118,7 @@ export async function analyzeCandles(
       ema200,
       rsi,
       supertrend,
+      vwap,
       atr: atrValue = 1,
       rvol,
     } = features;
@@ -235,6 +236,8 @@ export async function analyzeCandles(
       depth,
       rrMultiplier: RISK_REWARD_RATIO,
       rvol,
+      vwap,
+      expiryMinutes,
       isUptrend,
       isDowntrend,
       strategyName: base.strategy,
