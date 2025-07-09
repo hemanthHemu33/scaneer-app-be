@@ -64,11 +64,9 @@ async function setStockSymbol(symbol) {
     console.log(`🔍 Stock symbol added to memory: ${symbol}`);
   }
 
-  await db.collection("stock_symbols").updateOne(
-    {},
-    { $addToSet: { symbols: symbol } },
-    { upsert: true }
-  );
+  await db
+    .collection("stock_symbols")
+    .updateOne({}, { $addToSet: { symbols: symbol } }, { upsert: true });
   console.log(`✅ Stock symbol "${symbol}" saved to database`);
 
   // Subscribe to ticker immediately
@@ -189,42 +187,70 @@ let riskState = {
 let gapPercent = {};
 
 // 🔐 Initialize Kite session
+// async function initSession() {
+//   try {
+//     const sessionQuery = { type: "kite_session" };
+
+//     const savedSession = await db.collection("tokens").findOne(sessionQuery);
+
+//     if (savedSession?.access_token) {
+//       kc.setAccessToken(savedSession.access_token);
+//       console.log("♻️ Loaded saved access token from DB");
+//       return savedSession.access_token;
+//     }
+
+//     // 🧠 fallback to tokensData if needed
+//     const requestToken =
+//       savedSession?.request_token || tokensData?.request_token;
+
+//     if (!requestToken) {
+//       throw new Error("Missing request_token. Cannot generate session.");
+//     }
+
+//     const session = await kc.generateSession(requestToken, apiSecret);
+//     kc.setAccessToken(session.access_token);
+
+//     // ✅ Save session object with fixed identifier
+//     await db
+//       .collection("tokens")
+//       .updateOne(
+//         sessionQuery,
+//         { $set: { ...session, type: "kite_session" } },
+//         { upsert: true }
+//       );
+
+//     console.log("✅ Session generated and updated in DB:", session);
+//     return session.access_token;
+//   } catch (err) {
+//     logError("Session init failed", err);
+//     return null;
+//   }
+// }
+
 async function initSession() {
   try {
-    const sessionQuery = { type: "kite_session" };
+    const session = await db
+      .collection("tokens")
+      .findOne({ type: "kite_session" });
 
-    const savedSession = await db.collection("tokens").findOne(sessionQuery);
-
-    if (savedSession?.access_token) {
-      kc.setAccessToken(savedSession.access_token);
-      console.log("♻️ Loaded saved access token from DB");
-      return savedSession.access_token;
+    if (!session?.access_token) {
+      console.warn("⚠️ No valid access token found in DB.");
+      return null;
     }
 
-    // 🧠 fallback to tokensData if needed
-    const requestToken =
-      savedSession?.request_token || tokensData?.request_token;
-
-    if (!requestToken) {
-      throw new Error("Missing request_token. Cannot generate session.");
-    }
-
-    const session = await kc.generateSession(requestToken, apiSecret);
     kc.setAccessToken(session.access_token);
 
-    // ✅ Save session object with fixed identifier
-    await db
-      .collection("tokens")
-      .updateOne(
-        sessionQuery,
-        { $set: { ...session, type: "kite_session" } },
-        { upsert: true }
-      );
-
-    console.log("✅ Session generated and updated in DB:", session);
-    return session.access_token;
+    // 🔍 Optional: Check if token is still valid by calling a protected endpoint
+    try {
+      await kc.getProfile(); // Throws if token is expired
+      console.log("✅ Access token is valid and set.");
+      return session;
+    } catch (err) {
+      console.error("❌ Access token is expired or invalid.", err.message);
+      return null;
+    }
   } catch (err) {
-    logError("Session init failed", err);
+    console.error("❌ Failed to load session from DB", err.message || err);
     return null;
   }
 }

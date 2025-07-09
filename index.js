@@ -170,11 +170,9 @@ app.get("/signals", async (req, res) => {
   }
 });
 
-
 app.get("/signal-history", (req, res) => {
   res.json(getSignalHistory());
 });
-
 
 app.post("/set-interval", (req, res) => {
   const { interval } = req.body;
@@ -198,32 +196,86 @@ app.post("/fetch-intraday-data", async (req, res) => {
   }
 });
 
+// app.get("/kite-redirect", async (req, res) => {
+//   const requestToken = req.query.request_token;
 
+//   if (!requestToken) {
+//     // return res.status(400).send("Missing request token");
+//     return res.status(400).json({ error: "Missing request_token" });
+//   }
+
+//   // // ✅ Save the request_token in DB with type
+//   // await db
+//   //   .collection("tokens")
+//   //   .updateOne(
+//   //     { type: "kite_session" },
+//   //     { $set: { request_token: requestToken, type: "kite_session" } },
+//   //     { upsert: true }
+//   //   );
+
+//   // // ✅ Optionally generate session here
+//   // const session = await initSession();
+
+//   try {
+//     const session = await kc.generateSession(requestToken, apiSecret);
+//     kc.setAccessToken(session.access_token);
+
+//     await db.collection("tokens").updateOne(
+//       { type: "kite_session" },
+//       {
+//         $set: {
+//           ...session,
+//           request_token: requestToken,
+//           type: "kite_session",
+//         },
+//       },
+//       { upsert: true }
+//     );
+
+//     return res.send("✅ Login successful, session created.");
+//   } catch (err) {
+//     console.error("❌ Failed to generate session:", err.message);
+//     return res.send("❌ Login failed: " + err.message);
+//   }
+
+//   // if (session) {
+//   //   return res.send("✅ Login Successful, session created.");
+//   // } else {
+//   //   return res.send("⚠️ Login saved, but session creation failed.");
+//   // }
+// });
 
 app.get("/kite-redirect", async (req, res) => {
   const requestToken = req.query.request_token;
 
   if (!requestToken) {
-    // return res.status(400).send("Missing request token");
     return res.status(400).json({ error: "Missing request_token" });
   }
 
-  // ✅ Save the request_token in DB with type
-  await db
-    .collection("tokens")
-    .updateOne(
+  try {
+    // ✅ Generate new session using the one-time request token
+    const session = await kc.generateSession(requestToken, apiSecret);
+    kc.setAccessToken(session.access_token);
+
+    // ✅ Save full session and request_token in DB
+    await db.collection("tokens").updateOne(
       { type: "kite_session" },
-      { $set: { request_token: requestToken, type: "kite_session" } },
+      {
+        $set: {
+          ...session,
+          request_token: requestToken,
+          type: "kite_session",
+        },
+      },
       { upsert: true }
     );
 
-  // ✅ Optionally generate session here
-  const session = await initSession();
-
-  if (session) {
-    return res.send("✅ Login Successful, session created.");
-  } else {
-    return res.send("⚠️ Login saved, but session creation failed.");
+    return res.send("✅ Login successful, session created.");
+  } catch (err) {
+    console.error("❌ Failed to generate session:", err.message || err);
+    return res
+      .status(500)
+      .send("❌ Login failed: " + (err.message || "Unknown error"));
   }
 });
 
