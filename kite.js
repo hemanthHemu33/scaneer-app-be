@@ -303,6 +303,7 @@ async function startLiveFeed(io) {
   if (!accessToken) return logError("Live feed start failed: No access token");
 
   await warmupCandleHistory();
+  await loadTickDataFromDB();
 
   // 🧠 Load historical intraday data then today's session data into candle history
   try {
@@ -789,6 +790,28 @@ async function logTrade(signal) {
   tradeLog.push(tradeEntry);
   await db.collection("trade_logs").insertOne(tradeEntry);
   // fs.appendFileSync("trade.log", JSON.stringify(tradeEntry) + "\n");
+}
+
+// Load any persisted ticks from MongoDB on startup
+async function loadTickDataFromDB() {
+  try {
+    const ticks = await db
+      .collection("tick_data")
+      .find({})
+      .sort({ timestamp: 1 })
+      .toArray();
+    for (const t of ticks) {
+      const token = String(t.token);
+      if (!tickBuffer[token]) tickBuffer[token] = [];
+      tickBuffer[token].push(t);
+    }
+    if (ticks.length) {
+      await db.collection("tick_data").deleteMany({});
+      console.log(`✅ Loaded ${ticks.length} ticks from DB`);
+    }
+  } catch (err) {
+    logError("Tick data load", err);
+  }
 }
 
 // Persist tick buffer every 10 seconds for restart safety
@@ -1400,4 +1423,5 @@ export {
   symbolTokenMap,
   historicalCache,
   resetInMemoryData,
+  loadTickDataFromDB,
 };
