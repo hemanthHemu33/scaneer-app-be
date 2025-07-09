@@ -43,6 +43,18 @@ export function toISTISOString(date = new Date()) {
   return dayjs(date).tz("Asia/Kolkata").format();
 }
 
+export function toISTDate(date = new Date()) {
+  return dayjs(date).tz("Asia/Kolkata").format("YYYY-MM-DD");
+}
+
+export function convertTickTimestampsToIST(tick = {}) {
+  const t = { ...tick };
+  if (t.last_trade_time) t.last_trade_time = toISTISOString(t.last_trade_time);
+  if (t.exchange_timestamp)
+    t.exchange_timestamp = toISTISOString(t.exchange_timestamp);
+  return t;
+}
+
 export function analyzeHigherTimeframe(
   candles,
   emaLength = 50,

@@ -95,6 +95,7 @@ export function computeFeatures(candles = []) {
   const rsi = calculateRSI(closes, 14);
   const atr = getATR(candles, 14);
   const supertrend = calculateSupertrend(candles, 50);
+  const vwap = calculateVWAP(candles);
 
   const avgVolume =
     volumes.length > 1
@@ -112,5 +113,6 @@ export function computeFeatures(candles = []) {
     supertrend,
     avgVolume,
     rvol,
+    vwap,
   };
 }
