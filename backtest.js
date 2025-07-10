@@ -1,39 +1,28 @@
 import fs from "fs";
 import dayjs from "dayjs";
 import customParseFormat from "dayjs/plugin/customParseFormat.js";
-import { analyzeCandles } from "./scanner.js";
-import { candleHistory } from "./dataEngine.js";
 import db from "./db.js";
 import { logBacktestReference } from "./auditLogger.js";
 
 dayjs.extend(customParseFormat);
 
-// ✅ Load instruments and build maps
-// const instruments = JSON.parse(
-//   fs.readFileSync("./routes/instruments.json", "utf-8")
-// );
-const instruments = await db
-  .collection("instruments")
-  .find({})
-  .toArray();
-const tokenSymbolMap = {};
-const symbolTokenMap = {};
+async function loadBacktestData() {
+  const instruments = await db.collection("instruments").find({}).toArray();
+  const tokenSymbolMap = {};
+  const symbolTokenMap = {};
+  for (const inst of instruments) {
+    const key = `${inst.exchange}:${inst.tradingsymbol}`;
+    tokenSymbolMap[inst.instrument_token] = key;
+    symbolTokenMap[key] = inst.instrument_token;
+  }
 
-for (const inst of instruments) {
-  const key = `${inst.exchange}:${inst.tradingsymbol}`;
-  tokenSymbolMap[inst.instrument_token] = key;
-  symbolTokenMap[key] = inst.instrument_token;
+  const historicalSessionData =
+    (await db.collection("historical_session_data").findOne({})) || {};
+  const sessionData = (await db.collection("session_data").findOne({})) || {};
+  const combinedSessionData = { ...historicalSessionData, ...sessionData };
+
+  return { tokenSymbolMap, symbolTokenMap, combinedSessionData };
 }
-
-// ✅ Load session-level historical data
-// const sessionData = JSON.parse(
-//   fs.readFileSync("./historical_data.json", "utf-8")
-// );
-const historicalSessionData = await db
-  .collection("historical_session_data")
-  .findOne({});
-const sessionData = await db.collection("session_data").findOne({});
-const combinedSessionData = { ...historicalSessionData, ...sessionData };
 
 // 🧠 CONFIG
 const SYMBOL = "NSE:ADANIENT";
@@ -43,12 +32,73 @@ const DELAY_MS = 10;
 // 🗓️ Set test date manually
 const testDate = dayjs("20/6/2025", "D/M/YYYY");
 
+export function simulateSignals(signals = [], candles = []) {
+  let wins = 0;
+  let trades = 0;
+  let totalRR = 0;
+  const results = [];
+
+  for (const sig of signals) {
+    const { entry, stopLoss, target2, target1, direction, index } = sig;
+    const target = target2 ?? target1;
+    if (
+      typeof entry !== "number" ||
+      typeof stopLoss !== "number" ||
+      typeof target !== "number"
+    ) {
+      continue;
+    }
+    const risk = Math.abs(entry - stopLoss);
+    if (!risk) continue;
+    const next = candles.slice((index ?? 0) + 1);
+    let outcome = 0;
+    for (const c of next) {
+      if (direction === "Long") {
+        if (c.low <= stopLoss) {
+          outcome = -risk;
+          break;
+        }
+        if (c.high >= target) {
+          outcome = target - entry;
+          break;
+        }
+      } else {
+        if (c.high >= stopLoss) {
+          outcome = -risk;
+          break;
+        }
+        if (c.low <= target) {
+          outcome = entry - target;
+          break;
+        }
+      }
+    }
+    if (outcome === 0) continue;
+    trades += 1;
+    if (outcome > 0) wins += 1;
+    totalRR += Math.abs((target - entry) / risk);
+    results.push({ signal: sig, pnl: outcome });
+  }
+
+  return {
+    trades,
+    winRate: trades ? wins / trades : 0,
+    avgRR: trades ? totalRR / trades : 0,
+    results,
+  };
+}
+
 export async function backtestStrategy(symbol = SYMBOL) {
+  const { tokenSymbolMap, symbolTokenMap, combinedSessionData } =
+    await loadBacktestData();
   const token = symbolTokenMap[symbol];
+
+  const { analyzeCandles } = await import('./scanner.js');
+  const { candleHistory } = await import('./dataEngine.js');
 
   if (!token || !combinedSessionData[token]) {
     console.error(`❌ No data found for symbol: ${symbol}`);
-    return;
+    return null;
   }
 
   // ✅ Convert timestamps properly
@@ -112,6 +162,7 @@ export async function backtestStrategy(symbol = SYMBOL) {
 
     if (signal) {
       signal.instrument_token = token; // ✅ Attach token to each signal
+      signal.index = i; // track candle index for simulation
       signals.push(signal);
       console.log(
         `📈 ${symbol}: ${signal.pattern} ${signal.direction} @ ₹${signal.entry}`
@@ -137,6 +188,13 @@ export async function backtestStrategy(symbol = SYMBOL) {
     `✅ Backtest complete. ${signals.length} signals saved to database`
   );
 
+  const metrics = simulateSignals(signals, candles);
+  console.log(
+    `📊 Win rate: ${(metrics.winRate * 100).toFixed(2)}% | Avg RR: ${metrics.avgRR.toFixed(
+      2
+    )}`
+  );
+
   await logBacktestReference(
     {
       backtestId: Date.now().toString(),
@@ -148,8 +206,10 @@ export async function backtestStrategy(symbol = SYMBOL) {
       },
       capitalDeployed: 100000,
     },
-    { trades: signals.length }
+    { trades: signals.length, winRate: metrics.winRate, avgRR: metrics.avgRR }
   );
+
+  return metrics;
 }
 
 if (process.env.NODE_ENV !== 'test') {
