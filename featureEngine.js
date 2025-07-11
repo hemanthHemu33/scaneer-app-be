@@ -24,10 +24,11 @@ export function calculateEMA(prices, length, key) {
 }
 
 export function calculateRSI(prices, length) {
-  if (!prices || prices.length < length + 1) return null;
+  if (!prices || prices.length < 2) return null;
+  const lookback = Math.min(length, prices.length - 1);
   let gains = 0,
     losses = 0;
-  for (let i = prices.length - length - 1; i < prices.length - 1; i++) {
+  for (let i = prices.length - lookback - 1; i < prices.length - 1; i++) {
     const diff = prices[i + 1] - prices[i];
     if (diff >= 0) gains += diff;
     else losses -= diff;
@@ -45,9 +46,10 @@ export function calculateSupertrend(candles, atrLength = 14) {
 }
 
 export function getATR(data, period = 14) {
-  if (!data || data.length < period) return null;
+  if (!data || data.length < 2) return null;
+  const len = Math.min(period, data.length - 1);
   let trSum = 0;
-  for (let i = 1; i < period; i++) {
+  for (let i = data.length - len; i < data.length; i++) {
     const high = data[i].high,
       low = data[i].low,
       prevClose = data[i - 1].close;
@@ -58,7 +60,7 @@ export function getATR(data, period = 14) {
     );
     trSum += tr;
   }
-  return trSum / period;
+  return trSum / len;
 }
 
 export function calculateVWAP(candles) {
@@ -66,16 +68,24 @@ export function calculateVWAP(candles) {
   const last = candles[candles.length - 1];
   const refDate = new Date(last.timestamp || last.date);
   refDate.setHours(0, 0, 0, 0);
+  const fallbackTP = (last.high + last.low + last.close) / 3;
   let totalPV = 0,
-    totalVolume = 0;
+    totalVolume = 0,
+    count = 0;
   candles.forEach((c) => {
     const ts = new Date(c.timestamp || c.date);
     if (ts < refDate) return;
     const typicalPrice = (c.high + c.low + c.close) / 3;
-    totalPV += typicalPrice * (c.volume || 0);
-    totalVolume += c.volume || 0;
+    if (c.volume && c.volume > 0) {
+      totalPV += typicalPrice * c.volume;
+      totalVolume += c.volume;
+    } else {
+      totalPV += typicalPrice;
+      count += 1;
+    }
   });
-  return totalVolume > 0 ? totalPV / totalVolume : null;
+  if (totalVolume > 0) return totalPV / totalVolume;
+  return count > 0 ? totalPV / count : fallbackTP;
 }
 
 export function resetIndicatorCache() {
