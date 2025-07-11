@@ -24,10 +24,11 @@ export function calculateEMA(prices, length, key) {
 }
 
 export function calculateRSI(prices, length) {
-  if (!prices || prices.length < length + 1) return null;
+  if (!prices || prices.length < 2) return null;
+  const lookback = Math.min(length, prices.length - 1);
   let gains = 0,
     losses = 0;
-  for (let i = prices.length - length - 1; i < prices.length - 1; i++) {
+  for (let i = prices.length - lookback - 1; i < prices.length - 1; i++) {
     const diff = prices[i + 1] - prices[i];
     if (diff >= 0) gains += diff;
     else losses -= diff;
@@ -45,9 +46,10 @@ export function calculateSupertrend(candles, atrLength = 14) {
 }
 
 export function getATR(data, period = 14) {
-  if (!data || data.length < period) return null;
+  if (!data || data.length < 2) return null;
+  const len = Math.min(period, data.length - 1);
   let trSum = 0;
-  for (let i = 1; i < period; i++) {
+  for (let i = data.length - len; i < data.length; i++) {
     const high = data[i].high,
       low = data[i].low,
       prevClose = data[i - 1].close;
@@ -58,7 +60,7 @@ export function getATR(data, period = 14) {
     );
     trSum += tr;
   }
-  return trSum / period;
+  return trSum / len;
 }
 
 export function calculateVWAP(candles) {
