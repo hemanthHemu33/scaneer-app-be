@@ -68,16 +68,24 @@ export function calculateVWAP(candles) {
   const last = candles[candles.length - 1];
   const refDate = new Date(last.timestamp || last.date);
   refDate.setHours(0, 0, 0, 0);
+  const fallbackTP = (last.high + last.low + last.close) / 3;
   let totalPV = 0,
-    totalVolume = 0;
+    totalVolume = 0,
+    count = 0;
   candles.forEach((c) => {
     const ts = new Date(c.timestamp || c.date);
     if (ts < refDate) return;
     const typicalPrice = (c.high + c.low + c.close) / 3;
-    totalPV += typicalPrice * (c.volume || 0);
-    totalVolume += c.volume || 0;
+    if (c.volume && c.volume > 0) {
+      totalPV += typicalPrice * c.volume;
+      totalVolume += c.volume;
+    } else {
+      totalPV += typicalPrice;
+      count += 1;
+    }
   });
-  return totalVolume > 0 ? totalPV / totalVolume : null;
+  if (totalVolume > 0) return totalPV / totalVolume;
+  return count > 0 ? totalPV / count : fallbackTP;
 }
 
 export function resetIndicatorCache() {
