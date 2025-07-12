@@ -19,7 +19,19 @@ import {
   calculateOBV,
   calculateCMF,
   calculateMFI,
-  calculateAnchoredVWAP
+  calculateAnchoredVWAP,
+  calculatePivotPoints,
+  calculateFibonacciRetracements,
+  calculateFibonacciExtensions,
+  calculateParabolicSAR,
+  calculateHeikinAshi,
+  calculateRenko,
+  calculateKagi,
+  calculatePointFigure,
+  calculateZigZag,
+  calculateMedianPrice,
+  calculateTypicalPrice,
+  calculateWeightedClose
 } from '../featureEngine.js';
 
 test('calculateSMA computes average', () => {
@@ -174,4 +186,72 @@ test('calculateAnchoredVWAP returns number', () => {
   ];
   const avwap = calculateAnchoredVWAP(candles);
   assert.equal(typeof avwap, 'number');
+});
+
+test('calculatePivotPoints returns levels', () => {
+  const candles = [{ high: 11, low: 9, close: 10 }];
+  const pp = calculatePivotPoints(candles);
+  assert.ok(pp && Math.abs(pp.pp - 10) < 1e-6);
+});
+
+test('calculateFibonacciRetracements returns numbers', () => {
+  const fib = calculateFibonacciRetracements(10, 8);
+  assert.ok(fib && typeof fib.level50 === 'number');
+});
+
+test('calculateFibonacciExtensions returns numbers', () => {
+  const fib = calculateFibonacciExtensions(10, 8);
+  assert.ok(fib && typeof fib.level161_8 === 'number');
+});
+
+test('calculateParabolicSAR returns number', () => {
+  const candles = [
+    { high: 10, low: 8 },
+    { high: 11, low: 9 },
+    { high: 12, low: 10 }
+  ];
+  const psar = calculateParabolicSAR(candles);
+  assert.equal(typeof psar, 'number');
+});
+
+test('calculateHeikinAshi returns array', () => {
+  const candles = [
+    { open: 1, high: 2, low: 0, close: 1 },
+    { open: 1, high: 3, low: 0.5, close: 2 }
+  ];
+  const ha = calculateHeikinAshi(candles);
+  assert.equal(ha.length, 2);
+});
+
+test('calculateRenko returns array', () => {
+  const candles = [
+    { close: 1 },
+    { close: 2 },
+    { close: 3 }
+  ];
+  const bricks = calculateRenko(candles, 0.5);
+  assert.ok(Array.isArray(bricks));
+});
+
+test('calculateKagi returns array', () => {
+  const lines = calculateKagi([1, 2, 3, 2, 4], 1);
+  assert.ok(Array.isArray(lines));
+});
+
+test('calculatePointFigure returns array', () => {
+  const cols = calculatePointFigure([1,2,3,2,4], 1, 3);
+  assert.ok(Array.isArray(cols));
+});
+
+test('calculateZigZag returns array', () => {
+  const zz = calculateZigZag([1,2,3,2,4], 10);
+  assert.ok(Array.isArray(zz));
+});
+
+test('median/typical/weighted close compute', () => {
+  const candle = { high: 10, low: 8, close: 9 };
+  const mp = calculateMedianPrice(candle);
+  const tp = calculateTypicalPrice(candle);
+  const wc = calculateWeightedClose(candle);
+  assert.ok(mp === 9 && tp === 9 && wc === 9);
 });
