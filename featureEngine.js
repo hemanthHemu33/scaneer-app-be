@@ -674,6 +674,228 @@ export function calculateVolumeProfile(candles, buckets = 10) {
   return profile;
 }
 
+export function calculatePivotPoints(candles) {
+  if (!candles || candles.length === 0) return null;
+  const last = candles[candles.length - 1];
+  const pp = (last.high + last.low + last.close) / 3;
+  const r1 = 2 * pp - last.low;
+  const s1 = 2 * pp - last.high;
+  const r2 = pp + (last.high - last.low);
+  const s2 = pp - (last.high - last.low);
+  const r3 = last.high + 2 * (pp - last.low);
+  const s3 = last.low - 2 * (last.high - pp);
+  return { pp, r1, s1, r2, s2, r3, s3 };
+}
+
+export function calculateFibonacciRetracements(high, low) {
+  if (high == null || low == null) return null;
+  const diff = high - low;
+  return {
+    level23_6: high - diff * 0.236,
+    level38_2: high - diff * 0.382,
+    level50: high - diff * 0.5,
+    level61_8: high - diff * 0.618,
+    level78_6: high - diff * 0.786,
+  };
+}
+
+export function calculateFibonacciExtensions(high, low) {
+  if (high == null || low == null) return null;
+  const diff = high - low;
+  return {
+    level127_2: high + diff * 1.272,
+    level161_8: high + diff * 1.618,
+    level261_8: high + diff * 2.618,
+  };
+}
+
+export function calculateParabolicSAR(candles, step = 0.02, max = 0.2) {
+  if (!candles || candles.length < 2) return null;
+  let rising = true;
+  let psar = candles[0].low;
+  let ep = candles[0].high;
+  let af = step;
+  for (let i = 1; i < candles.length; i++) {
+    psar = psar + af * (ep - psar);
+    const curr = candles[i];
+    if (rising) {
+      if (curr.low < psar) {
+        rising = false;
+        psar = ep;
+        ep = curr.low;
+        af = step;
+      } else {
+        if (curr.high > ep) {
+          ep = curr.high;
+          af = Math.min(max, af + step);
+        }
+      }
+    } else {
+      if (curr.high > psar) {
+        rising = true;
+        psar = ep;
+        ep = curr.high;
+        af = step;
+      } else {
+        if (curr.low < ep) {
+          ep = curr.low;
+          af = Math.min(max, af + step);
+        }
+      }
+    }
+  }
+  return psar;
+}
+
+export function calculateHeikinAshi(candles) {
+  if (!candles || candles.length === 0) return null;
+  const ha = [];
+  for (let i = 0; i < candles.length; i++) {
+    const c = candles[i];
+    const close = (c.open + c.high + c.low + c.close) / 4;
+    const open = i === 0 ? (c.open + c.close) / 2 : (ha[i - 1].open + ha[i - 1].close) / 2;
+    const high = Math.max(c.high, open, close);
+    const low = Math.min(c.low, open, close);
+    ha.push({ open, high, low, close });
+  }
+  return ha;
+}
+
+export function calculateRenko(candles, brickSize) {
+  if (!candles || candles.length === 0) return null;
+  if (!brickSize) brickSize = getATR(candles, 14) || (candles[0].close * 0.01);
+  const bricks = [];
+  let lastClose = candles[0].close;
+  for (const c of candles) {
+    while (Math.abs(c.close - lastClose) >= brickSize) {
+      const dir = c.close > lastClose ? 1 : -1;
+      lastClose += brickSize * dir;
+      bricks.push({ close: lastClose, direction: dir });
+    }
+  }
+  return bricks;
+}
+
+export function calculateKagi(prices, reversal = 1) {
+  if (!prices || prices.length === 0) return null;
+  const lines = [];
+  let start = prices[0];
+  let prev = prices[0];
+  let dir = 0;
+  for (let i = 1; i < prices.length; i++) {
+    const p = prices[i];
+    if (dir >= 0 && p >= prev) {
+      prev = p;
+    } else if (dir <= 0 && p <= prev) {
+      prev = p;
+    } else if (dir <= 0 && p >= prev + reversal) {
+      lines.push({ open: start, close: prev, direction: -1 });
+      start = prev;
+      prev = p;
+      dir = 1;
+    } else if (dir >= 0 && p <= prev - reversal) {
+      lines.push({ open: start, close: prev, direction: 1 });
+      start = prev;
+      prev = p;
+      dir = -1;
+    }
+  }
+  lines.push({ open: start, close: prev, direction: dir || 1 });
+  return lines;
+}
+
+export function calculatePointFigure(prices, boxSize = 1, reversal = 3) {
+  if (!prices || prices.length === 0) return null;
+  const cols = [];
+  let type = null;
+  let top = prices[0];
+  let bottom = prices[0];
+  for (const price of prices) {
+    if (type == null) {
+      type = price >= prices[0] ? 'X' : 'O';
+    }
+    if (type === 'X') {
+      if (price >= top + boxSize) {
+        top = price;
+      } else if (price <= top - boxSize * reversal) {
+        cols.push({ type: 'X', high: top, low: bottom });
+        type = 'O';
+        bottom = price;
+        top = price;
+      }
+    } else {
+      if (price <= bottom - boxSize) {
+        bottom = price;
+      } else if (price >= bottom + boxSize * reversal) {
+        cols.push({ type: 'O', high: top, low: bottom });
+        type = 'X';
+        top = price;
+        bottom = price;
+      }
+    }
+  }
+  cols.push({ type, high: top, low: bottom });
+  return cols;
+}
+
+export function calculateZigZag(prices, deviation = 5) {
+  if (!prices || prices.length < 2) return null;
+  const pts = [];
+  let last = prices[0];
+  let lastIdx = 0;
+  let dir = null;
+  for (let i = 1; i < prices.length; i++) {
+    const p = prices[i];
+    const change = ((p - last) / last) * 100;
+    if (dir === null) {
+      if (Math.abs(change) >= deviation) {
+        dir = change > 0 ? 1 : -1;
+        last = p;
+        lastIdx = i;
+        pts.push({ index: lastIdx, price: p });
+      }
+    } else if (dir === 1) {
+      if (p > last) {
+        last = p;
+        lastIdx = i;
+        pts[pts.length - 1] = { index: lastIdx, price: p };
+      } else if (((last - p) / last) * 100 >= deviation) {
+        dir = -1;
+        last = p;
+        lastIdx = i;
+        pts.push({ index: lastIdx, price: p });
+      }
+    } else {
+      if (p < last) {
+        last = p;
+        lastIdx = i;
+        pts[pts.length - 1] = { index: lastIdx, price: p };
+      } else if (((p - last) / last) * 100 >= deviation) {
+        dir = 1;
+        last = p;
+        lastIdx = i;
+        pts.push({ index: lastIdx, price: p });
+      }
+    }
+  }
+  return pts;
+}
+
+export function calculateMedianPrice(candle) {
+  if (!candle) return null;
+  return (candle.high + candle.low) / 2;
+}
+
+export function calculateTypicalPrice(candle) {
+  if (!candle) return null;
+  return (candle.high + candle.low + candle.close) / 3;
+}
+
+export function calculateWeightedClose(candle) {
+  if (!candle) return null;
+  return (candle.high + candle.low + 2 * candle.close) / 4;
+}
+
 export function resetIndicatorCache() {
   emaCache.clear();
 }
@@ -682,6 +904,8 @@ export function computeFeatures(candles = []) {
   if (!Array.isArray(candles) || candles.length === 0) return null;
 
   const closes = candles.map((c) => c.close);
+  const highs = candles.map((c) => c.high);
+  const lows = candles.map((c) => c.low);
   const volumes = candles.map((c) => c.volume || 0);
 
   const ema9 = calculateEMA(closes, 9);
@@ -724,6 +948,18 @@ export function computeFeatures(candles = []) {
   const atr = getATR(candles, 14);
   const supertrend = calculateSupertrend(candles, 50);
   const vwap = calculateVWAP(candles);
+  const pivot = calculatePivotPoints(candles);
+  const fibRetracements = calculateFibonacciRetracements(Math.max(...highs), Math.min(...lows));
+  const fibExtensions = calculateFibonacciExtensions(Math.max(...highs), Math.min(...lows));
+  const psar = calculateParabolicSAR(candles);
+  const heikinAshi = calculateHeikinAshi(candles);
+  const renko = calculateRenko(candles);
+  const kagi = calculateKagi(closes);
+  const pointFigure = calculatePointFigure(closes);
+  const zigzag = calculateZigZag(closes);
+  const medianPrice = calculateMedianPrice(candles.at(-1));
+  const typicalPrice = calculateTypicalPrice(candles.at(-1));
+  const weightedClose = calculateWeightedClose(candles.at(-1));
   const anchoredVwap = calculateAnchoredVWAP(candles);
   const obv = calculateOBV(candles);
   const cmf = calculateCMF(candles);
@@ -798,5 +1034,17 @@ export function computeFeatures(candles = []) {
     avgVolume,
     rvol,
     vwap,
+    pivot,
+    fibRetracements,
+    fibExtensions,
+    psar,
+    heikinAshi,
+    renko,
+    kagi,
+    pointFigure,
+    zigzag,
+    medianPrice,
+    typicalPrice,
+    weightedClose,
   };
 }
