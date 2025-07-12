@@ -525,6 +525,155 @@ export function calculateEnvelopes(prices, length = 20, pct = 0.025) {
   return calculateMAEnvelopes(prices, length, pct);
 }
 
+export function calculateOBV(candles) {
+  if (!candles || candles.length < 2) return null;
+  let obv = 0;
+  for (let i = 1; i < candles.length; i++) {
+    const prev = candles[i - 1].close;
+    const curr = candles[i].close;
+    const vol = candles[i].volume || 0;
+    if (curr > prev) obv += vol;
+    else if (curr < prev) obv -= vol;
+  }
+  return obv;
+}
+
+export function calculateCMF(candles, length = 20) {
+  if (!candles || candles.length < length) return null;
+  let mfv = 0,
+    volSum = 0;
+  for (let i = candles.length - length; i < candles.length; i++) {
+    const c = candles[i];
+    const mfm =
+      ((c.close - c.low) - (c.high - c.close)) / (c.high - c.low || 1);
+    const vol = c.volume || 0;
+    mfv += mfm * vol;
+    volSum += vol;
+  }
+  return volSum === 0 ? 0 : mfv / volSum;
+}
+
+export function calculateMFI(candles, length = 14) {
+  if (!candles || candles.length < length + 1) return null;
+  let posMF = 0,
+    negMF = 0;
+  for (let i = candles.length - length; i < candles.length; i++) {
+    const tp = (candles[i].high + candles[i].low + candles[i].close) / 3;
+    const prevTP =
+      (candles[i - 1].high + candles[i - 1].low + candles[i - 1].close) / 3;
+    const mf = tp * (candles[i].volume || 0);
+    if (tp > prevTP) posMF += mf;
+    else if (tp < prevTP) negMF += mf;
+  }
+  const mr = posMF / (negMF || 1);
+  return 100 - 100 / (1 + mr);
+}
+
+export function calculateAccumDist(candles) {
+  if (!candles || candles.length === 0) return null;
+  let ad = 0;
+  for (const c of candles) {
+    const mfm =
+      ((c.close - c.low) - (c.high - c.close)) / (c.high - c.low || 1);
+    ad += mfm * (c.volume || 0);
+  }
+  return ad;
+}
+
+export function calculateAnchoredVWAP(candles, anchorIndex = 0) {
+  if (!candles || candles.length === 0) return null;
+  anchorIndex = Math.max(0, anchorIndex);
+  let pv = 0,
+    vol = 0;
+  for (let i = anchorIndex; i < candles.length; i++) {
+    const tp = (candles[i].high + candles[i].low + candles[i].close) / 3;
+    const v = candles[i].volume || 0;
+    pv += tp * v;
+    vol += v;
+  }
+  return vol ? pv / vol : null;
+}
+
+export function calculatePVI(candles) {
+  if (!candles || candles.length < 2) return null;
+  let pvi = 1000;
+  for (let i = 1; i < candles.length; i++) {
+    const prevV = candles[i - 1].volume || 0;
+    const currV = candles[i].volume || 0;
+    if (currV > prevV) {
+      pvi +=
+        ((candles[i].close - candles[i - 1].close) / candles[i - 1].close) *
+        pvi;
+    }
+  }
+  return pvi;
+}
+
+export function calculateNVI(candles) {
+  if (!candles || candles.length < 2) return null;
+  let nvi = 1000;
+  for (let i = 1; i < candles.length; i++) {
+    const prevV = candles[i - 1].volume || 0;
+    const currV = candles[i].volume || 0;
+    if (currV < prevV) {
+      nvi +=
+        ((candles[i].close - candles[i - 1].close) / candles[i - 1].close) *
+        nvi;
+    }
+  }
+  return nvi;
+}
+
+export function calculateVolumeOscillator(volumes, short = 14, long = 28) {
+  if (!volumes || volumes.length < long) return null;
+  const emaShort = calculateEMA(volumes, short);
+  const emaLong = calculateEMA(volumes, long);
+  return ((emaShort - emaLong) / emaLong) * 100;
+}
+
+export function calculateEMV(candles, length = 14) {
+  if (!candles || candles.length < length + 1) return null;
+  const series = [];
+  for (let i = 1; i < candles.length; i++) {
+    const curr = candles[i];
+    const prev = candles[i - 1];
+    const distance =
+      (curr.high + curr.low) / 2 - (prev.high + prev.low) / 2;
+    const boxRatio = (curr.volume || 1) / (curr.high - curr.low || 1);
+    series.push(distance / boxRatio);
+  }
+  const slice = series.slice(-length);
+  return slice.reduce((a, b) => a + b, 0) / slice.length;
+}
+
+export function calculateVPT(candles) {
+  if (!candles || candles.length < 2) return null;
+  let vpt = 0;
+  for (let i = 1; i < candles.length; i++) {
+    vpt +=
+      (candles[i].volume || 0) *
+      ((candles[i].close - candles[i - 1].close) / candles[i - 1].close);
+  }
+  return vpt;
+}
+
+export function calculateVolumeProfile(candles, buckets = 10) {
+  if (!candles || candles.length === 0) return null;
+  const highs = candles.map((c) => c.high);
+  const lows = candles.map((c) => c.low);
+  const minP = Math.min(...lows);
+  const maxP = Math.max(...highs);
+  const step = (maxP - minP) / buckets;
+  const profile = Array(buckets).fill(0);
+  for (const c of candles) {
+    const price = (c.high + c.low) / 2;
+    let idx = Math.floor((price - minP) / step);
+    if (idx >= buckets) idx = buckets - 1;
+    profile[idx] += c.volume || 0;
+  }
+  return profile;
+}
+
 export function resetIndicatorCache() {
   emaCache.clear();
 }
@@ -575,6 +724,17 @@ export function computeFeatures(candles = []) {
   const atr = getATR(candles, 14);
   const supertrend = calculateSupertrend(candles, 50);
   const vwap = calculateVWAP(candles);
+  const anchoredVwap = calculateAnchoredVWAP(candles);
+  const obv = calculateOBV(candles);
+  const cmf = calculateCMF(candles);
+  const mfi = calculateMFI(candles);
+  const adl = calculateAccumDist(candles);
+  const pvi = calculatePVI(candles);
+  const nvi = calculateNVI(candles);
+  const volOsc = calculateVolumeOscillator(volumes);
+  const emv = calculateEMV(candles);
+  const vpt = calculateVPT(candles);
+  const volumeProfile = calculateVolumeProfile(candles);
 
   const avgVolume =
     volumes.length > 1
@@ -624,6 +784,17 @@ export function computeFeatures(candles = []) {
     envelopes,
     atr,
     supertrend,
+    anchoredVwap,
+    obv,
+    cmf,
+    mfi,
+    adl,
+    pvi,
+    nvi,
+    volOsc,
+    emv,
+    vpt,
+    volumeProfile,
     avgVolume,
     rvol,
     vwap,

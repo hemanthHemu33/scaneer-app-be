@@ -15,7 +15,11 @@ import {
   calculateChaikinVolatility,
   calculateHistoricalVolatility,
   calculateFractalChaosBands,
-  calculateEnvelopes
+  calculateEnvelopes,
+  calculateOBV,
+  calculateCMF,
+  calculateMFI,
+  calculateAnchoredVWAP
 } from '../featureEngine.js';
 
 test('calculateSMA computes average', () => {
@@ -132,4 +136,42 @@ test('calculateFractalChaosBands returns bands', () => {
 test('calculateEnvelopes returns bands', () => {
   const env = calculateEnvelopes([1, 2, 3, 4, 5], 5, 0.1);
   assert.ok(env && typeof env.upper === 'number');
+});
+
+test('calculateOBV sums volume based on closes', () => {
+  const candles = [
+    { close: 10, volume: 100 },
+    { close: 11, volume: 150 },
+    { close: 10, volume: 200 }
+  ];
+  const obv = calculateOBV(candles);
+  assert.equal(obv, -50);
+});
+
+test('calculateCMF returns number', () => {
+  const candles = [
+    { high: 10, low: 8, close: 9, volume: 100 },
+    { high: 11, low: 9, close: 10, volume: 120 }
+  ];
+  const cmf = calculateCMF(candles, 2);
+  assert.equal(typeof cmf, 'number');
+});
+
+test('calculateMFI returns number', () => {
+  const candles = [
+    { high: 10, low: 8, close: 9, volume: 100 },
+    { high: 11, low: 9, close: 10, volume: 110 },
+    { high: 12, low: 10, close: 11, volume: 120 }
+  ];
+  const mfi = calculateMFI(candles, 2);
+  assert.equal(typeof mfi, 'number');
+});
+
+test('calculateAnchoredVWAP returns number', () => {
+  const candles = [
+    { high: 10, low: 8, close: 9, volume: 100 },
+    { high: 11, low: 9, close: 10, volume: 100 }
+  ];
+  const avwap = calculateAnchoredVWAP(candles);
+  assert.equal(typeof avwap, 'number');
 });
