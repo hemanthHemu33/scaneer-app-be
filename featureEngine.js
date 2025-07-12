@@ -436,6 +436,95 @@ export function calculateTSI(prices, r = 25, s = 13) {
   return (ema2.at(-1) / ema2Abs.at(-1)) * 100;
 }
 
+export function calculateStdDev(prices, length) {
+  if (!prices || prices.length < length) return null;
+  const slice = prices.slice(-length);
+  const mean = slice.reduce((a, b) => a + b, 0) / length;
+  const variance = slice.reduce((sum, p) => sum + (p - mean) ** 2, 0) / length;
+  return Math.sqrt(variance);
+}
+
+export function calculateBollingerBands(prices, length = 20, mult = 2) {
+  const ma = calculateSMA(prices, length);
+  const sd = calculateStdDev(prices, length);
+  if (ma == null || sd == null) return null;
+  return { upper: ma + mult * sd, lower: ma - mult * sd, middle: ma };
+}
+
+export function calculateKeltnerChannels(
+  candles,
+  emaLength = 20,
+  atrLength = 10,
+  mult = 2
+) {
+  if (!candles || candles.length < Math.max(emaLength, atrLength)) return null;
+  const closes = candles.map((c) => c.close);
+  const ema = calculateEMA(closes, emaLength);
+  const atr = getATR(candles, atrLength);
+  if (ema == null || atr == null) return null;
+  return { upper: ema + mult * atr, lower: ema - mult * atr, middle: ema };
+}
+
+export function calculateDonchianChannels(candles, length = 20) {
+  if (!candles || candles.length < length) return null;
+  const highs = candles.map((c) => c.high);
+  const lows = candles.map((c) => c.low);
+  const upper = Math.max(...highs.slice(-length));
+  const lower = Math.min(...lows.slice(-length));
+  const middle = (upper + lower) / 2;
+  return { upper, lower, middle };
+}
+
+export function calculateChaikinVolatility(
+  candles,
+  emaLength = 10,
+  rocLength = 10
+) {
+  if (!candles || candles.length < emaLength + rocLength) return null;
+  const hlDiff = candles.map((c) => c.high - c.low);
+  const ema = emaSeries(hlDiff, emaLength);
+  const curr = ema.at(-1);
+  const prev = ema[ema.length - 1 - rocLength];
+  if (prev == null) return null;
+  return ((curr - prev) / prev) * 100;
+}
+
+export function calculateHistoricalVolatility(
+  prices,
+  length = 20,
+  periodsPerYear = 252
+) {
+  if (!prices || prices.length < length + 1) return null;
+  const logs = [];
+  for (let i = prices.length - length - 1; i < prices.length - 1; i++) {
+    logs.push(Math.log(prices[i + 1] / prices[i]));
+  }
+  const mean = logs.reduce((a, b) => a + b, 0) / logs.length;
+  const variance = logs.reduce((s, r) => s + (r - mean) ** 2, 0) / logs.length;
+  return Math.sqrt(variance) * Math.sqrt(periodsPerYear) * 100;
+}
+
+export function calculateFractalChaosBands(candles, length = 2) {
+  if (!candles || candles.length < length * 2 + 1) return null;
+  const highs = candles.map((c) => c.high);
+  const lows = candles.map((c) => c.low);
+  let upper = null,
+    lower = null;
+  for (let i = length; i < candles.length - length; i++) {
+    const hSlice = highs.slice(i - length, i + length + 1);
+    const lSlice = lows.slice(i - length, i + length + 1);
+    if (highs[i] === Math.max(...hSlice)) upper = highs[i];
+    if (lows[i] === Math.min(...lSlice)) lower = lows[i];
+  }
+  if (upper == null) upper = Math.max(...highs.slice(-length));
+  if (lower == null) lower = Math.min(...lows.slice(-length));
+  return { upper, lower };
+}
+
+export function calculateEnvelopes(prices, length = 20, pct = 0.025) {
+  return calculateMAEnvelopes(prices, length, pct);
+}
+
 export function resetIndicatorCache() {
   emaCache.clear();
 }
@@ -475,6 +564,14 @@ export function computeFeatures(candles = []) {
   const klinger = calculateKlinger(candles);
   const stc = calculateSTC(closes);
   const tsi = calculateTSI(closes);
+  const bollinger = calculateBollingerBands(closes);
+  const keltner = calculateKeltnerChannels(candles);
+  const donchian = calculateDonchianChannels(candles);
+  const chaikinVol = calculateChaikinVolatility(candles);
+  const stdDev = calculateStdDev(closes, 20);
+  const histVol = calculateHistoricalVolatility(closes);
+  const fractalChaos = calculateFractalChaosBands(candles);
+  const envelopes = calculateEnvelopes(closes);
   const atr = getATR(candles, 14);
   const supertrend = calculateSupertrend(candles, 50);
   const vwap = calculateVWAP(candles);
@@ -517,6 +614,14 @@ export function computeFeatures(candles = []) {
     klinger,
     stc,
     tsi,
+    bollinger,
+    keltner,
+    donchian,
+    chaikinVol,
+    stdDev,
+    histVol,
+    fractalChaos,
+    envelopes,
     atr,
     supertrend,
     avgVolume,

@@ -36,6 +36,14 @@ import {
   calculateKlinger,
   calculateSTC,
   calculateTSI,
+  calculateStdDev,
+  calculateBollingerBands,
+  calculateKeltnerChannels,
+  calculateDonchianChannels,
+  calculateChaikinVolatility,
+  calculateHistoricalVolatility,
+  calculateFractalChaosBands,
+  calculateEnvelopes,
   resetIndicatorCache,
 } from "./featureEngine.js";
 
@@ -69,6 +77,14 @@ export {
   calculateKlinger,
   calculateSTC,
   calculateTSI,
+  calculateStdDev,
+  calculateBollingerBands,
+  calculateKeltnerChannels,
+  calculateDonchianChannels,
+  calculateChaikinVolatility,
+  calculateHistoricalVolatility,
+  calculateFractalChaosBands,
+  calculateEnvelopes,
   resetIndicatorCache,
 };
 
