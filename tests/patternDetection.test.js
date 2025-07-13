@@ -50,3 +50,38 @@ test('detectAllPatterns identifies Saucer Bottom', () => {
   const sb = patterns.find(p => p.type === 'Saucer Bottom');
   assert.ok(sb);
 });
+
+test('detectAllPatterns identifies HH-HL Structure', () => {
+  const candles = [
+    { open: 10, high: 10.5, low: 9.5, close: 10.2 },
+    { open: 10.2, high: 10.8, low: 9.8, close: 10.6 },
+    { open: 10.7, high: 11, low: 10.2, close: 10.9 }
+  ];
+  const patterns = detectAllPatterns(candles, 1, 3);
+  const hh = patterns.find(p => p.type === 'HH-HL Structure');
+  assert.ok(hh);
+});
+
+test('detectAllPatterns identifies Break of Structure (Bullish)', () => {
+  const candles = [
+    { open: 9.8, high: 10, low: 9.5, close: 9.8 },
+    { open: 9.7, high: 9.9, low: 9.4, close: 9.6 },
+    { open: 9.6, high: 9.8, low: 9.3, close: 9.7 },
+    { open: 9.7, high: 9.9, low: 9.4, close: 9.8 },
+    { open: 10, high: 10.5, low: 9.8, close: 10.6 }
+  ];
+  const patterns = detectAllPatterns(candles, 1, 5);
+  const bos = patterns.find(p => p.type === 'Break of Structure (Bullish)');
+  assert.ok(bos);
+});
+
+test('detectAllPatterns identifies Swing Failure Pattern (Bearish)', () => {
+  const candles = [
+    { open: 9.8, high: 10, low: 9.6, close: 9.9 },
+    { open: 9.9, high: 10.2, low: 9.7, close: 10.1 },
+    { open: 10.1, high: 10.5, low: 9.8, close: 10.1 }
+  ];
+  const patterns = detectAllPatterns(candles, 1, 3);
+  const sfp = patterns.find(p => p.type === 'Swing Failure Pattern (Bearish)');
+  assert.ok(sfp);
+});
