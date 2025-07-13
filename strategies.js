@@ -865,6 +865,16 @@ function detectMarketSentimentReversal(candles) {
   return null;
 }
 
+function detectTtmSqueezeBreakout(candles, ctx = {}) {
+  const { features = computeFeatures(candles) } = ctx;
+  const squeeze = features?.ttmSqueeze;
+  const hist = features?.macdHist;
+  if (squeeze && !squeeze.squeezeOn && hist > 0) {
+    return { name: "TTM Squeeze Breakout", confidence: 0.6 };
+  }
+  return null;
+}
+
 // List of all detector functions mapped to their strategy name
 export const DETECTORS = [
   detectEmaCrossover,
@@ -922,6 +932,7 @@ export const DETECTORS = [
   detectMaSlopeAcceleration,
   detectVwapRejectionBounce,
   detectMarketSentimentReversal,
+  detectTtmSqueezeBreakout,
 ];
 
 export function evaluateStrategies(
@@ -1119,6 +1130,13 @@ export const momentumBreakoutStrategies = [
       "Trade breakouts from this range after market open with volume",
     ],
     notes: "Great for momentum scalps especially on news-driven gaps",
+  },
+  {
+    name: "TTM Squeeze Breakout",
+    rules: [
+      "Squeeze condition off and MACD histogram turns positive",
+      "Enter on strong candle close beyond consolidation",
+    ],
   },
 ];
 

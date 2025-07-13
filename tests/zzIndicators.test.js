@@ -32,6 +32,11 @@ import {
   calculateMedianPrice,
   calculateTypicalPrice,
   calculateWeightedClose
+  ,calculateTTMSqueeze
+  ,calculateZScore
+  ,calculateElderImpulse
+  ,calculateDonchianWidth
+  ,calculateBollingerPB
 } from '../featureEngine.js';
 
 test('calculateSMA computes average', () => {
@@ -254,4 +259,63 @@ test('median/typical/weighted close compute', () => {
   const tp = calculateTypicalPrice(candle);
   const wc = calculateWeightedClose(candle);
   assert.ok(mp === 9 && tp === 9 && wc === 9);
+});
+
+test('calculateTTMSqueeze returns object', () => {
+  const candles = [
+    { high: 10, low: 8, close: 9, volume: 100 },
+    { high: 11, low: 9, close: 10, volume: 110 },
+    { high: 12, low: 10, close: 11, volume: 120 },
+    { high: 13, low: 11, close: 12, volume: 130 }
+  ];
+  const res = calculateTTMSqueeze(candles);
+  assert.equal(typeof res.squeezeOn, 'boolean');
+});
+
+test('calculateZScore returns number', () => {
+  const val = calculateZScore([1,2,3,4,5,6,7,8,9,10]);
+  assert.equal(typeof val, 'number');
+});
+
+test('calculateElderImpulse returns string', () => {
+  const candles = [
+    { close: 10 },
+    { close: 11 },
+    { close: 12 },
+    { close: 13 },
+    { close: 14 },
+    { close: 15 },
+    { close: 16 },
+    { close: 17 },
+    { close: 18 },
+    { close: 19 },
+    { close: 20 },
+    { close: 21 },
+    { close: 22 },
+    { close: 23 },
+    { close: 24 },
+    { close: 25 },
+    { close: 26 },
+    { close: 27 },
+    { close: 28 },
+    { close: 29 },
+    { close: 30 }
+  ];
+  const val = calculateElderImpulse(candles);
+  assert.equal(typeof val, 'string');
+});
+
+test('calculateDonchianWidth returns number', () => {
+  const candles = [
+    { high: 10, low: 8 },
+    { high: 11, low: 9 },
+    { high: 12, low: 10 }
+  ];
+  const width = calculateDonchianWidth(candles, 3);
+  assert.equal(typeof width, 'number');
+});
+
+test('calculateBollingerPB returns number', () => {
+  const pb = calculateBollingerPB([1,2,3,4,5], 5);
+  assert.equal(typeof pb, 'number');
 });
