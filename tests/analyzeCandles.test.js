@@ -34,7 +34,8 @@ const featureMock = test.mock.module('../featureEngine.js', {
       atr: 2.5,
       supertrend: { signal: 'Buy' },
       avgVolume: 100,
-      rvol: 1.2
+      rvol: 1.2,
+      vwap: 100
     }),
     resetIndicatorCache: () => {}
   }
@@ -53,7 +54,12 @@ const utilMock = test.mock.module('../util.js', {
         strength: 3,
         confidence: 'High'
       }
-    ]
+    ],
+    confirmRetest: () => true,
+    toISTISOString: (d = new Date()) => new Date(d).toISOString(),
+    toISTDate: (d = new Date()) => '2024-01-01',
+    convertTickTimestampsToIST: (t) => t,
+    getMAForSymbol: () => 100
   }
 });
 
