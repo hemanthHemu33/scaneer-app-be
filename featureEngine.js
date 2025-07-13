@@ -896,6 +896,165 @@ export function calculateWeightedClose(candle) {
   return (candle.high + candle.low + 2 * candle.close) / 4;
 }
 
+export function calculateTTMSqueeze(
+  candles,
+  bbLength = 20,
+  kcLength = 20,
+  mult = 1.5
+) {
+  const closes = candles.map((c) => c.close);
+  const bb = calculateBollingerBands(closes, bbLength, mult);
+  const kc = calculateKeltnerChannels(candles, kcLength, mult, 1);
+  if (!bb || !kc) return null;
+  const squeezeOn = bb.upper <= kc.upper && bb.lower >= kc.lower;
+  return { squeezeOn, width: bb.upper - bb.lower };
+}
+
+export function calculateZScore(prices, length = 20) {
+  if (!prices || prices.length < length) return null;
+  const slice = prices.slice(-length);
+  const mean = slice.reduce((a, b) => a + b, 0) / length;
+  const variance = slice.reduce((s, p) => s + (p - mean) ** 2, 0) / length;
+  const sd = Math.sqrt(variance) || 1;
+  return (prices.at(-1) - mean) / sd;
+}
+
+export function calculateElderImpulse(candles) {
+  if (!candles || candles.length < 26) return null;
+  const closes = candles.map((c) => c.close);
+  const ema13 = calculateEMA(closes, 13);
+  const ema26 = calculateEMA(closes, 26);
+  const macd = calculateMACD(closes);
+  if (!macd) return null;
+  if (ema13 > ema26 && macd.histogram > 0) return 'Bullish';
+  if (ema13 < ema26 && macd.histogram < 0) return 'Bearish';
+  return 'Neutral';
+}
+
+export function calculateDonchianWidth(candles, length = 20) {
+  const dc = calculateDonchianChannels(candles, length);
+  if (!dc) return null;
+  return (dc.upper - dc.lower) / (dc.middle || 1);
+}
+
+export function calculateIchimokuBaseLine(candles) {
+  if (!candles || candles.length < 26) return null;
+  const highs = candles.map((c) => c.high);
+  const lows = candles.map((c) => c.low);
+  const high = Math.max(...highs.slice(-26));
+  const low = Math.min(...lows.slice(-26));
+  return (high + low) / 2;
+}
+
+export function calculateIchimokuConversionLine(candles) {
+  if (!candles || candles.length < 9) return null;
+  const highs = candles.map((c) => c.high);
+  const lows = candles.map((c) => c.low);
+  const high = Math.max(...highs.slice(-9));
+  const low = Math.min(...lows.slice(-9));
+  return (high + low) / 2;
+}
+
+export function calculateAnchoredMomentum(candles, anchorIndex = 0) {
+  if (!candles || candles.length === 0) return null;
+  anchorIndex = Math.max(0, Math.min(anchorIndex, candles.length - 1));
+  const anchor = candles[anchorIndex].close;
+  const last = candles.at(-1).close;
+  return ((last - anchor) / anchor) * 100;
+}
+
+export function calculateATRBands(candles, length = 14, mult = 2) {
+  if (!candles || candles.length < length + 1) return null;
+  const atr = getATR(candles, length);
+  const close = candles.at(-1).close;
+  return { upper: close + mult * atr, lower: close - mult * atr };
+}
+
+export function calculateDynamicStopLoss(candles, length = 14, mult = 3) {
+  if (!candles || candles.length < length + 1) return null;
+  const atr = getATR(candles, length);
+  const close = candles.at(-1).close;
+  return close - mult * atr;
+}
+
+export function calculateATRTrailingStop(candles, length = 14, mult = 3) {
+  return calculateDynamicStopLoss(candles, length, mult);
+}
+
+export function calculateLaguerreRSI(prices, gamma = 0.5) {
+  if (!prices || prices.length < 2) return null;
+  let l0 = 0,
+    l1 = 0,
+    l2 = 0,
+    l3 = 0;
+  for (const p of prices) {
+    const prevL0 = l0,
+      prevL1 = l1,
+      prevL2 = l2;
+    l0 = (1 - gamma) * p + gamma * prevL0;
+    l1 = -(1 - gamma) * l0 + prevL0 + gamma * prevL1;
+    l2 = -(1 - gamma) * l1 + prevL1 + gamma * prevL2;
+    l3 = -(1 - gamma) * l2 + prevL2 + gamma * l3;
+  }
+  const cu = (l0 - l1 > 0 ? l0 - l1 : 0) + (l1 - l2 > 0 ? l1 - l2 : 0) + (l2 - l3 > 0 ? l2 - l3 : 0);
+  const cd = (l0 - l1 < 0 ? l1 - l0 : 0) + (l1 - l2 < 0 ? l2 - l1 : 0) + (l2 - l3 < 0 ? l3 - l2 : 0);
+  if (cu + cd === 0) return 50;
+  return (cu / (cu + cd)) * 100;
+}
+
+export const calculateRSILaguerre = calculateLaguerreRSI;
+
+export function calculateTrendIntensityIndex(prices, length = 20) {
+  if (!prices || prices.length < length) return null;
+  const sma = calculateSMA(prices, length);
+  let up = 0,
+    sum = 0;
+  for (let i = prices.length - length; i < prices.length; i++) {
+    const diff = prices[i] - sma;
+    if (diff > 0) up += diff;
+    sum += Math.abs(diff);
+  }
+  return sum === 0 ? 0 : (up / sum) * 100;
+}
+
+export function calculateBollingerPB(prices, length = 20, mult = 2) {
+  const bb = calculateBollingerBands(prices, length, mult);
+  if (!bb) return null;
+  return (prices.at(-1) - bb.lower) / (bb.upper - bb.lower);
+}
+
+export function calculateMACDHistogram(prices, shortL = 12, longL = 26, signalL = 9) {
+  const res = calculateMACD(prices, shortL, longL, signalL);
+  return res ? res.histogram : null;
+}
+
+export function calculateCoppockCurve(prices, r1 = 11, r2 = 14, wmaLen = 10) {
+  if (!prices || prices.length < Math.max(r1, r2) + wmaLen) return null;
+  const sum = [];
+  for (let i = prices.length - wmaLen; i < prices.length; i++) {
+    const r1v = ((prices[i] - prices[i - r1]) / prices[i - r1]) * 100;
+    const r2v = ((prices[i] - prices[i - r2]) / prices[i - r2]) * 100;
+    sum.push(r1v + r2v);
+  }
+  return calculateWMA(sum, wmaLen);
+}
+
+export function calculatePriceOscillator(prices, shortL = 12, longL = 26) {
+  if (!prices || prices.length < longL) return null;
+  const shortEma = calculateEMA(prices, shortL);
+  const longEma = calculateEMA(prices, longL);
+  return ((shortEma - longEma) / longEma) * 100;
+}
+
+export function calculateMcGinleyDynamic(prices, length = 10, k = 0.6) {
+  if (!prices || prices.length === 0) return null;
+  let md = prices[0];
+  for (let i = 1; i < prices.length; i++) {
+    md = md + (prices[i] - md) / (k * length * Math.pow(prices[i] / md, 4));
+  }
+  return md;
+}
+
 export function resetIndicatorCache() {
   emaCache.clear();
 }
@@ -972,6 +1131,25 @@ export function computeFeatures(candles = []) {
   const vpt = calculateVPT(candles);
   const volumeProfile = calculateVolumeProfile(candles);
 
+  const ttmSqueeze = calculateTTMSqueeze(candles);
+  const zScore = calculateZScore(closes);
+  const elderImpulse = calculateElderImpulse(candles);
+  const donchianWidth = calculateDonchianWidth(candles);
+  const ichimokuBase = calculateIchimokuBaseLine(candles);
+  const ichimokuConversion = calculateIchimokuConversionLine(candles);
+  const anchoredMomentum = calculateAnchoredMomentum(candles);
+  const atrBands = calculateATRBands(candles);
+  const dynamicStop = calculateDynamicStopLoss(candles);
+  const atrTrailingStop = calculateATRTrailingStop(candles);
+  const laguerreRsi = calculateLaguerreRSI(closes);
+  const rsiLaguerre = calculateRSILaguerre(closes);
+  const trendIntensity = calculateTrendIntensityIndex(closes);
+  const bollingerPB = calculateBollingerPB(closes);
+  const macdHist = calculateMACDHistogram(closes);
+  const coppock = calculateCoppockCurve(closes);
+  const priceOsc = calculatePriceOscillator(closes);
+  const mcGinley = calculateMcGinleyDynamic(closes);
+
   const avgVolume =
     volumes.length > 1
       ? volumes.slice(0, -1).reduce((a, b) => a + b, 0) / (volumes.length - 1)
@@ -1031,6 +1209,24 @@ export function computeFeatures(candles = []) {
     emv,
     vpt,
     volumeProfile,
+    ttmSqueeze,
+    zScore,
+    elderImpulse,
+    donchianWidth,
+    ichimokuBase,
+    ichimokuConversion,
+    anchoredMomentum,
+    atrBands,
+    dynamicStop,
+    atrTrailingStop,
+    laguerreRsi,
+    rsiLaguerre,
+    trendIntensity,
+    bollingerPB,
+    macdHist,
+    coppock,
+    priceOsc,
+    mcGinley,
     avgVolume,
     rvol,
     vwap,
