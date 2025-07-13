@@ -225,6 +225,24 @@ export function detectAllPatterns(candles, atrValue, lookback = 5) {
     last.open > last.close &&
     last.high - last.open > 2 * (last.open - last.low);
 
+  const marubozuBullish =
+    last.close > last.open &&
+    Math.abs(last.open - last.low) < epsilon &&
+    Math.abs(last.high - last.close) < epsilon;
+  const beltHoldBullish =
+    last.close > last.open &&
+    Math.abs(last.open - last.low) < epsilon &&
+    last.close - last.open > (last.high - last.low) * 0.6;
+
+  let kickerBullish = false;
+  if (candles.length >= 2) {
+    const prevCandle = candles[candles.length - 2];
+    kickerBullish =
+      prevCandle.close < prevCandle.open &&
+      last.open > prevCandle.open &&
+      last.close > last.open;
+  }
+
   if (isDoji)
     patterns.push({
       type: "Doji",
@@ -251,6 +269,27 @@ export function detectAllPatterns(candles, atrValue, lookback = 5) {
       type: "Shooting Star",
       direction: "Short",
       strength: 2,
+      confidence: "High",
+    });
+  if (marubozuBullish)
+    patterns.push({
+      type: "Marubozu (Bullish)",
+      direction: "Long",
+      strength: 2,
+      confidence: "Medium",
+    });
+  if (beltHoldBullish)
+    patterns.push({
+      type: "Belt Hold (Bullish)",
+      direction: "Long",
+      strength: 2,
+      confidence: "Medium",
+    });
+  if (kickerBullish)
+    patterns.push({
+      type: "Kicker Pattern (Bullish)",
+      direction: "Long",
+      strength: 3,
       confidence: "High",
     });
 
@@ -314,10 +353,33 @@ export function detectAllPatterns(candles, atrValue, lookback = 5) {
       strength: 2,
       confidence: "Medium",
     });
+  const haramiCrossBullish =
+    isDoji &&
+    prev.open > prev.close &&
+    last.high <= prev.open &&
+    last.low >= prev.close;
+  if (haramiCrossBullish)
+    patterns.push({
+      type: "Bullish Harami Cross",
+      direction: "Long",
+      strength: 2,
+      confidence: "Medium",
+    });
   if (haramiBearish)
     patterns.push({
       type: "Bearish Harami",
       direction: "Short",
+      strength: 2,
+      confidence: "Medium",
+    });
+  const tweezerBottom =
+    prev.close < prev.open &&
+    last.close > last.open &&
+    Math.abs(prev.low - last.low) < epsilon;
+  if (tweezerBottom)
+    patterns.push({
+      type: "Tweezer Bottom",
+      direction: "Long",
       strength: 2,
       confidence: "Medium",
     });
@@ -338,6 +400,55 @@ export function detectAllPatterns(candles, atrValue, lookback = 5) {
       patterns.push({
         type: "Three Black Crows",
         direction: "Short",
+        strength: 3,
+        confidence: "High",
+      });
+  }
+
+  if (candles.length >= 5) {
+    const [r1, r2, r3, r4, r5] = candles.slice(-5);
+    const risingThreeMethods =
+      r1.close > r1.open &&
+      [r2, r3, r4].every(
+        (c) =>
+          c.close < c.open && c.high <= r1.high && c.low >= r1.low
+      ) &&
+      r5.close > r5.open &&
+      r5.close > r1.close;
+    if (risingThreeMethods)
+      patterns.push({
+        type: "Rising Three Methods",
+        direction: "Long",
+        strength: 3,
+        confidence: "High",
+      });
+
+    const matHoldBullish =
+      r1.close > r1.open &&
+      r2.open > r1.close &&
+      [r2, r3, r4].every((c) => c.close < c.open && c.low > r1.low) &&
+      r5.close > r5.open &&
+      r5.close > r2.open;
+    if (matHoldBullish)
+      patterns.push({
+        type: "Mat Hold Pattern (Bullish)",
+        direction: "Long",
+        strength: 3,
+        confidence: "High",
+      });
+
+    const breakawayBullish =
+      r1.open > r1.close &&
+      r2.open < r1.close &&
+      r2.close < r1.close &&
+      r3.close < r2.close &&
+      r4.close < r3.close &&
+      r5.close > r4.close &&
+      r5.close > r1.open;
+    if (breakawayBullish)
+      patterns.push({
+        type: "Breakaway (Bullish)",
+        direction: "Long",
         strength: 3,
         confidence: "High",
       });
