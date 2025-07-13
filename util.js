@@ -854,6 +854,179 @@ export function detectAllPatterns(candles, atrValue, lookback = 5) {
     });
   }
 
+  // Pennant
+  if (candles.length >= 6) {
+    const priorUp = candles.slice(-6, -3).every((c) => c.close > c.open);
+    const priorDown = candles.slice(-6, -3).every((c) => c.close < c.open);
+    const cons = candles.slice(-3);
+    const cHighs = cons.map((c) => c.high);
+    const cLows = cons.map((c) => c.low);
+    const tightening = cHighs[0] > cHighs[1] && cHighs[1] > cHighs[2] && cLows[0] < cLows[1] && cLows[1] < cLows[2];
+    if (priorUp && tightening && last.close > last.open) {
+      patterns.push({
+        type: "Pennant (Bullish)",
+        direction: "Long",
+        breakout: Math.max(...cHighs),
+        stopLoss: Math.min(...cLows),
+        strength: 2,
+        confidence: "Medium",
+      });
+    }
+    if (priorDown && tightening && last.close < last.open) {
+      patterns.push({
+        type: "Pennant (Bearish)",
+        direction: "Short",
+        breakout: Math.min(...cLows),
+        stopLoss: Math.max(...cHighs),
+        strength: 2,
+        confidence: "Medium",
+      });
+    }
+  }
+
+  // Rectangle
+  if (candles.length >= 6) {
+    const rect = candles.slice(-4);
+    const rHigh = Math.max(...rect.map((c) => c.high));
+    const rLow = Math.min(...rect.map((c) => c.low));
+    const withinRange = rect.every(
+      (c) => Math.abs(c.high - rHigh) < epsilon && Math.abs(c.low - rLow) < epsilon
+    );
+    const priorUp = candles.slice(-6, -4).every((c) => c.close > c.open);
+    const priorDown = candles.slice(-6, -4).every((c) => c.close < c.open);
+    if (withinRange && priorUp) {
+      patterns.push({
+        type: "Rectangle (Bullish)",
+        direction: "Long",
+        breakout: rHigh,
+        stopLoss: rLow,
+        strength: 2,
+        confidence: "Medium",
+      });
+    } else if (withinRange && priorDown) {
+      patterns.push({
+        type: "Rectangle (Bearish)",
+        direction: "Short",
+        breakout: rLow,
+        stopLoss: rHigh,
+        strength: 2,
+        confidence: "Medium",
+      });
+    }
+  }
+
+  // Channel Up / Down
+  if (candles.length >= 4) {
+    const [c1, c2, c3, c4] = candles.slice(-4);
+    const up = c1.high < c2.high && c2.high < c3.high && c3.high < c4.high &&
+      c1.low < c2.low && c2.low < c3.low && c3.low < c4.low;
+    const down = c1.high > c2.high && c2.high > c3.high && c3.high > c4.high &&
+      c1.low > c2.low && c2.low > c3.low && c3.low > c4.low;
+    const widthOk = Math.abs((c4.high - c4.low) - (c1.high - c1.low)) < (c1.high - c1.low) * 0.3;
+    if (up && widthOk) {
+      patterns.push({
+        type: "Channel Up",
+        direction: "Long",
+        breakout: c4.high,
+        stopLoss: c4.low,
+        strength: 2,
+        confidence: "Medium",
+      });
+    } else if (down && widthOk) {
+      patterns.push({
+        type: "Channel Down",
+        direction: "Short",
+        breakout: c4.low,
+        stopLoss: c4.high,
+        strength: 2,
+        confidence: "Medium",
+      });
+    }
+  }
+
+  // Measured Move
+  if (candles.length >= 7) {
+    const [a, b, c, d, e, f, g] = candles.slice(-7);
+    const leg1 = b.close - a.open;
+    const leg2 = g.close - d.close;
+    const upMove = a.close < b.close && b.close > c.close && d.close < e.close && e.close < f.close && leg2 > 0;
+    const downMove = a.close > b.close && b.close < c.close && d.close > e.close && e.close > f.close && leg2 < 0;
+    if (upMove && Math.abs(leg2 - leg1) / Math.abs(leg1) < 0.5) {
+      patterns.push({
+        type: "Measured Move Up",
+        direction: "Long",
+        breakout: g.close,
+        stopLoss: c.low,
+        strength: 2,
+        confidence: "Medium",
+      });
+    } else if (downMove && Math.abs(leg2 - leg1) / Math.abs(leg1) < 0.5) {
+      patterns.push({
+        type: "Measured Move Down",
+        direction: "Short",
+        breakout: g.close,
+        stopLoss: c.high,
+        strength: 2,
+        confidence: "Medium",
+      });
+    }
+  }
+
+  // Trendline Break
+  if (candles.length >= 4) {
+    const [h1, h2, h3] = highs.slice(-3);
+    const [l1, l2, l3] = lows.slice(-3);
+    if (h1 > h2 && h2 > h3 && last.close > h2) {
+      patterns.push({
+        type: "Trendline Break (Bullish)",
+        direction: "Long",
+        breakout: last.close,
+        stopLoss: recentLow,
+        strength: 2,
+        confidence: "Medium",
+      });
+    }
+    if (l1 < l2 && l2 < l3 && last.close < l2) {
+      patterns.push({
+        type: "Trendline Break (Bearish)",
+        direction: "Short",
+        breakout: last.close,
+        stopLoss: recentHigh,
+        strength: 2,
+        confidence: "Medium",
+      });
+    }
+  }
+
+  // High/Low Base
+  if (candles.length >= 6) {
+    const base = candles.slice(-4);
+    const baseHigh = Math.max(...base.map((c) => c.high));
+    const baseLow = Math.min(...base.map((c) => c.low));
+    const tight = base.every((c) => c.high - c.low < (recentHigh - recentLow) * 0.3);
+    const priorUp = candles.slice(-6, -4).every((c) => c.close > c.open);
+    const priorDown = candles.slice(-6, -4).every((c) => c.close < c.open);
+    if (tight && priorUp && Math.abs(baseHigh - recentHigh) < epsilon) {
+      patterns.push({
+        type: "High Base",
+        direction: "Long",
+        breakout: baseHigh,
+        stopLoss: baseLow,
+        strength: 2,
+        confidence: "Medium",
+      });
+    } else if (tight && priorDown && Math.abs(baseLow - recentLow) < epsilon) {
+      patterns.push({
+        type: "Low Base",
+        direction: "Short",
+        breakout: baseLow,
+        stopLoss: baseHigh,
+        strength: 2,
+        confidence: "Medium",
+      });
+    }
+  }
+
   // VWAP Reversal
   if (candles.length >= 2 && vwap) {
     const prevClose = candles[candles.length - 2].close;
