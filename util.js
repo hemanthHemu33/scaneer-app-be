@@ -1158,6 +1158,249 @@ export function detectAllPatterns(candles, atrValue, lookback = 5) {
     }
   }
 
+  // --- Price Action Swing Structures ---
+  if (candles.length >= 3) {
+    const [p1, p2, p3] = candles.slice(-3);
+    if (
+      p2.high > p1.high &&
+      p3.high > p2.high &&
+      p2.low > p1.low &&
+      p3.low > p2.low
+    ) {
+      patterns.push({
+        type: "HH-HL Structure",
+        direction: "Long",
+        strength: 1,
+        confidence: "Medium",
+      });
+    }
+    if (
+      p2.high < p1.high &&
+      p3.high < p2.high &&
+      p2.low < p1.low &&
+      p3.low < p2.low
+    ) {
+      patterns.push({
+        type: "LH-LL Structure",
+        direction: "Short",
+        strength: 1,
+        confidence: "Medium",
+      });
+    }
+  }
+
+  // --- Inside/Outside Bar Patterns ---
+  if (candles.length >= 3) {
+    const base = candles[candles.length - 3];
+    const inside = candles[candles.length - 2];
+    if (inside.high < base.high && inside.low > base.low) {
+      if (last.close > inside.high) {
+        patterns.push({
+          type: "Inside Bar Breakout (Bullish)",
+          direction: "Long",
+          breakout: last.close,
+          stopLoss: inside.low,
+          strength: 2,
+          confidence: "Medium",
+        });
+      } else if (last.close < inside.low) {
+        patterns.push({
+          type: "Inside Bar Breakout (Bearish)",
+          direction: "Short",
+          breakout: last.close,
+          stopLoss: inside.high,
+          strength: 2,
+          confidence: "Medium",
+        });
+      }
+    }
+  }
+
+  if (candles.length >= 2) {
+    const prev = candles[candles.length - 2];
+    if (last.high > prev.high && last.low < prev.low) {
+      if (last.close > prev.open) {
+        patterns.push({
+          type: "Outside Bar Bullish Reversal",
+          direction: "Long",
+          strength: 2,
+          confidence: "Medium",
+        });
+      }
+      if (last.close < prev.open) {
+        patterns.push({
+          type: "Outside Bar Bearish Reversal",
+          direction: "Short",
+          strength: 2,
+          confidence: "Medium",
+        });
+      }
+    }
+  }
+
+  // --- Break of Structure & Change of Character ---
+  if (candles.length >= lookback + 1) {
+    const prevClose = candles[candles.length - 2].close;
+    if (last.close > recentHigh && prevClose <= recentHigh) {
+      patterns.push({
+        type: "Break of Structure (Bullish)",
+        direction: "Long",
+        breakout: last.close,
+        stopLoss: recentLow,
+        strength: 2,
+        confidence: "High",
+      });
+    }
+    if (last.close < recentLow && prevClose >= recentLow) {
+      patterns.push({
+        type: "Break of Structure (Bearish)",
+        direction: "Short",
+        breakout: last.close,
+        stopLoss: recentHigh,
+        strength: 2,
+        confidence: "High",
+      });
+    }
+  }
+
+  if (candles.length >= 4) {
+    const [c1, c2, c3, c4] = candles.slice(-4);
+    if (c3.high > c2.high && c3.low > c2.low && c4.close < c3.low) {
+      patterns.push({
+        type: "Change of Character (Bearish)",
+        direction: "Short",
+        strength: 2,
+        confidence: "High",
+      });
+    }
+    if (c3.high < c2.high && c3.low < c2.low && c4.close > c3.high) {
+      patterns.push({
+        type: "Change of Character (Bullish)",
+        direction: "Long",
+        strength: 2,
+        confidence: "High",
+      });
+    }
+  }
+
+  // --- Swing Failure Pattern ---
+  if (last.high > recentHigh && last.close <= recentHigh) {
+    patterns.push({
+      type: "Swing Failure Pattern (Bearish)",
+      direction: "Short",
+      breakout: recentHigh,
+      stopLoss: last.high,
+      strength: 2,
+      confidence: "Medium",
+    });
+  }
+  if (last.low < recentLow && last.close >= recentLow) {
+    patterns.push({
+      type: "Swing Failure Pattern (Bullish)",
+      direction: "Long",
+      breakout: recentLow,
+      stopLoss: last.low,
+      strength: 2,
+      confidence: "Medium",
+    });
+  }
+
+  // --- Order Block Reversal ---
+  if (candles.length >= 3) {
+    const base = candles[candles.length - 3];
+    const mid = candles[candles.length - 2];
+    if (base.close > base.open && mid.low >= base.low && last.close < base.low) {
+      patterns.push({
+        type: "Order Block Reversal (Bearish)",
+        direction: "Short",
+        breakout: last.close,
+        stopLoss: base.high,
+        strength: 3,
+        confidence: "Medium",
+      });
+    }
+    if (base.close < base.open && mid.high <= base.high && last.close > base.high) {
+      patterns.push({
+        type: "Order Block Reversal (Bullish)",
+        direction: "Long",
+        breakout: last.close,
+        stopLoss: base.low,
+        strength: 3,
+        confidence: "Medium",
+      });
+    }
+  }
+
+  // --- Fair Value Gap ---
+  if (candles.length >= 3) {
+    const g1 = candles[candles.length - 3];
+    const g2 = candles[candles.length - 2];
+    const gapUp = g2.low > g1.high && last.low > g2.high;
+    const gapDown = g2.high < g1.low && last.high < g2.low;
+    if (gapUp) {
+      patterns.push({
+        type: "Fair Value Gap (Up)",
+        direction: "Long",
+        strength: 1,
+        confidence: "Medium",
+      });
+    }
+    if (gapDown) {
+      patterns.push({
+        type: "Fair Value Gap (Down)",
+        direction: "Short",
+        strength: 1,
+        confidence: "Medium",
+      });
+    }
+  }
+
+  // --- Supply / Demand Zones ---
+  if (candles.length >= 5) {
+    const last5Highs = candles.slice(-5).map((c) => c.high);
+    const last5Lows = candles.slice(-5).map((c) => c.low);
+    const highRange = Math.max(...last5Highs) - Math.min(...last5Highs);
+    const lowRange = Math.max(...last5Lows) - Math.min(...last5Lows);
+    if (highRange < atrValue) {
+      patterns.push({
+        type: "Supply Zone",
+        direction: "Short",
+        strength: 1,
+        confidence: "Low",
+      });
+    }
+    if (lowRange < atrValue) {
+      patterns.push({
+        type: "Demand Zone",
+        direction: "Long",
+        strength: 1,
+        confidence: "Low",
+      });
+    }
+  }
+
+  // --- Liquidity Sweep / Stop Hunt ---
+  if (candles.length >= 2) {
+    const priorHigh = Math.max(...candles.slice(0, -1).map((c) => c.high));
+    const priorLow = Math.min(...candles.slice(0, -1).map((c) => c.low));
+    if (last.high > priorHigh && last.close <= priorHigh) {
+      patterns.push({
+        type: "Liquidity Sweep (Up)",
+        direction: "Short",
+        strength: 2,
+        confidence: "Medium",
+      });
+    }
+    if (last.low < priorLow && last.close >= priorLow) {
+      patterns.push({
+        type: "Liquidity Sweep (Down)",
+        direction: "Long",
+        strength: 2,
+        confidence: "Medium",
+      });
+    }
+  }
+
   return patterns;
 }
 
