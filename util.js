@@ -651,6 +651,113 @@ export function detectAllPatterns(candles, atrValue, lookback = 5) {
     });
   }
 
+  if (lastN.length >= 5) {
+    const isRoundingTop =
+      highs[0] < highs[1] &&
+      highs[1] < highs[2] &&
+      highs[2] > highs[3] &&
+      highs[3] > highs[4] &&
+      lows[0] < lows[1] &&
+      lows[1] < lows[2] &&
+      lows[2] > lows[3] &&
+      lows[3] > lows[4];
+
+    if (isRoundingTop) {
+      patterns.push({
+        type: "Rounding Top",
+        direction: "Short",
+        breakout: recentLow,
+        stopLoss: highs[2],
+        strength: 2,
+        confidence: "Medium",
+      });
+    }
+
+    const isRoundingBottom =
+      highs[0] > highs[1] &&
+      highs[1] > highs[2] &&
+      highs[2] < highs[3] &&
+      highs[3] < highs[4] &&
+      lows[0] > lows[1] &&
+      lows[1] > lows[2] &&
+      lows[2] < lows[3] &&
+      lows[3] < lows[4];
+
+    if (isRoundingBottom) {
+      patterns.push({
+        type: "Rounding Bottom",
+        direction: "Long",
+        breakout: recentHigh,
+        stopLoss: lows[2],
+        strength: 2,
+        confidence: "Medium",
+      });
+    }
+  }
+
+  if (candles.length >= 3) {
+    const [a, b, c] = candles.slice(-3);
+    const rangeA = a.high - a.low;
+    const rangeB = b.high - b.low;
+    const rangeC = c.high - c.low;
+
+    const broadeningTop =
+      c.high > b.high &&
+      b.high > a.high &&
+      c.low < b.low &&
+      b.low < a.low &&
+      rangeB > rangeA &&
+      rangeC > rangeB;
+
+    if (broadeningTop) {
+      patterns.push({
+        type: "Broadening Top",
+        direction: "Short",
+        breakout: c.low,
+        stopLoss: c.high,
+        strength: 2,
+        confidence: "Medium",
+      });
+    }
+
+    const broadeningBottom =
+      c.high < b.high &&
+      b.high < a.high &&
+      c.low > b.low &&
+      b.low > a.low &&
+      rangeB > rangeA &&
+      rangeC > rangeB;
+
+    if (broadeningBottom) {
+      patterns.push({
+        type: "Broadening Bottom",
+        direction: "Long",
+        breakout: c.high,
+        stopLoss: c.low,
+        strength: 2,
+        confidence: "Medium",
+      });
+    }
+
+    const saucerBottom =
+      a.close < a.open &&
+      b.close < b.open &&
+      b.low >= a.low &&
+      c.close > c.open &&
+      c.close > b.close;
+
+    if (saucerBottom) {
+      patterns.push({
+        type: "Saucer Bottom",
+        direction: "Long",
+        breakout: c.high,
+        stopLoss: Math.min(a.low, b.low),
+        strength: 1,
+        confidence: "Medium",
+      });
+    }
+  }
+
   const isRising =
     lows[0] < lows[1] &&
     lows[1] < lows[2] &&

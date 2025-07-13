@@ -1,0 +1,52 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+
+const kiteMock = test.mock.module('../kite.js', { namedExports: { getMA: () => null } });
+const dbMock = test.mock.module('../db.js', {
+  defaultExport: {},
+  namedExports: { connectDB: async () => ({}) }
+});
+
+const { detectAllPatterns } = await import('../util.js');
+
+kiteMock.restore();
+dbMock.restore();
+
+test('detectAllPatterns identifies Rounding Bottom', () => {
+  const candles = [
+    { open: 10.8, high: 11, low: 10, close: 10.2 },
+    { open: 10.2, high: 10.5, low: 9.5, close: 9.8 },
+    { open: 9.8, high: 10, low: 9, close: 9.5 },
+    { open: 9.6, high: 10.4, low: 9.3, close: 10.1 },
+    { open: 10.2, high: 11.2, low: 9.8, close: 11 }
+  ];
+  const patterns = detectAllPatterns(candles, 1, 5);
+  const rb = patterns.find(p => p.type === 'Rounding Bottom');
+  assert.ok(rb);
+});
+
+test('detectAllPatterns identifies Broadening Top', () => {
+  const candles = [
+    { open: 9, high: 9.2, low: 8.9, close: 9.1 },
+    { open: 9.2, high: 9.4, low: 8.8, close: 9 },
+    { open: 9.5, high: 10, low: 9, close: 9.8 },
+    { open: 9.8, high: 11, low: 8.8, close: 9 },
+    { open: 9, high: 12, low: 8, close: 8.5 }
+  ];
+  const patterns = detectAllPatterns(candles, 1, 5);
+  const bt = patterns.find(p => p.type === 'Broadening Top');
+  assert.ok(bt);
+});
+
+test('detectAllPatterns identifies Saucer Bottom', () => {
+  const candles = [
+    { open: 9.8, high: 10, low: 9.7, close: 9.9 },
+    { open: 9.9, high: 10.1, low: 9.6, close: 9.8 },
+    { open: 10, high: 10.2, low: 9, close: 9 },
+    { open: 9.5, high: 9.7, low: 9, close: 9 },
+    { open: 9.1, high: 10.5, low: 9, close: 10 }
+  ];
+  const patterns = detectAllPatterns(candles, 1, 5);
+  const sb = patterns.find(p => p.type === 'Saucer Bottom');
+  assert.ok(sb);
+});
