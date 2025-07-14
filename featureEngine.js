@@ -1061,6 +1061,15 @@ export function resetIndicatorCache() {
 
 export function computeFeatures(candles = []) {
   if (!Array.isArray(candles) || candles.length === 0) return null;
+  candles = candles.filter(
+    (c) =>
+      c &&
+      typeof c.open === "number" &&
+      typeof c.high === "number" &&
+      typeof c.low === "number" &&
+      typeof c.close === "number"
+  );
+  if (candles.length === 0) return null;
 
   const closes = candles.map((c) => c.close);
   const highs = candles.map((c) => c.high);
