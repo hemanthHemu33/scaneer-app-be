@@ -2,9 +2,7 @@
 
 import { calculateDynamicStopLoss, adjustRiskBasedOnDrawdown } from './dynamicRiskModel.js';
 import { adjustStopLoss } from './riskValidator.js';
-
-// Zerodha intraday margin (approx. 20% of trade value)
-const ZERODHA_INTRADAY_MARGIN = 0.2;
+import { DEFAULT_MARGIN_PERCENT } from './util.js';
 
 // Default risk to reward ratio used for target calculations
 export const RISK_REWARD_RATIO = 1.5;
@@ -25,6 +23,8 @@ let tradeCount = 0;
  * @param {number} [opts.lotSize=1]        Minimum tradable lot size.
  * @param {number} [opts.utilizationCap=1] Max portion of capital to allocate when marginPerLot is provided.
  * @param {number} [opts.marginPerLot]     Margin required per lot. Defaults to Zerodha intraday policy if price is supplied.
+ * @param {number} [opts.marginPercent]    Broker margin percentage (if not using leverage).
+ * @param {number} [opts.leverage]         Leverage multiplier available from broker.
  * @param {number} [opts.volatilityGuard]  ATR/VIX threshold beyond which position size is scaled down.
  * @param {Object} [opts.marketDepth]      Current market depth { buy, sell }.
  * @param {number} [opts.priceMovement]    Recent price movement for dynamic scaling.
@@ -39,6 +39,8 @@ export function calculatePositionSize({
   lotSize = 1,
   utilizationCap = 1,
   marginPerLot,
+  marginPercent,
+  leverage = 0,
   volatilityGuard,
   marketDepth,
   priceMovement,
@@ -83,8 +85,14 @@ export function calculatePositionSize({
 
   if (lotSize > 1) qty = Math.floor(qty / lotSize) * lotSize;
 
+  const marginPct =
+    typeof marginPercent === 'number'
+      ? marginPercent
+      : leverage > 0
+      ? 1 / leverage
+      : DEFAULT_MARGIN_PERCENT;
   const effectiveMarginPerLot =
-    marginPerLot || (price ? price * lotSize * ZERODHA_INTRADAY_MARGIN : 0);
+    marginPerLot || (price ? price * lotSize * marginPct : 0);
   if (effectiveMarginPerLot > 0) {
     const maxLots = Math.floor((capital * utilizationCap) / effectiveMarginPerLot);
     qty = Math.min(qty, maxLots * lotSize);
@@ -104,6 +112,8 @@ export function calculatePositionSize({
  * @param {'Long'|'Short'} opts.direction Trade direction
  * @param {number} opts.atr         Current ATR value
  * @param {number} opts.capital     Trading capital
+ * @param {number} [opts.leverage]  Leverage multiplier
+ * @param {number} [opts.marginPercent] Broker margin percentage
  * @param {number} [opts.drawdown]  Current drawdown percentage (0-1)
  * @returns {Object} { stopLoss, qty, target1, target2 }
  */
@@ -113,6 +123,8 @@ export function calculateTradeParameters({
   direction,
   atr,
   capital,
+  leverage = 0,
+  marginPercent,
   drawdown = 0,
 }) {
   const dynamicSL = calculateDynamicStopLoss({ atr, entry, direction });
@@ -154,6 +166,8 @@ export function calculateTradeParameters({
     volatility: atr,
     lotSize: 1,
     utilizationCap: 1,
+    leverage,
+    marginPercent,
   });
 
   qty = adjustRiskBasedOnDrawdown({ drawdown, lotSize: qty });
