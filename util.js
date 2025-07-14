@@ -651,6 +651,113 @@ export function detectAllPatterns(candles, atrValue, lookback = 5) {
     });
   }
 
+  if (lastN.length >= 5) {
+    const isRoundingTop =
+      highs[0] < highs[1] &&
+      highs[1] < highs[2] &&
+      highs[2] > highs[3] &&
+      highs[3] > highs[4] &&
+      lows[0] < lows[1] &&
+      lows[1] < lows[2] &&
+      lows[2] > lows[3] &&
+      lows[3] > lows[4];
+
+    if (isRoundingTop) {
+      patterns.push({
+        type: "Rounding Top",
+        direction: "Short",
+        breakout: recentLow,
+        stopLoss: highs[2],
+        strength: 2,
+        confidence: "Medium",
+      });
+    }
+
+    const isRoundingBottom =
+      highs[0] > highs[1] &&
+      highs[1] > highs[2] &&
+      highs[2] < highs[3] &&
+      highs[3] < highs[4] &&
+      lows[0] > lows[1] &&
+      lows[1] > lows[2] &&
+      lows[2] < lows[3] &&
+      lows[3] < lows[4];
+
+    if (isRoundingBottom) {
+      patterns.push({
+        type: "Rounding Bottom",
+        direction: "Long",
+        breakout: recentHigh,
+        stopLoss: lows[2],
+        strength: 2,
+        confidence: "Medium",
+      });
+    }
+  }
+
+  if (candles.length >= 3) {
+    const [a, b, c] = candles.slice(-3);
+    const rangeA = a.high - a.low;
+    const rangeB = b.high - b.low;
+    const rangeC = c.high - c.low;
+
+    const broadeningTop =
+      c.high > b.high &&
+      b.high > a.high &&
+      c.low < b.low &&
+      b.low < a.low &&
+      rangeB > rangeA &&
+      rangeC > rangeB;
+
+    if (broadeningTop) {
+      patterns.push({
+        type: "Broadening Top",
+        direction: "Short",
+        breakout: c.low,
+        stopLoss: c.high,
+        strength: 2,
+        confidence: "Medium",
+      });
+    }
+
+    const broadeningBottom =
+      c.high < b.high &&
+      b.high < a.high &&
+      c.low > b.low &&
+      b.low > a.low &&
+      rangeB > rangeA &&
+      rangeC > rangeB;
+
+    if (broadeningBottom) {
+      patterns.push({
+        type: "Broadening Bottom",
+        direction: "Long",
+        breakout: c.high,
+        stopLoss: c.low,
+        strength: 2,
+        confidence: "Medium",
+      });
+    }
+
+    const saucerBottom =
+      a.close < a.open &&
+      b.close < b.open &&
+      b.low >= a.low &&
+      c.close > c.open &&
+      c.close > b.close;
+
+    if (saucerBottom) {
+      patterns.push({
+        type: "Saucer Bottom",
+        direction: "Long",
+        breakout: c.high,
+        stopLoss: Math.min(a.low, b.low),
+        strength: 1,
+        confidence: "Medium",
+      });
+    }
+  }
+
   const isRising =
     lows[0] < lows[1] &&
     lows[1] < lows[2] &&
@@ -745,6 +852,179 @@ export function detectAllPatterns(candles, atrValue, lookback = 5) {
       strength: 2,
       confidence: "Medium",
     });
+  }
+
+  // Pennant
+  if (candles.length >= 6) {
+    const priorUp = candles.slice(-6, -3).every((c) => c.close > c.open);
+    const priorDown = candles.slice(-6, -3).every((c) => c.close < c.open);
+    const cons = candles.slice(-3);
+    const cHighs = cons.map((c) => c.high);
+    const cLows = cons.map((c) => c.low);
+    const tightening = cHighs[0] > cHighs[1] && cHighs[1] > cHighs[2] && cLows[0] < cLows[1] && cLows[1] < cLows[2];
+    if (priorUp && tightening && last.close > last.open) {
+      patterns.push({
+        type: "Pennant (Bullish)",
+        direction: "Long",
+        breakout: Math.max(...cHighs),
+        stopLoss: Math.min(...cLows),
+        strength: 2,
+        confidence: "Medium",
+      });
+    }
+    if (priorDown && tightening && last.close < last.open) {
+      patterns.push({
+        type: "Pennant (Bearish)",
+        direction: "Short",
+        breakout: Math.min(...cLows),
+        stopLoss: Math.max(...cHighs),
+        strength: 2,
+        confidence: "Medium",
+      });
+    }
+  }
+
+  // Rectangle
+  if (candles.length >= 6) {
+    const rect = candles.slice(-4);
+    const rHigh = Math.max(...rect.map((c) => c.high));
+    const rLow = Math.min(...rect.map((c) => c.low));
+    const withinRange = rect.every(
+      (c) => Math.abs(c.high - rHigh) < epsilon && Math.abs(c.low - rLow) < epsilon
+    );
+    const priorUp = candles.slice(-6, -4).every((c) => c.close > c.open);
+    const priorDown = candles.slice(-6, -4).every((c) => c.close < c.open);
+    if (withinRange && priorUp) {
+      patterns.push({
+        type: "Rectangle (Bullish)",
+        direction: "Long",
+        breakout: rHigh,
+        stopLoss: rLow,
+        strength: 2,
+        confidence: "Medium",
+      });
+    } else if (withinRange && priorDown) {
+      patterns.push({
+        type: "Rectangle (Bearish)",
+        direction: "Short",
+        breakout: rLow,
+        stopLoss: rHigh,
+        strength: 2,
+        confidence: "Medium",
+      });
+    }
+  }
+
+  // Channel Up / Down
+  if (candles.length >= 4) {
+    const [c1, c2, c3, c4] = candles.slice(-4);
+    const up = c1.high < c2.high && c2.high < c3.high && c3.high < c4.high &&
+      c1.low < c2.low && c2.low < c3.low && c3.low < c4.low;
+    const down = c1.high > c2.high && c2.high > c3.high && c3.high > c4.high &&
+      c1.low > c2.low && c2.low > c3.low && c3.low > c4.low;
+    const widthOk = Math.abs((c4.high - c4.low) - (c1.high - c1.low)) < (c1.high - c1.low) * 0.3;
+    if (up && widthOk) {
+      patterns.push({
+        type: "Channel Up",
+        direction: "Long",
+        breakout: c4.high,
+        stopLoss: c4.low,
+        strength: 2,
+        confidence: "Medium",
+      });
+    } else if (down && widthOk) {
+      patterns.push({
+        type: "Channel Down",
+        direction: "Short",
+        breakout: c4.low,
+        stopLoss: c4.high,
+        strength: 2,
+        confidence: "Medium",
+      });
+    }
+  }
+
+  // Measured Move
+  if (candles.length >= 7) {
+    const [a, b, c, d, e, f, g] = candles.slice(-7);
+    const leg1 = b.close - a.open;
+    const leg2 = g.close - d.close;
+    const upMove = a.close < b.close && b.close > c.close && d.close < e.close && e.close < f.close && leg2 > 0;
+    const downMove = a.close > b.close && b.close < c.close && d.close > e.close && e.close > f.close && leg2 < 0;
+    if (upMove && Math.abs(leg2 - leg1) / Math.abs(leg1) < 0.5) {
+      patterns.push({
+        type: "Measured Move Up",
+        direction: "Long",
+        breakout: g.close,
+        stopLoss: c.low,
+        strength: 2,
+        confidence: "Medium",
+      });
+    } else if (downMove && Math.abs(leg2 - leg1) / Math.abs(leg1) < 0.5) {
+      patterns.push({
+        type: "Measured Move Down",
+        direction: "Short",
+        breakout: g.close,
+        stopLoss: c.high,
+        strength: 2,
+        confidence: "Medium",
+      });
+    }
+  }
+
+  // Trendline Break
+  if (candles.length >= 4) {
+    const [h1, h2, h3] = highs.slice(-3);
+    const [l1, l2, l3] = lows.slice(-3);
+    if (h1 > h2 && h2 > h3 && last.close > h2) {
+      patterns.push({
+        type: "Trendline Break (Bullish)",
+        direction: "Long",
+        breakout: last.close,
+        stopLoss: recentLow,
+        strength: 2,
+        confidence: "Medium",
+      });
+    }
+    if (l1 < l2 && l2 < l3 && last.close < l2) {
+      patterns.push({
+        type: "Trendline Break (Bearish)",
+        direction: "Short",
+        breakout: last.close,
+        stopLoss: recentHigh,
+        strength: 2,
+        confidence: "Medium",
+      });
+    }
+  }
+
+  // High/Low Base
+  if (candles.length >= 6) {
+    const base = candles.slice(-4);
+    const baseHigh = Math.max(...base.map((c) => c.high));
+    const baseLow = Math.min(...base.map((c) => c.low));
+    const tight = base.every((c) => c.high - c.low < (recentHigh - recentLow) * 0.3);
+    const priorUp = candles.slice(-6, -4).every((c) => c.close > c.open);
+    const priorDown = candles.slice(-6, -4).every((c) => c.close < c.open);
+    if (tight && priorUp && Math.abs(baseHigh - recentHigh) < epsilon) {
+      patterns.push({
+        type: "High Base",
+        direction: "Long",
+        breakout: baseHigh,
+        stopLoss: baseLow,
+        strength: 2,
+        confidence: "Medium",
+      });
+    } else if (tight && priorDown && Math.abs(baseLow - recentLow) < epsilon) {
+      patterns.push({
+        type: "Low Base",
+        direction: "Short",
+        breakout: baseLow,
+        stopLoss: baseHigh,
+        strength: 2,
+        confidence: "Medium",
+      });
+    }
   }
 
   // VWAP Reversal
@@ -874,6 +1154,249 @@ export function detectAllPatterns(candles, atrValue, lookback = 5) {
         stopLoss: head,
         strength: 3,
         confidence: "High",
+      });
+    }
+  }
+
+  // --- Price Action Swing Structures ---
+  if (candles.length >= 3) {
+    const [p1, p2, p3] = candles.slice(-3);
+    if (
+      p2.high > p1.high &&
+      p3.high > p2.high &&
+      p2.low > p1.low &&
+      p3.low > p2.low
+    ) {
+      patterns.push({
+        type: "HH-HL Structure",
+        direction: "Long",
+        strength: 1,
+        confidence: "Medium",
+      });
+    }
+    if (
+      p2.high < p1.high &&
+      p3.high < p2.high &&
+      p2.low < p1.low &&
+      p3.low < p2.low
+    ) {
+      patterns.push({
+        type: "LH-LL Structure",
+        direction: "Short",
+        strength: 1,
+        confidence: "Medium",
+      });
+    }
+  }
+
+  // --- Inside/Outside Bar Patterns ---
+  if (candles.length >= 3) {
+    const base = candles[candles.length - 3];
+    const inside = candles[candles.length - 2];
+    if (inside.high < base.high && inside.low > base.low) {
+      if (last.close > inside.high) {
+        patterns.push({
+          type: "Inside Bar Breakout (Bullish)",
+          direction: "Long",
+          breakout: last.close,
+          stopLoss: inside.low,
+          strength: 2,
+          confidence: "Medium",
+        });
+      } else if (last.close < inside.low) {
+        patterns.push({
+          type: "Inside Bar Breakout (Bearish)",
+          direction: "Short",
+          breakout: last.close,
+          stopLoss: inside.high,
+          strength: 2,
+          confidence: "Medium",
+        });
+      }
+    }
+  }
+
+  if (candles.length >= 2) {
+    const prev = candles[candles.length - 2];
+    if (last.high > prev.high && last.low < prev.low) {
+      if (last.close > prev.open) {
+        patterns.push({
+          type: "Outside Bar Bullish Reversal",
+          direction: "Long",
+          strength: 2,
+          confidence: "Medium",
+        });
+      }
+      if (last.close < prev.open) {
+        patterns.push({
+          type: "Outside Bar Bearish Reversal",
+          direction: "Short",
+          strength: 2,
+          confidence: "Medium",
+        });
+      }
+    }
+  }
+
+  // --- Break of Structure & Change of Character ---
+  if (candles.length >= lookback + 1) {
+    const prevClose = candles[candles.length - 2].close;
+    if (last.close > recentHigh && prevClose <= recentHigh) {
+      patterns.push({
+        type: "Break of Structure (Bullish)",
+        direction: "Long",
+        breakout: last.close,
+        stopLoss: recentLow,
+        strength: 2,
+        confidence: "High",
+      });
+    }
+    if (last.close < recentLow && prevClose >= recentLow) {
+      patterns.push({
+        type: "Break of Structure (Bearish)",
+        direction: "Short",
+        breakout: last.close,
+        stopLoss: recentHigh,
+        strength: 2,
+        confidence: "High",
+      });
+    }
+  }
+
+  if (candles.length >= 4) {
+    const [c1, c2, c3, c4] = candles.slice(-4);
+    if (c3.high > c2.high && c3.low > c2.low && c4.close < c3.low) {
+      patterns.push({
+        type: "Change of Character (Bearish)",
+        direction: "Short",
+        strength: 2,
+        confidence: "High",
+      });
+    }
+    if (c3.high < c2.high && c3.low < c2.low && c4.close > c3.high) {
+      patterns.push({
+        type: "Change of Character (Bullish)",
+        direction: "Long",
+        strength: 2,
+        confidence: "High",
+      });
+    }
+  }
+
+  // --- Swing Failure Pattern ---
+  if (last.high > recentHigh && last.close <= recentHigh) {
+    patterns.push({
+      type: "Swing Failure Pattern (Bearish)",
+      direction: "Short",
+      breakout: recentHigh,
+      stopLoss: last.high,
+      strength: 2,
+      confidence: "Medium",
+    });
+  }
+  if (last.low < recentLow && last.close >= recentLow) {
+    patterns.push({
+      type: "Swing Failure Pattern (Bullish)",
+      direction: "Long",
+      breakout: recentLow,
+      stopLoss: last.low,
+      strength: 2,
+      confidence: "Medium",
+    });
+  }
+
+  // --- Order Block Reversal ---
+  if (candles.length >= 3) {
+    const base = candles[candles.length - 3];
+    const mid = candles[candles.length - 2];
+    if (base.close > base.open && mid.low >= base.low && last.close < base.low) {
+      patterns.push({
+        type: "Order Block Reversal (Bearish)",
+        direction: "Short",
+        breakout: last.close,
+        stopLoss: base.high,
+        strength: 3,
+        confidence: "Medium",
+      });
+    }
+    if (base.close < base.open && mid.high <= base.high && last.close > base.high) {
+      patterns.push({
+        type: "Order Block Reversal (Bullish)",
+        direction: "Long",
+        breakout: last.close,
+        stopLoss: base.low,
+        strength: 3,
+        confidence: "Medium",
+      });
+    }
+  }
+
+  // --- Fair Value Gap ---
+  if (candles.length >= 3) {
+    const g1 = candles[candles.length - 3];
+    const g2 = candles[candles.length - 2];
+    const gapUp = g2.low > g1.high && last.low > g2.high;
+    const gapDown = g2.high < g1.low && last.high < g2.low;
+    if (gapUp) {
+      patterns.push({
+        type: "Fair Value Gap (Up)",
+        direction: "Long",
+        strength: 1,
+        confidence: "Medium",
+      });
+    }
+    if (gapDown) {
+      patterns.push({
+        type: "Fair Value Gap (Down)",
+        direction: "Short",
+        strength: 1,
+        confidence: "Medium",
+      });
+    }
+  }
+
+  // --- Supply / Demand Zones ---
+  if (candles.length >= 5) {
+    const last5Highs = candles.slice(-5).map((c) => c.high);
+    const last5Lows = candles.slice(-5).map((c) => c.low);
+    const highRange = Math.max(...last5Highs) - Math.min(...last5Highs);
+    const lowRange = Math.max(...last5Lows) - Math.min(...last5Lows);
+    if (highRange < atrValue) {
+      patterns.push({
+        type: "Supply Zone",
+        direction: "Short",
+        strength: 1,
+        confidence: "Low",
+      });
+    }
+    if (lowRange < atrValue) {
+      patterns.push({
+        type: "Demand Zone",
+        direction: "Long",
+        strength: 1,
+        confidence: "Low",
+      });
+    }
+  }
+
+  // --- Liquidity Sweep / Stop Hunt ---
+  if (candles.length >= 2) {
+    const priorHigh = Math.max(...candles.slice(0, -1).map((c) => c.high));
+    const priorLow = Math.min(...candles.slice(0, -1).map((c) => c.low));
+    if (last.high > priorHigh && last.close <= priorHigh) {
+      patterns.push({
+        type: "Liquidity Sweep (Up)",
+        direction: "Short",
+        strength: 2,
+        confidence: "Medium",
+      });
+    }
+    if (last.low < priorLow && last.close >= priorLow) {
+      patterns.push({
+        type: "Liquidity Sweep (Down)",
+        direction: "Long",
+        strength: 2,
+        confidence: "Medium",
       });
     }
   }
