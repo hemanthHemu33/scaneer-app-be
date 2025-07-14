@@ -36,6 +36,32 @@ import {
   calculateKlinger,
   calculateSTC,
   calculateTSI,
+  calculateStdDev,
+  calculateBollingerBands,
+  calculateKeltnerChannels,
+  calculateDonchianChannels,
+  calculateChaikinVolatility,
+  calculateHistoricalVolatility,
+  calculateFractalChaosBands,
+  calculateEnvelopes,
+  calculateTTMSqueeze,
+  calculateZScore,
+  calculateElderImpulse,
+  calculateDonchianWidth,
+  calculateIchimokuBaseLine,
+  calculateIchimokuConversionLine,
+  calculateAnchoredMomentum,
+  calculateATRBands,
+  calculateDynamicStopLoss as calcDynamicStopLoss,
+  calculateATRTrailingStop,
+  calculateLaguerreRSI,
+  calculateRSILaguerre,
+  calculateTrendIntensityIndex,
+  calculateBollingerPB,
+  calculateMACDHistogram,
+  calculateCoppockCurve,
+  calculatePriceOscillator,
+  calculateMcGinleyDynamic,
   resetIndicatorCache,
 } from "./featureEngine.js";
 
@@ -69,6 +95,32 @@ export {
   calculateKlinger,
   calculateSTC,
   calculateTSI,
+  calculateStdDev,
+  calculateBollingerBands,
+  calculateKeltnerChannels,
+  calculateDonchianChannels,
+  calculateChaikinVolatility,
+  calculateHistoricalVolatility,
+  calculateFractalChaosBands,
+  calculateEnvelopes,
+  calculateTTMSqueeze,
+  calculateZScore,
+  calculateElderImpulse,
+  calculateDonchianWidth,
+  calculateIchimokuBaseLine,
+  calculateIchimokuConversionLine,
+  calculateAnchoredMomentum,
+  calculateATRBands,
+  calcDynamicStopLoss,
+  calculateATRTrailingStop,
+  calculateLaguerreRSI,
+  calculateRSILaguerre,
+  calculateTrendIntensityIndex,
+  calculateBollingerPB,
+  calculateMACDHistogram,
+  calculateCoppockCurve,
+  calculatePriceOscillator,
+  calculateMcGinleyDynamic,
   resetIndicatorCache,
 };
 
@@ -172,6 +224,42 @@ export function detectAllPatterns(candles, atrValue, lookback = 5) {
   const isShootingStar =
     last.open > last.close &&
     last.high - last.open > 2 * (last.open - last.low);
+  const bodySize = Math.abs(last.close - last.open);
+  const isHangingMan =
+    bodySize > 0 &&
+    Math.min(last.open, last.close) - last.low > 2 * bodySize &&
+    last.high - Math.max(last.open, last.close) <= bodySize * 0.3;
+
+  const marubozuBullish =
+    last.close > last.open &&
+    Math.abs(last.open - last.low) < epsilon &&
+    Math.abs(last.high - last.close) < epsilon;
+  const marubozuBearish =
+    last.close < last.open &&
+    Math.abs(last.high - last.open) < epsilon &&
+    Math.abs(last.close - last.low) < epsilon;
+  const beltHoldBullish =
+    last.close > last.open &&
+    Math.abs(last.open - last.low) < epsilon &&
+    last.close - last.open > (last.high - last.low) * 0.6;
+  const beltHoldBearish =
+    last.close < last.open &&
+    Math.abs(last.open - last.high) < epsilon &&
+    last.open - last.close > (last.high - last.low) * 0.6;
+
+  let kickerBullish = false;
+  let kickerBearish = false;
+  if (candles.length >= 2) {
+    const prevCandle = candles[candles.length - 2];
+    kickerBullish =
+      prevCandle.close < prevCandle.open &&
+      last.open > prevCandle.open &&
+      last.close > last.open;
+    kickerBearish =
+      prevCandle.close > prevCandle.open &&
+      last.open < prevCandle.open &&
+      last.close < last.open;
+  }
 
   if (isDoji)
     patterns.push({
@@ -199,6 +287,55 @@ export function detectAllPatterns(candles, atrValue, lookback = 5) {
       type: "Shooting Star",
       direction: "Short",
       strength: 2,
+      confidence: "High",
+    });
+  if (isHangingMan)
+    patterns.push({
+      type: "Hanging Man",
+      direction: "Short",
+      strength: 2,
+      confidence: "Medium",
+    });
+  if (marubozuBullish)
+    patterns.push({
+      type: "Marubozu (Bullish)",
+      direction: "Long",
+      strength: 2,
+      confidence: "Medium",
+    });
+  if (marubozuBearish)
+    patterns.push({
+      type: "Marubozu (Bearish)",
+      direction: "Short",
+      strength: 2,
+      confidence: "Medium",
+    });
+  if (beltHoldBullish)
+    patterns.push({
+      type: "Belt Hold (Bullish)",
+      direction: "Long",
+      strength: 2,
+      confidence: "Medium",
+    });
+  if (beltHoldBearish)
+    patterns.push({
+      type: "Belt Hold (Bearish)",
+      direction: "Short",
+      strength: 2,
+      confidence: "Medium",
+    });
+  if (kickerBullish)
+    patterns.push({
+      type: "Kicker Pattern (Bullish)",
+      direction: "Long",
+      strength: 3,
+      confidence: "High",
+    });
+  if (kickerBearish)
+    patterns.push({
+      type: "Kicker Pattern (Bearish)",
+      direction: "Short",
+      strength: 3,
       confidence: "High",
     });
 
@@ -262,9 +399,55 @@ export function detectAllPatterns(candles, atrValue, lookback = 5) {
       strength: 2,
       confidence: "Medium",
     });
+  const haramiCrossBullish =
+    isDoji &&
+    prev.open > prev.close &&
+    last.high <= prev.open &&
+    last.low >= prev.close;
+  if (haramiCrossBullish)
+    patterns.push({
+      type: "Bullish Harami Cross",
+      direction: "Long",
+      strength: 2,
+      confidence: "Medium",
+    });
+  const haramiCrossBearish =
+    isDoji &&
+    prev.open < prev.close &&
+    last.high <= prev.close &&
+    last.low >= prev.open;
+  if (haramiCrossBearish)
+    patterns.push({
+      type: "Bearish Harami Cross",
+      direction: "Short",
+      strength: 2,
+      confidence: "Medium",
+    });
   if (haramiBearish)
     patterns.push({
       type: "Bearish Harami",
+      direction: "Short",
+      strength: 2,
+      confidence: "Medium",
+    });
+  const tweezerBottom =
+    prev.close < prev.open &&
+    last.close > last.open &&
+    Math.abs(prev.low - last.low) < epsilon;
+  if (tweezerBottom)
+    patterns.push({
+      type: "Tweezer Bottom",
+      direction: "Long",
+      strength: 2,
+      confidence: "Medium",
+    });
+  const tweezerTop =
+    prev.close > prev.open &&
+    last.close < last.open &&
+    Math.abs(prev.high - last.high) < epsilon;
+  if (tweezerTop)
+    patterns.push({
+      type: "Tweezer Top",
       direction: "Short",
       strength: 2,
       confidence: "Medium",
@@ -285,6 +468,101 @@ export function detectAllPatterns(candles, atrValue, lookback = 5) {
     if (threeCrows)
       patterns.push({
         type: "Three Black Crows",
+        direction: "Short",
+        strength: 3,
+        confidence: "High",
+      });
+  }
+
+  if (candles.length >= 5) {
+    const [r1, r2, r3, r4, r5] = candles.slice(-5);
+    const risingThreeMethods =
+      r1.close > r1.open &&
+      [r2, r3, r4].every(
+        (c) =>
+          c.close < c.open && c.high <= r1.high && c.low >= r1.low
+      ) &&
+      r5.close > r5.open &&
+      r5.close > r1.close;
+    if (risingThreeMethods)
+      patterns.push({
+        type: "Rising Three Methods",
+        direction: "Long",
+        strength: 3,
+        confidence: "High",
+      });
+
+    const fallingThreeMethods =
+      r1.close < r1.open &&
+      [r2, r3, r4].every(
+        (c) =>
+          c.close > c.open && c.high <= r1.high && c.low >= r1.low
+      ) &&
+      r5.close < r5.open &&
+      r5.close < r1.close;
+    if (fallingThreeMethods)
+      patterns.push({
+        type: "Falling Three Methods",
+        direction: "Short",
+        strength: 3,
+        confidence: "High",
+      });
+
+    const matHoldBullish =
+      r1.close > r1.open &&
+      r2.open > r1.close &&
+      [r2, r3, r4].every((c) => c.close < c.open && c.low > r1.low) &&
+      r5.close > r5.open &&
+      r5.close > r2.open;
+    if (matHoldBullish)
+      patterns.push({
+        type: "Mat Hold Pattern (Bullish)",
+        direction: "Long",
+        strength: 3,
+        confidence: "High",
+      });
+
+    const matHoldBearish =
+      r1.close < r1.open &&
+      r2.open < r1.close &&
+      [r2, r3, r4].every((c) => c.close > c.open && c.high < r1.high) &&
+      r5.close < r5.open &&
+      r5.close < r2.open;
+    if (matHoldBearish)
+      patterns.push({
+        type: "Mat Hold Pattern (Bearish)",
+        direction: "Short",
+        strength: 3,
+        confidence: "High",
+      });
+
+    const breakawayBullish =
+      r1.open > r1.close &&
+      r2.open < r1.close &&
+      r2.close < r1.close &&
+      r3.close < r2.close &&
+      r4.close < r3.close &&
+      r5.close > r4.close &&
+      r5.close > r1.open;
+    if (breakawayBullish)
+      patterns.push({
+        type: "Breakaway (Bullish)",
+        direction: "Long",
+        strength: 3,
+        confidence: "High",
+      });
+
+    const breakawayBearish =
+      r1.close > r1.open &&
+      r2.open > r1.close &&
+      r2.close > r1.close &&
+      r3.close > r2.close &&
+      r4.close > r3.close &&
+      r5.close < r4.close &&
+      r5.close < r1.open;
+    if (breakawayBearish)
+      patterns.push({
+        type: "Breakaway (Bearish)",
         direction: "Short",
         strength: 3,
         confidence: "High",

@@ -603,7 +603,6 @@ export async function processAlignedCandles(io) {
 }
 
 // 🕒 Old tick buffer processing
-
 async function processBuffer(io) {
   if (!isMarketOpen()) {
     console.log("Market closed, skipping buffer processing.");
