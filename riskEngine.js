@@ -10,9 +10,13 @@ import {
 
 const defaultState = {
   dailyLoss: 0,
+  dailyRisk: 0,
   maxDailyLoss: 5000,
+  maxDailyRisk: 10000,
   tradeCount: 0,
   maxTradesPerDay: 20,
+  consecutiveLosses: 0,
+  maxLossStreak: 3,
   lastResetDay: new Date().getDate(),
 };
 
@@ -26,9 +30,12 @@ export function resetRiskState() {
   correlationMap.clear();
 }
 
-export function recordTradeResult({ pnl = 0 }) {
+export function recordTradeResult({ pnl = 0, risk = 0 }) {
   riskState.tradeCount += 1;
   riskState.dailyLoss += pnl < 0 ? Math.abs(pnl) : 0;
+  riskState.dailyRisk += risk;
+  if (pnl < 0) riskState.consecutiveLosses += 1;
+  else riskState.consecutiveLosses = 0;
 }
 
 export function isSignalValid(signal, ctx = {}) {
@@ -38,8 +45,38 @@ export function isSignalValid(signal, ctx = {}) {
 
   const maxLoss = ctx.maxDailyLoss ?? riskState.maxDailyLoss;
   if (riskState.dailyLoss >= maxLoss) return false;
+  const maxRisk = ctx.maxDailyRisk ?? riskState.maxDailyRisk;
+  if (riskState.dailyRisk >= maxRisk) return false;
   const maxTrades = ctx.maxTradesPerDay ?? riskState.maxTradesPerDay;
   if (riskState.tradeCount >= maxTrades) return false;
+  const maxStreak = ctx.maxLossStreak ?? riskState.maxLossStreak;
+  if (riskState.consecutiveLosses >= maxStreak) return false;
+  if (
+    typeof ctx.maxOpenPositions === 'number' &&
+    typeof ctx.openPositionsCount === 'number' &&
+    ctx.openPositionsCount >= ctx.maxOpenPositions
+  )
+    return false;
+
+  if (
+    typeof ctx.minTradeValue === 'number' &&
+    typeof ctx.tradeValue === 'number' &&
+    ctx.tradeValue < ctx.minTradeValue
+  )
+    return false;
+  if (
+    typeof ctx.maxTradeValue === 'number' &&
+    typeof ctx.tradeValue === 'number' &&
+    ctx.tradeValue > ctx.maxTradeValue
+  )
+    return false;
+  if (
+    typeof ctx.volatilityFilter === 'number' &&
+    typeof signal.atr === 'number' &&
+    signal.atr > ctx.volatilityFilter
+  )
+    return false;
+  if (ctx.allowPyramiding === false && ctx.hasPositionForSymbol) return false;
 
   if (signal.expiresAt && now > new Date(signal.expiresAt).getTime()) return false;
 

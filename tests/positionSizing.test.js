@@ -49,3 +49,14 @@ test('leverage limits position size', () => {
   assert.equal(qty, 100); // capped by margin
 });
 
+test('min and max qty constraints applied', () => {
+  const qty = calculatePositionSize({
+    capital: 100000,
+    risk: 1000,
+    slPoints: 10,
+    minQty: 20,
+    maxQty: 50,
+  });
+  assert.equal(qty, 50);
+});
+

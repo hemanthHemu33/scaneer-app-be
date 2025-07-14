@@ -9,7 +9,7 @@ const dbMock = test.mock.module('../db.js', {
   namedExports: { connectDB: async () => ({}) }
 });
 
-const { isSignalValid, resetRiskState } = await import('../riskEngine.js');
+const { isSignalValid, resetRiskState, riskState } = await import('../riskEngine.js');
 
 auditMock.restore();
 dbMock.restore();
@@ -60,5 +60,41 @@ test('isSignalValid respects ATR boundaries', () => {
     spread: 0.1,
   };
   const ok = isSignalValid(sig, { minATR: 0.5, maxATR: 5 });
+  assert.equal(ok, false);
+});
+
+test('isSignalValid blocks when maxOpenPositions reached', () => {
+  resetRiskState();
+  const sig = {
+    stock: 'CCC',
+    pattern: 'trend',
+    direction: 'Long',
+    entry: 100,
+    stopLoss: 98,
+    target2: 104,
+    atr: 1,
+    spread: 0.1,
+  };
+  const ok = isSignalValid(sig, {
+    maxOpenPositions: 2,
+    openPositionsCount: 2,
+  });
+  assert.equal(ok, false);
+});
+
+test('isSignalValid blocks on loss streak', () => {
+  resetRiskState();
+  riskState.consecutiveLosses = 3;
+  const sig = {
+    stock: 'DDD',
+    pattern: 'trend',
+    direction: 'Long',
+    entry: 100,
+    stopLoss: 98,
+    target2: 104,
+    atr: 1,
+    spread: 0.1,
+  };
+  const ok = isSignalValid(sig, { maxLossStreak: 3 });
   assert.equal(ok, false);
 });
