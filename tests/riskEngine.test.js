@@ -98,3 +98,24 @@ test('isSignalValid blocks on loss streak', () => {
   const ok = isSignalValid(sig, { maxLossStreak: 3 });
   assert.equal(ok, false);
 });
+
+test('isSignalValid enforces liquidity and volume ratio', () => {
+  resetRiskState();
+  const sig = {
+    stock: 'EEE',
+    pattern: 'trend',
+    direction: 'Long',
+    entry: 100,
+    stopLoss: 98,
+    target2: 104,
+    atr: 1,
+    spread: 0.1,
+    liquidity: 400,
+  };
+  const ok = isSignalValid(sig, {
+    minLiquidity: 500,
+    avgVolume: 1000,
+    minVolumeRatio: 0.5,
+  });
+  assert.equal(ok, false);
+});

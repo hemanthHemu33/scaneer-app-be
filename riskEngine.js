@@ -114,6 +114,21 @@ export function isSignalValid(signal, ctx = {}) {
   )
     return false;
 
+  if (
+    typeof ctx.minLiquidity === 'number' &&
+    typeof (signal.liquidity ?? ctx.volume) === 'number' &&
+    (signal.liquidity ?? ctx.volume) < ctx.minLiquidity
+  )
+    return false;
+
+  if (
+    typeof ctx.minVolumeRatio === 'number' &&
+    typeof ctx.avgVolume === 'number' &&
+    typeof (signal.liquidity ?? ctx.volume) === 'number' &&
+    (signal.liquidity ?? ctx.volume) < ctx.avgVolume * ctx.minVolumeRatio
+  )
+    return false;
+
   if (typeof ctx.minATR === 'number' && signal.atr < ctx.minATR) return false;
   if (typeof ctx.maxATR === 'number' && signal.atr > ctx.maxATR) return false;
 
