@@ -56,6 +56,48 @@ export function isSLInvalid({ price, stopLoss, atr, structureBreak = false }) {
   return proximity <= atr * 0.2;
 }
 
+// Ensure stop-loss distance is sensible relative to ATR
+export function validateATRStopLoss({
+  entry,
+  stopLoss,
+  atr,
+  minMult = 0.5,
+  maxMult = 3,
+}) {
+  if (!atr) return true;
+  const dist = Math.abs(entry - stopLoss);
+  if (dist <= atr * minMult) return false;
+  if (dist > atr * maxMult) return false;
+  return true;
+}
+
+// Validate trade entry against nearest support/resistance levels
+export function validateSupportResistance({
+  entry,
+  direction,
+  support,
+  resistance,
+  atr,
+}) {
+  const buffer = atr ? atr * 0.5 : entry * 0.01;
+  if (direction === 'Long') {
+    if (typeof support === 'number' && entry - support <= buffer) return false;
+    if (typeof resistance === 'number' && resistance - entry <= buffer)
+      return false;
+  } else if (direction === 'Short') {
+    if (typeof resistance === 'number' && resistance - entry <= buffer)
+      return false;
+    if (typeof support === 'number' && entry - support <= buffer) return false;
+  }
+  return true;
+}
+
+// Require current volume to exceed average volume by a multiplier
+export function validateVolumeSpike({ volume, avgVolume, minSpike = 1.5 }) {
+  if (!volume || !avgVolume) return true;
+  return volume >= avgVolume * minSpike;
+}
+
 export function checkMarketConditions({
   atr,
   avgAtr,
