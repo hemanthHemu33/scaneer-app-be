@@ -37,3 +37,26 @@ test('Gap Down Breakdown detected', () => {
   const found = res.find(r => r.name === 'Gap Down Breakdown');
   assert.ok(found);
 });
+
+test('Gap Up + Bullish Marubozu detected', () => {
+  const candles = [
+    { open: 100, high: 100.5, low: 99.5, close: 100, volume: 100 },
+    { open: 102, high: 103, low: 102, close: 103, volume: 200 }
+  ];
+  const res = evaluateStrategies(candles, {}, { topN: 5 });
+  const found = res.find(r => r.name === 'Gap Up + Bullish Marubozu');
+  assert.ok(found);
+});
+
+test('Breakaway Gap (Bullish) detected', () => {
+  const candles = [
+    { open: 99, high: 100, low: 98.5, close: 99.2, volume: 80 },
+    { open: 99.1, high: 100, low: 98.8, close: 99, volume: 80 },
+    { open: 99, high: 100.2, low: 98.7, close: 99.1, volume: 80 },
+    { open: 99.2, high: 100.1, low: 98.9, close: 99.3, volume: 80 },
+    { open: 101.5, high: 102, low: 100.8, close: 101.8, volume: 200 }
+  ];
+  const res = evaluateStrategies(candles, {}, { topN: 5 });
+  const found = res.find(r => r.name === 'Breakaway Gap (Bullish)');
+  assert.ok(found);
+});
