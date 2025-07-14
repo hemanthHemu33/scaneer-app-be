@@ -1401,6 +1401,236 @@ export function detectAllPatterns(candles, atrValue, lookback = 5) {
     }
   }
 
+  // --- Additional Swing Patterns ---
+  if (candles.length >= 5) {
+    const [p1, p2, p3, p4, p5] = candles.slice(-5);
+    const bullishWolfe =
+      p1.low > p2.low &&
+      p3.low > p1.low &&
+      p4.low < p3.low &&
+      p5.low > p4.low &&
+      p5.high > p3.high;
+    const bearishWolfe =
+      p1.high < p2.high &&
+      p3.high < p2.high &&
+      p4.high > p3.high &&
+      p5.high < p4.high &&
+      p5.low < p3.low;
+    if (bullishWolfe) {
+      patterns.push({
+        type: "Wolfe Wave (Bullish)",
+        direction: "Long",
+        strength: 3,
+        confidence: "Low",
+      });
+    } else if (bearishWolfe) {
+      patterns.push({
+        type: "Wolfe Wave (Bearish)",
+        direction: "Short",
+        strength: 3,
+        confidence: "Low",
+      });
+    }
+
+    const XA = p2.close - p1.close;
+    const AB = p3.close - p2.close;
+    const BC = p4.close - p3.close;
+    const CD = p5.close - p4.close;
+    const abxa = Math.abs(AB / (XA || 1));
+    const bcab = Math.abs(BC / (AB || 1));
+    const cdxa = Math.abs(CD / (XA || 1));
+    const harmonicCheck = (range, [min, max]) => range >= min && range <= max;
+    const patternsMap = [
+      { name: "Gartley", ab: [0.6, 0.7], bc: [0.5, 0.9], cd: [0.7, 0.9] },
+      { name: "Bat", ab: [0.4, 0.6], bc: [0.5, 1.0], cd: [0.8, 1.0] },
+      { name: "Butterfly", ab: [0.7, 0.8], bc: [0.3, 0.9], cd: [1.2, 1.7] },
+      { name: "Crab", ab: [0.3, 0.6], bc: [0.3, 1.0], cd: [1.6, 2.0] },
+      { name: "Shark", ab: [0.4, 0.6], bc: [1.1, 1.6], cd: [0.8, 1.2] },
+      { name: "Cypher", ab: [0.3, 0.4], bc: [1.2, 1.4], cd: [0.7, 0.9] },
+    ];
+    for (const h of patternsMap) {
+      if (
+        harmonicCheck(abxa, h.ab) &&
+        harmonicCheck(bcab, h.bc) &&
+        harmonicCheck(cdxa, h.cd)
+      ) {
+        patterns.push({
+          type: `${h.name} Pattern`,
+          direction: CD > 0 ? "Long" : "Short",
+          strength: 2,
+          confidence: "Low",
+        });
+        break;
+      }
+    }
+
+    const impulseUp =
+      p1.close < p2.close &&
+      p2.close > p3.close &&
+      p3.close > p1.close &&
+      p4.close > p2.close &&
+      p5.close > p4.close;
+    const impulseDown =
+      p1.close > p2.close &&
+      p2.close < p3.close &&
+      p3.close < p1.close &&
+      p4.close < p2.close &&
+      p5.close < p4.close;
+    if (impulseUp) {
+      patterns.push({
+        type: "Elliott Wave Impulse (Bullish)",
+        direction: "Long",
+        strength: 2,
+        confidence: "Low",
+      });
+    } else if (impulseDown) {
+      patterns.push({
+        type: "Elliott Wave Impulse (Bearish)",
+        direction: "Short",
+        strength: 2,
+        confidence: "Low",
+      });
+    }
+  }
+
+  if (candles.length >= 3) {
+    const [a, b, c] = candles.slice(-3);
+    if (b.high > a.high && b.high > c.high && b.low > a.low && b.low > c.low) {
+      patterns.push({
+        type: "Fractal Top", 
+        direction: "Short",
+        strength: 1,
+        confidence: "Low",
+      });
+    }
+    if (b.low < a.low && b.low < c.low && b.high < a.high && b.high < c.high) {
+      patterns.push({
+        type: "Fractal Bottom",
+        direction: "Long",
+        strength: 1,
+        confidence: "Low",
+      });
+    }
+  }
+
+  if (candles.length >= 6) {
+    const slice = candles.slice(-6);
+    const highsSeq = slice.map(c => c.high);
+    const lowsSeq = slice.map(c => c.low);
+    const expand = highsSeq[1] > highsSeq[0] && lowsSeq[1] < lowsSeq[0] && highsSeq[2] > highsSeq[1] && lowsSeq[2] < lowsSeq[1];
+    const contract = highsSeq[5] < highsSeq[4] && lowsSeq[5] > lowsSeq[4] && highsSeq[4] < highsSeq[3] && lowsSeq[4] > lowsSeq[3];
+    if (expand && contract) {
+      patterns.push({
+        type: "Diamond Top",
+        direction: "Short",
+        strength: 3,
+        confidence: "Low",
+      });
+    }
+    const expandB = highsSeq[1] < highsSeq[0] && lowsSeq[1] > lowsSeq[0] && highsSeq[2] < highsSeq[1] && lowsSeq[2] > lowsSeq[1];
+    const contractB = highsSeq[5] > highsSeq[4] && lowsSeq[5] < lowsSeq[4] && highsSeq[4] > highsSeq[3] && lowsSeq[4] < lowsSeq[3];
+    if (expandB && contractB) {
+      patterns.push({
+        type: "Diamond Bottom",
+        direction: "Long",
+        strength: 3,
+        confidence: "Low",
+      });
+    }
+  }
+
+  if (candles.length >= 4) {
+    const [w1, w2, w3, w4] = candles.slice(-4);
+    const sharpRise = w1.close > w1.open && w2.close > w1.close * 1.03;
+    const breakdown = w3.close < w2.low && w4.close < w3.close;
+    if (sharpRise && breakdown) {
+      patterns.push({
+        type: "Bump and Run Reversal",
+        direction: "Short",
+        strength: 2,
+        confidence: "Low",
+      });
+    }
+  }
+
+  if (candles.length >= 3) {
+    const [i1, i2, i3] = candles.slice(-3);
+    const gapUp = i2.low > i1.high && i3.high < i2.low;
+    const gapDown = i2.high < i1.low && i3.low > i2.high;
+    if (gapUp) {
+      patterns.push({
+        type: "Island Reversal (Bearish)",
+        direction: "Short",
+        strength: 2,
+        confidence: "Low",
+      });
+    } else if (gapDown) {
+      patterns.push({
+        type: "Island Reversal (Bullish)",
+        direction: "Long",
+        strength: 2,
+        confidence: "Low",
+      });
+    }
+  }
+
+  if (candles.length >= 4) {
+    const [d1, d2, d3, d4] = candles.slice(-4);
+    const dropPct = (d2.close - d1.close) / Math.abs(d1.close);
+    const bouncePct = (d3.close - d2.close) / Math.abs(d2.close);
+    const fail = d4.close < d2.close;
+    if (dropPct < -0.1 && bouncePct > 0 && bouncePct < 0.5 && fail) {
+      patterns.push({
+        type: "Dead Cat Bounce",
+        direction: "Short",
+        strength: 2,
+        confidence: "Low",
+      });
+    }
+  }
+
+  if (candles.length >= 3) {
+    const [b1, b2, b3] = candles.slice(-3);
+    if (b2.high > Math.max(b1.high, b3.high) && b3.close < b1.close) {
+      patterns.push({
+        type: "Bull Trap",
+        direction: "Short",
+        strength: 2,
+        confidence: "Low",
+      });
+    }
+    if (b2.low < Math.min(b1.low, b3.low) && b3.close > b1.close) {
+      patterns.push({
+        type: "Bear Trap",
+        direction: "Long",
+        strength: 2,
+        confidence: "Low",
+      });
+    }
+  }
+
+  if (candles.length >= 3) {
+    const [c1, c2, c3] = candles.slice(-3);
+    const up = c1.close < c2.close && c2.close < c3.close && c3.high - c3.low > (c2.high - c2.low) * 1.5;
+    const down = c1.close > c2.close && c2.close > c3.close && c3.high - c3.low > (c2.high - c2.low) * 1.5;
+    if (up) {
+      patterns.push({
+        type: "Climax Top",
+        direction: "Short",
+        strength: 2,
+        confidence: "Low",
+      });
+    }
+    if (down) {
+      patterns.push({
+        type: "Climax Bottom",
+        direction: "Long",
+        strength: 2,
+        confidence: "Low",
+      });
+    }
+  }
+
   return patterns;
 }
 
