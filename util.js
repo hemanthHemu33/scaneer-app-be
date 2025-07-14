@@ -6,6 +6,9 @@ import timezone from "dayjs/plugin/timezone.js";
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
+
+// Default margin percentage used when broker margin or leverage is not supplied
+export const DEFAULT_MARGIN_PERCENT = 0.2;
 import {
   calculateEMA,
   calculateRSI,
@@ -625,8 +628,11 @@ export function detectAllPatterns(candles, atrValue, lookback = 5) {
     });
   }
 
-  const isCup = lastN[0].high > lastN[2].high && lastN[4].high > lastN[2].high;
-  const isHandle = last.low > lastN[2].low && last.close > last.open;
+  const isCup =
+    (lastN[0]?.high ?? 0) > (lastN[2]?.high ?? 0) &&
+    (lastN[4]?.high ?? 0) > (lastN[2]?.high ?? 0);
+  const isHandle =
+    lastN[2] && last.low > lastN[2].low && last.close > last.open;
   if (isCup && isHandle) {
     patterns.push({
       type: "Cup & Handle",
@@ -1069,7 +1075,7 @@ export function detectAllPatterns(candles, atrValue, lookback = 5) {
     });
   }
 
-  if (last.high < lastN[3].high && last.low > lastN[3].low) {
+  if (lastN.length > 3 && last.high < lastN[3].high && last.low > lastN[3].low) {
     patterns.push({
       type: "Inside Bar",
       direction: "Long",
@@ -1081,6 +1087,7 @@ export function detectAllPatterns(candles, atrValue, lookback = 5) {
   }
 
   if (
+    lastN.length > 3 &&
     last.high > lastN[3].high &&
     last.low < lastN[3].low &&
     last.close > lastN[3].close &&
@@ -1097,6 +1104,7 @@ export function detectAllPatterns(candles, atrValue, lookback = 5) {
   }
 
   if (
+    lastN.length > 3 &&
     last.high > lastN[3].high &&
     last.low < lastN[3].low &&
     last.close < lastN[3].close &&
@@ -1715,4 +1723,30 @@ export function confirmRetest(candles, breakout, direction = "Long") {
       ? confirm.close > confirm.open && confirm.close > breakout
       : confirm.close < confirm.open && confirm.close < breakout;
   return touched && closeStrong && (volumeOk || wickOk || bodyOk);
+}
+
+// Calculate stop-loss distance based on ATR and setup type
+export function atrStopLossDistance(atr, setupType = "conservative") {
+  if (!atr) return 0;
+  const mult =
+    setupType === "breakout" || setupType === "high" ? 2 : 1.5;
+  return atr * mult;
+}
+
+// Estimate margin required for a trade given price, quantity and leverage
+export function calculateRequiredMargin({
+  price,
+  qty,
+  lotSize = 1,
+  leverage = 0,
+  brokerMargin = undefined,
+}) {
+  if (!price || !qty) return 0;
+  const pct =
+    typeof brokerMargin === "number"
+      ? brokerMargin
+      : leverage > 0
+      ? 1 / leverage
+      : DEFAULT_MARGIN_PERCENT;
+  return price * qty * lotSize * pct;
 }

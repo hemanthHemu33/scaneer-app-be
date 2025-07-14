@@ -12,7 +12,13 @@ const featureMock = test.mock.module('../featureEngine.js', {
     computeFeatures: () => ({ ema9: 0, ema21: 0, ema200: 0, rsi: 50 })
   }
 });
-const utilMock = test.mock.module('../util.js', { namedExports: { confirmRetest: () => true, detectAllPatterns: () => [] } });
+const utilMock = test.mock.module('../util.js', {
+  namedExports: {
+    confirmRetest: () => true,
+    detectAllPatterns: () => [],
+    DEFAULT_MARGIN_PERCENT: 0.2,
+  }
+});
 const dbMock = test.mock.module('../db.js', { defaultExport: {}, namedExports: { connectDB: async () => ({}) } });
 
 const { evaluateStrategies } = await import('../strategies.js');

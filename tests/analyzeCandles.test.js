@@ -59,7 +59,8 @@ const utilMock = test.mock.module('../util.js', {
     toISTISOString: (d = new Date()) => new Date(d).toISOString(),
     toISTDate: (d = new Date()) => '2024-01-01',
     convertTickTimestampsToIST: (t) => t,
-    getMAForSymbol: () => 100
+    getMAForSymbol: () => 100,
+    DEFAULT_MARGIN_PERCENT: 0.2
   }
 });
 
