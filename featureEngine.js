@@ -1059,6 +1059,21 @@ export function resetIndicatorCache() {
   emaCache.clear();
 }
 
+export function calculateEMASlope(prices, length = 21) {
+  if (!prices || prices.length <= length) return 0;
+  const prev = calculateEMA(prices.slice(0, -1), length);
+  const curr = calculateEMA(prices, length);
+  return curr - prev;
+}
+
+export function classifyVolatility(atr, price) {
+  if (!atr || !price) return 'Medium';
+  const ratio = atr / price;
+  if (ratio > 0.05) return 'High';
+  if (ratio < 0.02) return 'Low';
+  return 'Medium';
+}
+
 export function computeFeatures(candles = []) {
   if (!Array.isArray(candles) || candles.length === 0) return null;
 
@@ -1105,6 +1120,9 @@ export function computeFeatures(candles = []) {
   const fractalChaos = calculateFractalChaosBands(candles);
   const envelopes = calculateEnvelopes(closes);
   const atr = getATR(candles, 14);
+  const emaSlope = calculateEMASlope(closes, 21);
+  const trendStrength = adx ?? Math.abs((emaSlope / (ema21 || 1)) * 100);
+  const volatilityClass = classifyVolatility(atr, closes.at(-1));
   const supertrend = calculateSupertrend(candles, 50);
   const vwap = calculateVWAP(candles);
   const pivot = calculatePivotPoints(candles);
@@ -1227,6 +1245,9 @@ export function computeFeatures(candles = []) {
     coppock,
     priceOsc,
     mcGinley,
+    emaSlope,
+    trendStrength,
+    volatilityClass,
     avgVolume,
     rvol,
     vwap,
