@@ -1564,9 +1564,21 @@ export function detectAllPatterns(candles, atrValue, lookback = 5) {
         strength: 2,
         confidence: "Low",
       });
+      patterns.push({
+        type: "Island Reversal Top",
+        direction: "Short",
+        strength: 2,
+        confidence: "Low",
+      });
     } else if (gapDown) {
       patterns.push({
         type: "Island Reversal (Bullish)",
+        direction: "Long",
+        strength: 2,
+        confidence: "Low",
+      });
+      patterns.push({
+        type: "Island Reversal Bottom",
         direction: "Long",
         strength: 2,
         confidence: "Low",
@@ -1598,6 +1610,16 @@ export function detectAllPatterns(candles, atrValue, lookback = 5) {
         strength: 2,
         confidence: "Low",
       });
+      const prevClose = b1.close;
+      const gap = (b2.open - prevClose) / prevClose;
+      if (gap > 0.015 && b3.close < b1.high && b3.close < b2.open) {
+        patterns.push({
+          type: "Bull Trap After Gap Up",
+          direction: "Short",
+          strength: 2,
+          confidence: "Medium",
+        });
+      }
     }
     if (b2.low < Math.min(b1.low, b3.low) && b3.close > b1.close) {
       patterns.push({
@@ -1605,6 +1627,38 @@ export function detectAllPatterns(candles, atrValue, lookback = 5) {
         direction: "Long",
         strength: 2,
         confidence: "Low",
+      });
+      const prevClose = b1.close;
+      const gap = (b2.open - prevClose) / prevClose;
+      if (gap < -0.015 && b3.close > b1.low && b3.close > b2.open) {
+        patterns.push({
+          type: "Bear Trap After Gap Down",
+          direction: "Long",
+          strength: 2,
+          confidence: "Medium",
+        });
+      }
+    }
+  }
+
+  if (candles.length >= 2) {
+    const prev = candles[candles.length - 2];
+    const last = candles[candles.length - 1];
+    const gap = (last.open - prev.close) / prev.close;
+    if (gap > 0.015 && last.close < prev.close && last.close < last.open) {
+      patterns.push({
+        type: "Gap Fill Reversal (Bearish)",
+        direction: "Short",
+        strength: 2,
+        confidence: "Medium",
+      });
+    }
+    if (gap < -0.015 && last.close > prev.close && last.close > last.open) {
+      patterns.push({
+        type: "Gap Fill Reversal (Bullish)",
+        direction: "Long",
+        strength: 2,
+        confidence: "Medium",
       });
     }
   }

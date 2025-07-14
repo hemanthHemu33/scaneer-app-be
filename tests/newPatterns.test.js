@@ -122,3 +122,55 @@ test('Gap Down + Trendline Breakdown detected', () => {
   const found = res.find(r => r.name === 'Gap Down + Trendline Breakdown');
   assert.ok(found);
 });
+
+test('Gap Fill Reversal (Bearish) detected', () => {
+  const candles = [
+    { open: 100, high: 101, low: 99, close: 100, volume: 100 },
+    { open: 103, high: 104, low: 98, close: 99, volume: 120 }
+  ];
+  const res = evaluateStrategies(candles, {}, { topN: 5 });
+  const found = res.find(r => r.name === 'Gap Fill Reversal (Bearish)');
+  assert.ok(found);
+});
+
+test('Island Reversal Top detected', () => {
+  const candles = [
+    { open: 100, high: 101, low: 99, close: 100, volume: 100 },
+    { open: 102, high: 103, low: 102, close: 102.5, volume: 100 },
+    { open: 100, high: 100.5, low: 99.5, close: 100, volume: 100 }
+  ];
+  const res = evaluateStrategies(candles, {}, { topN: 5 });
+  const found = res.find(r => r.name === 'Island Reversal Top');
+  assert.ok(found);
+});
+
+test('Island Reversal Bottom detected', () => {
+  const candles = [
+    { open: 100, high: 101, low: 99, close: 100, volume: 100 },
+    { open: 98, high: 98.5, low: 97.5, close: 98, volume: 100 },
+    { open: 100, high: 101, low: 99.5, close: 100.5, volume: 100 }
+  ];
+  const res = evaluateStrategies(candles, {}, { topN: 5 });
+  const found = res.find(r => r.name === 'Island Reversal Bottom');
+  assert.ok(found);
+});
+
+test('Bull Trap After Gap Up detected', () => {
+  const candles = [
+    { open: 100, high: 101, low: 99, close: 101, volume: 100 },
+    { open: 103, high: 104, low: 99, close: 100, volume: 110 }
+  ];
+  const res = evaluateStrategies(candles, {}, { topN: 5 });
+  const found = res.find(r => r.name === 'Bull Trap After Gap Up');
+  assert.ok(found);
+});
+
+test('Bear Trap After Gap Down detected', () => {
+  const candles = [
+    { open: 100, high: 101, low: 99, close: 99, volume: 100 },
+    { open: 97, high: 100, low: 95, close: 99.5, volume: 110 }
+  ];
+  const res = evaluateStrategies(candles, {}, { topN: 5 });
+  const found = res.find(r => r.name === 'Bear Trap After Gap Down');
+  assert.ok(found);
+});
