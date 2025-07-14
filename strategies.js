@@ -711,6 +711,113 @@ function detectVcp(candles) {
   return null;
 }
 
+function detectBreakoutAboveResistance(candles) {
+  if (candles.length < 6) return null;
+  const prevHigh = highest(candles.slice(-6, -1), 5);
+  const last = candles.at(-1);
+  const avgVol = avg(candles.slice(-6, -1).map((c) => c.volume || 0));
+  if (last.close > prevHigh && last.volume > avgVol) {
+    return { name: "Breakout above Resistance", confidence: 0.6 };
+  }
+  return null;
+}
+
+function detectBreakdownBelowSupport(candles) {
+  if (candles.length < 6) return null;
+  const prevLow = lowest(candles.slice(-6, -1), 5);
+  const last = candles.at(-1);
+  const avgVol = avg(candles.slice(-6, -1).map((c) => c.volume || 0));
+  if (last.close < prevLow && last.volume > avgVol) {
+    return { name: "Breakdown below Support", confidence: 0.6 };
+  }
+  return null;
+}
+
+function detectFlatTopBreakout(candles) {
+  if (candles.length < 4) return null;
+  const last4 = candles.slice(-4);
+  const highs = last4.map((c) => c.high);
+  const lows = last4.map((c) => c.low);
+  const flat = Math.max(...highs.slice(0, 3)) - Math.min(...highs.slice(0, 3)) <
+    (highs[3] - lows[3]) * 0.1;
+  const risingLows = lows[1] > lows[0] && lows[2] > lows[1];
+  if (flat && risingLows && last4.at(-1).close > Math.max(...highs.slice(0, 3))) {
+    return { name: "Flat Top Breakout", confidence: 0.55 };
+  }
+  return null;
+}
+
+function detectFlatBottomBreakdown(candles) {
+  if (candles.length < 4) return null;
+  const last4 = candles.slice(-4);
+  const highs = last4.map((c) => c.high);
+  const lows = last4.map((c) => c.low);
+  const flat = Math.max(...lows.slice(0, 3)) - Math.min(...lows.slice(0, 3)) <
+    (highs[3] - lows[3]) * 0.1;
+  const fallingHighs = highs[1] < highs[0] && highs[2] < highs[1];
+  if (flat && fallingHighs && last4.at(-1).close < Math.min(...lows.slice(0, 3))) {
+    return { name: "Flat Bottom Breakdown", confidence: 0.55 };
+  }
+  return null;
+}
+
+function detectFalseBreakoutTrap(candles) {
+  if (candles.length < 3) return null;
+  const prev = candles.at(-2);
+  const last = candles.at(-1);
+  const recentHigh = highest(candles.slice(-5, -2), 3);
+  const recentLow = lowest(candles.slice(-5, -2), 3);
+  if (prev.close > recentHigh && last.close < recentHigh) {
+    return { name: "False Breakout (Trap)", confidence: 0.55 };
+  }
+  if (prev.close < recentLow && last.close > recentLow) {
+    return { name: "False Breakout (Trap)", confidence: 0.55 };
+  }
+  return null;
+}
+
+function detectGapUpBreakout(candles) {
+  if (candles.length < 2) return null;
+  const prev = candles.at(-2);
+  const last = candles.at(-1);
+  const gap = (last.open - prev.close) / prev.close;
+  if (gap > 0.015 && last.close > last.open) {
+    return { name: "Gap Up Breakout", confidence: 0.55 };
+  }
+  return null;
+}
+
+function detectGapDownBreakdown(candles) {
+  if (candles.length < 2) return null;
+  const prev = candles.at(-2);
+  const last = candles.at(-1);
+  const gap = (last.open - prev.close) / prev.close;
+  if (gap < -0.015 && last.close < last.open) {
+    return { name: "Gap Down Breakdown", confidence: 0.55 };
+  }
+  return null;
+}
+
+function detectPrebreakoutConsolidation(candles) {
+  if (candles.length < 8) return null;
+  const base = candles.slice(-5);
+  const range = Math.max(...base.map((c) => c.high)) - Math.min(...base.map((c) => c.low));
+  const priorUp = candles.slice(-8, -5).every((c) => c.close >= c.open);
+  if (priorUp && range / Math.max(...base.map((c) => c.high)) < 0.02) {
+    return { name: "Pre-breakout Consolidation", confidence: 0.55 };
+  }
+  return null;
+}
+
+function detectCupHandleBreakout(candles) {
+  const patterns = detectAllPatterns(candles, 1, 5);
+  const cup = patterns.find((p) => p.type === "Cup & Handle");
+  if (cup) {
+    return { name: "Cup & Handle Breakout", confidence: 0.6 };
+  }
+  return null;
+}
+
 function detectParabolicExhaustion(
   candles,
   _ctx = {},
@@ -921,6 +1028,15 @@ export const DETECTORS = [
   detectRsiRangeShift,
   detectGapFill,
   detectVcp,
+  detectBreakoutAboveResistance,
+  detectBreakdownBelowSupport,
+  detectFlatTopBreakout,
+  detectFlatBottomBreakdown,
+  detectFalseBreakoutTrap,
+  detectGapUpBreakout,
+  detectGapDownBreakdown,
+  detectPrebreakoutConsolidation,
+  detectCupHandleBreakout,
   detectParabolicExhaustion,
   detectEmaSnapback,
   detectInstitutionalFootprintBreakout,
@@ -1136,6 +1252,69 @@ export const momentumBreakoutStrategies = [
     rules: [
       "Squeeze condition off and MACD histogram turns positive",
       "Enter on strong candle close beyond consolidation",
+    ],
+  },
+  {
+    name: "Breakout above Resistance",
+    rules: [
+      "Price closes above recent resistance level",
+      "Volume expands on breakout",
+    ],
+  },
+  {
+    name: "Breakdown below Support",
+    rules: [
+      "Price closes below recent support level",
+      "Volume expands on breakdown",
+    ],
+  },
+  {
+    name: "Flat Top Breakout",
+    rules: [
+      "Equal highs with rising lows",
+      "Breakout candle closes above resistance",
+    ],
+  },
+  {
+    name: "Flat Bottom Breakdown",
+    rules: [
+      "Equal lows with falling highs",
+      "Breakdown candle closes below support",
+    ],
+  },
+  {
+    name: "False Breakout (Trap)",
+    rules: [
+      "Breaks key level but immediately reverses",
+      "Next candle closes back inside range",
+    ],
+  },
+  {
+    name: "Gap Up Breakout",
+    rules: [
+      "Opens above prior close by >1.5%",
+      "Closes strong after the gap",
+    ],
+  },
+  {
+    name: "Gap Down Breakdown",
+    rules: [
+      "Opens below prior close by >1.5%",
+      "Continues lower after the gap",
+    ],
+  },
+  {
+    name: "Pre-breakout Consolidation",
+    rules: [
+      "Tight range after small uptrend",
+      "Look for expansion breakout",
+    ],
+  },
+  {
+    name: "Cup & Handle Breakout",
+    rules: [
+      "Cup & Handle pattern forms",
+      "Breakout of handle high with volume",
     ],
   },
 ];
