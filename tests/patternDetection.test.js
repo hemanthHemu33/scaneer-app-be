@@ -110,3 +110,55 @@ test('detectAllPatterns identifies Dead Cat Bounce', () => {
   const dcb = patterns.find(p => p.type === 'Dead Cat Bounce');
   assert.ok(dcb);
 });
+
+test('detectAllPatterns identifies Gap Fill Reversal (Bearish)', () => {
+  const candles = [
+    { open: 100, high: 101, low: 99, close: 100 },
+    { open: 103, high: 104, low: 98, close: 99 }
+  ];
+  const patterns = detectAllPatterns(candles, 1, 2);
+  const gfr = patterns.find(p => p.type === 'Gap Fill Reversal (Bearish)');
+  assert.ok(gfr);
+});
+
+test('detectAllPatterns identifies Island Reversal Top', () => {
+  const candles = [
+    { open: 100, high: 101, low: 99, close: 100 },
+    { open: 102, high: 103, low: 102, close: 102.5 },
+    { open: 100, high: 100.5, low: 99.5, close: 100 }
+  ];
+  const patterns = detectAllPatterns(candles, 1, 3);
+  const irt = patterns.find(p => p.type === 'Island Reversal Top');
+  assert.ok(irt);
+});
+
+test('detectAllPatterns identifies Island Reversal Bottom', () => {
+  const candles = [
+    { open: 100, high: 101, low: 99, close: 100 },
+    { open: 98, high: 98.5, low: 97.5, close: 98 },
+    { open: 100, high: 101, low: 99.5, close: 100.5 }
+  ];
+  const patterns = detectAllPatterns(candles, 1, 3);
+  const irb = patterns.find(p => p.type === 'Island Reversal Bottom');
+  assert.ok(irb);
+});
+
+test('detectAllPatterns identifies Bull Trap After Gap Up', () => {
+  const candles = [
+    { open: 100, high: 101, low: 99, close: 101 },
+    { open: 103, high: 104, low: 99, close: 100 }
+  ];
+  const patterns = detectAllPatterns(candles, 1, 2);
+  const bt = patterns.find(p => p.type === 'Bull Trap After Gap Up');
+  assert.ok(bt);
+});
+
+test('detectAllPatterns identifies Bear Trap After Gap Down', () => {
+  const candles = [
+    { open: 100, high: 101, low: 99, close: 99 },
+    { open: 97, high: 100, low: 95, close: 99.5 }
+  ];
+  const patterns = detectAllPatterns(candles, 1, 2);
+  const bt = patterns.find(p => p.type === 'Bear Trap After Gap Down');
+  assert.ok(bt);
+});

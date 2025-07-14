@@ -1187,6 +1187,70 @@ function detectGapDownRetestGapZone(candles) {
   return null;
 }
 
+function detectGapFillReversal(candles) {
+  if (candles.length < 2) return null;
+  const prev = candles.at(-2);
+  const last = candles.at(-1);
+  const gap = (last.open - prev.close) / prev.close;
+  if (gap > 0.015 && last.close < prev.close) {
+    return { name: "Gap Fill Reversal (Bearish)", confidence: 0.55 };
+  }
+  if (gap < -0.015 && last.close > prev.close) {
+    return { name: "Gap Fill Reversal (Bullish)", confidence: 0.55 };
+  }
+  return null;
+}
+
+function detectIslandReversalTop(candles) {
+  if (candles.length < 3) return null;
+  const [a, b, c] = candles.slice(-3);
+  if (b.low > a.high && c.high < b.low) {
+    return { name: "Island Reversal Top", confidence: 0.55 };
+  }
+  return null;
+}
+
+function detectIslandReversalBottom(candles) {
+  if (candles.length < 3) return null;
+  const [a, b, c] = candles.slice(-3);
+  if (b.high < a.low && c.low > b.high) {
+    return { name: "Island Reversal Bottom", confidence: 0.55 };
+  }
+  return null;
+}
+
+function detectBullTrapAfterGapUp(candles) {
+  if (candles.length < 2) return null;
+  const prev = candles.at(-2);
+  const last = candles.at(-1);
+  const gap = (last.open - prev.close) / prev.close;
+  if (
+    gap > 0.015 &&
+    last.high > prev.high &&
+    last.close < prev.high &&
+    last.close < last.open
+  ) {
+    return { name: "Bull Trap After Gap Up", confidence: 0.55 };
+  }
+  return null;
+}
+
+function detectBearTrapAfterGapDown(candles) {
+  if (candles.length < 2) return null;
+  const prev = candles.at(-2);
+  const last = candles.at(-1);
+  const gap = (last.open - prev.close) / prev.close;
+  if (
+    gap < -0.015 &&
+    last.low < prev.low &&
+    last.close > prev.low &&
+    last.close > last.open
+  ) {
+    return { name: "Bear Trap After Gap Down", confidence: 0.55 };
+  }
+  return null;
+}
+
 function detectParabolicExhaustion(
   candles,
   _ctx = {},
@@ -1446,6 +1510,11 @@ export const DETECTORS = [
   detectGapDownTrendlineBreakdown,
   detectGapDownHeadShouldersBreakdown,
   detectGapDownRetestGapZone,
+  detectGapFillReversal,
+  detectIslandReversalTop,
+  detectIslandReversalBottom,
+  detectBullTrapAfterGapUp,
+  detectBearTrapAfterGapDown,
 ];
 
 export function evaluateStrategies(
@@ -1562,6 +1631,30 @@ export const reversalStrategies = [
       "Dark Cloud Cover (bearish) or Piercing Line (bullish)",
       "Volume and location near support/resistance improve reliability",
     ],
+  },
+  {
+    name: "Gap Fill Reversal (Bearish)",
+    rules: ["Gap up fades and closes below prior close"],
+  },
+  {
+    name: "Gap Fill Reversal (Bullish)",
+    rules: ["Gap down fills and closes above prior close"],
+  },
+  {
+    name: "Island Reversal Top",
+    rules: ["Gap up followed by gap down creating an island"],
+  },
+  {
+    name: "Island Reversal Bottom",
+    rules: ["Gap down followed by gap up creating an island"],
+  },
+  {
+    name: "Bull Trap After Gap Up",
+    rules: ["Gap up above prior high then reverses lower"],
+  },
+  {
+    name: "Bear Trap After Gap Down",
+    rules: ["Gap down below prior low then reverses higher"],
   },
 ];
 
