@@ -4,6 +4,11 @@ import assert from 'node:assert/strict';
 const kiteMock = test.mock.module('../kite.js', { namedExports: { getMA: () => null } });
 const featureMock = test.mock.module('../featureEngine.js', {
   namedExports: {
+    calculateEMA: () => 0,
+    calculateRSI: () => 50,
+    calculateSupertrend: () => ({ signal: 'Sell' }),
+    calculateVWAP: () => 0,
+    getATR: () => 1,
     computeFeatures: () => ({ ema9: 0, ema21: 0, ema200: 0, rsi: 50 })
   }
 });
@@ -58,5 +63,62 @@ test('Breakaway Gap (Bullish) detected', () => {
   ];
   const res = evaluateStrategies(candles, {}, { topN: 5 });
   const found = res.find(r => r.name === 'Breakaway Gap (Bullish)');
+  assert.ok(found);
+});
+
+test('Gap Down + Bearish Marubozu detected', () => {
+  const candles = [
+    { open: 100, high: 100, low: 99.8, close: 100, volume: 100 },
+    { open: 98, high: 98, low: 97.9, close: 97.9, volume: 150 }
+  ];
+  const res = evaluateStrategies(candles, {}, { topN: 5 });
+  const found = res.find(r => r.name === 'Gap Down + Bearish Marubozu');
+  assert.ok(found);
+});
+
+test('Breakaway Gap (Bearish) detected', () => {
+  const candles = [
+    { open: 100, high: 100.5, low: 99.5, close: 100, volume: 80 },
+    { open: 100.2, high: 100.7, low: 99.6, close: 100.1, volume: 80 },
+    { open: 100.1, high: 100.6, low: 99.7, close: 100, volume: 80 },
+    { open: 100, high: 100.4, low: 99.5, close: 100, volume: 80 },
+    { open: 97, high: 97.2, low: 96.8, close: 96.9, volume: 200 }
+  ];
+  const res = evaluateStrategies(candles, {}, { topN: 5 });
+  const found = res.find(r => r.name === 'Breakaway Gap (Bearish)');
+  assert.ok(found);
+});
+
+test('Gap Down + High Volume Confirmation detected', () => {
+  const candles = [
+    { open: 105, high: 105, low: 104, close: 105, volume: 100 },
+    { open: 103, high: 103.5, low: 102.5, close: 103, volume: 250 }
+  ];
+  const res = evaluateStrategies(candles, {}, { topN: 5 });
+  const found = res.find(r => r.name === 'Gap Down + High Volume Confirmation');
+  assert.ok(found);
+});
+
+test('Gap Down + RSI/MACD Bearish Divergence detected', () => {
+  const candles = [
+    { open: 100, high: 100.2, low: 99.8, close: 100, volume: 100 },
+    { open: 98.3, high: 98.4, low: 97.9, close: 98, volume: 150 }
+  ];
+  const ctx = { features: { rsi: 40, macd: { histogram: -1 } } };
+  const res = evaluateStrategies(candles, ctx, { topN: 5 });
+  const found = res.find(r => r.name === 'Gap Down + RSI/MACD Bearish Divergence');
+  assert.ok(found);
+});
+
+test('Gap Down + Trendline Breakdown detected', () => {
+  const candles = [
+    { open: 100, high: 101, low: 99, close: 100 },
+    { open: 102, high: 103, low: 101, close: 102 },
+    { open: 104, high: 105, low: 103, close: 104 },
+    { open: 103, high: 104, low: 102, close: 103 },
+    { open: 101, high: 101.5, low: 100, close: 100 }
+  ];
+  const res = evaluateStrategies(candles, {}, { topN: 5 });
+  const found = res.find(r => r.name === 'Gap Down + Trendline Breakdown');
   assert.ok(found);
 });
