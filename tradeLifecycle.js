@@ -63,8 +63,26 @@ export async function monitorBracketOrders(slId, targetId, interval = 1000) {
  */
 export async function executeSignal(signal, opts = {}) {
   const symbol = signal.stock || signal.symbol;
-  if (!isSignalValid(signal, opts.market || {})) return null;
-  const tradeValue = signal.entry * (signal.qty || 1);
+  const qty =
+    signal.qty ||
+    calculatePositionSize({
+      capital: opts.capital || opts.totalCapital || 0,
+      risk: opts.risk || 0.01,
+      slPoints: Math.abs(signal.entry - signal.stopLoss),
+      price: signal.entry,
+      minQty: opts.minQty,
+      maxQty: opts.maxQty,
+    });
+  if (qty <= 0) return null;
+  const tradeValue = signal.entry * qty;
+  if (
+    !isSignalValid(signal, {
+      ...(opts.market || {}),
+      tradeValue,
+      openPositionsCount: opts.openPositionsCount,
+    })
+  )
+    return null;
   const allowed =
     checkExposureLimits({
       symbol,
@@ -79,15 +97,6 @@ export async function executeSignal(signal, opts = {}) {
       strategy: signal.pattern,
     });
   if (!allowed) return null;
-  const qty =
-    signal.qty ||
-    calculatePositionSize({
-      capital: opts.capital || opts.totalCapital || 0,
-      risk: opts.risk || 0.01,
-      slPoints: Math.abs(signal.entry - signal.stopLoss),
-      price: signal.entry,
-    });
-  if (qty <= 0) return null;
 
   const entryOrder = await sendOrder('regular', {
     exchange: 'NSE',
