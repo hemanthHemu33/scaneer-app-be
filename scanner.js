@@ -86,8 +86,14 @@ export async function analyzeCandles(
       return null;
     }
 
+    // Filter out malformed candle objects
     const validCandles = candles.filter(
-      (c) => c.open && c.high && c.low && c.close
+      (c) =>
+        c &&
+        c.open !== undefined &&
+        c.high !== undefined &&
+        c.low !== undefined &&
+        c.close !== undefined
     );
     if (validCandles.length < 5) return null;
     const features = computeFeatures(validCandles);
