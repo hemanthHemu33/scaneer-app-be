@@ -176,3 +176,36 @@ test('isSignalValid blocks opposite direction with open position', () => {
   const ok = isSignalValid(sig, { openPositionsMap: positions });
   assert.equal(ok, false);
 });
+
+test('isSignalValid enforces cooloff after loss', () => {
+  resetRiskState();
+  riskState.lastTradeWasLoss = true;
+  const sig = {
+    stock: 'FFF',
+    pattern: 'trend',
+    direction: 'Long',
+    entry: 100,
+    stopLoss: 98,
+    target2: 104,
+    atr: 1,
+    spread: 0.1,
+  };
+  const ok = isSignalValid(sig, { cooloffAfterLoss: true });
+  assert.equal(ok, false);
+});
+
+test('isSignalValid enforces maxLossPerTradePct', () => {
+  resetRiskState();
+  const sig = {
+    stock: 'GGG',
+    pattern: 'trend',
+    direction: 'Long',
+    entry: 100,
+    stopLoss: 90,
+    target2: 120,
+    atr: 1,
+    spread: 0.1,
+  };
+  const ok = isSignalValid(sig, { maxLossPerTradePct: 0.05 });
+  assert.equal(ok, false);
+});
