@@ -9,6 +9,65 @@ export const RISK_REWARD_RATIO = 1.5;
 
 let tradeCount = 0;
 
+// --- Position Sizing Models ---
+
+export function fixedRupeeRiskModel({ riskAmount, slPoints }) {
+  if (!riskAmount || !slPoints) return 0;
+  return riskAmount / slPoints;
+}
+
+export function fixedPercentRiskModel({ capital, riskPercent = 0.01, slPoints }) {
+  if (!capital || !slPoints) return 0;
+  return (capital * riskPercent) / slPoints;
+}
+
+export function kellyCriterionSize({ capital, winRate, winLossRatio, slPoints, fraction = 1 }) {
+  if (!capital || !slPoints || !winRate || !winLossRatio) return 0;
+  const k = winRate - (1 - winRate) / winLossRatio;
+  if (k <= 0) return 0;
+  return ((capital * k * fraction) / slPoints);
+}
+
+export function volatilityWeightedSize({
+  capital,
+  baseRisk = 0.01,
+  volatility,
+  benchmarkVolatility = volatility,
+  slPoints,
+}) {
+  if (!capital || !slPoints || !volatility) return 0;
+  const weight = benchmarkVolatility ? benchmarkVolatility / volatility : 1;
+  return ((capital * baseRisk * weight) / slPoints);
+}
+
+export function equalCapitalAllocation({ capital, numPositions = 1, price }) {
+  if (!capital || !price || numPositions <= 0) return 0;
+  return (capital / numPositions) / price;
+}
+
+export function equalRiskAllocation({ capital, numPositions = 1, slPoints }) {
+  if (!capital || !slPoints || numPositions <= 0) return 0;
+  return (capital / numPositions) / slPoints;
+}
+
+export function confidenceBasedSizing({ baseQty, confidence = 1, maxConfidence = 1 }) {
+  if (!baseQty) return 0;
+  const conf = Math.min(confidence, maxConfidence);
+  return baseQty * conf;
+}
+
+export function atrBasedSizing({ capital, atr, atrMult = 1, riskPercent = 0.01 }) {
+  if (!capital || !atr) return 0;
+  const sl = atr * atrMult;
+  return ((capital * riskPercent) / sl);
+}
+
+export function dollarVolatilitySizing({ capital, atr, price, riskPercent = 0.01 }) {
+  if (!capital || !atr || !price) return 0;
+  const dv = atr * price;
+  return ((capital * riskPercent) / dv);
+}
+
 /**
  * Calculate tradable quantity based on risk parameters.
  * Supports optional volatility and margin considerations.
@@ -33,6 +92,10 @@ let tradeCount = 0;
  * @param {number} [opts.volatilityGuard]  ATR/VIX threshold beyond which position size is scaled down.
  * @param {Object} [opts.marketDepth]      Current market depth { buy, sell }.
  * @param {number} [opts.priceMovement]    Recent price movement for dynamic scaling.
+ * @param {string} [opts.method]           Optional sizing method ('fixed-rupee', 'fixed-percent', 'kelly',
+ *                                         'volatility-weighted', 'equal-capital', 'equal-risk',
+ *                                         'confidence', 'atr', 'dollar-volatility').
+ * Additional fields may be required based on the chosen method (e.g. winRate).
  */
 export function calculatePositionSize({
   capital,
@@ -56,22 +119,72 @@ export function calculatePositionSize({
   priceMovement,
   minQty,
   maxQty,
+  method,
+  winRate,
+  winLossRatio,
+  fraction = 1,
+  benchmarkVolatility,
+  numPositions,
+  confidence,
+  atrMult = 1,
 }) {
-  if (!capital || !slPoints || slPoints <= 0) return 0;
+  if (!capital) return 0;
+  const methodName = method || 'default';
+  if (!slPoints && !['equal-capital'].includes(methodName) && !['equal-risk'].includes(methodName)) return 0;
 
   tradeCount += 1;
   if (tradeCount === 1) {
     utilizationCap = 1;
   }
 
-  // Determine risk amount with optional cost buffer (taxes/slippage)
-  let riskAmount = risk <= 1 ? capital * risk : risk;
-  if (costBuffer > 1) {
-    riskAmount /= costBuffer;
+  // Determine base quantity using selected model
+  let qty;
+  switch (methodName) {
+    case 'fixed-rupee':
+      qty = fixedRupeeRiskModel({ riskAmount: risk, slPoints });
+      break;
+    case 'fixed-percent':
+      qty = fixedPercentRiskModel({ capital, riskPercent: risk, slPoints });
+      break;
+    case 'kelly':
+      qty = kellyCriterionSize({ capital, winRate, winLossRatio, slPoints, fraction });
+      break;
+    case 'volatility-weighted':
+      qty = volatilityWeightedSize({
+        capital,
+        baseRisk: risk,
+        volatility,
+        benchmarkVolatility,
+        slPoints,
+      });
+      break;
+    case 'equal-capital':
+      qty = equalCapitalAllocation({ capital, numPositions, price });
+      break;
+    case 'equal-risk':
+      qty = equalRiskAllocation({ capital, numPositions, slPoints });
+      break;
+    case 'confidence':
+      const baseQty = fixedPercentRiskModel({ capital, riskPercent: risk, slPoints });
+      qty = confidenceBasedSizing({ baseQty, confidence });
+      break;
+    case 'atr':
+      qty = atrBasedSizing({ capital, atr: volatility, atrMult, riskPercent: risk });
+      break;
+    case 'dollar-volatility':
+      qty = dollarVolatilitySizing({ capital, atr: volatility, price, riskPercent: risk });
+      break;
+    default: {
+      let riskAmount = risk <= 1 ? capital * risk : risk;
+      if (costBuffer > 1) {
+        riskAmount /= costBuffer;
+      }
+      if (riskAmount <= 0) return 0;
+      qty = riskAmount / slPoints;
+    }
   }
-  if (riskAmount <= 0) return 0;
 
-  let qty = riskAmount / slPoints;
+  if (!qty || qty <= 0) return 0;
 
   if (volatility && volatilityGuard && volatility > volatilityGuard) {
     const factor = volatility / volatilityGuard;
