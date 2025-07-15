@@ -1,6 +1,12 @@
 // riskEngine.js
 // Central risk validation engine for trading signals
-import { validateRR, checkMarketConditions } from './riskValidator.js';
+import {
+  validateRR,
+  checkMarketConditions,
+  validateATRStopLoss,
+  validateSupportResistance,
+  validateVolumeSpike,
+} from './riskValidator.js';
 
 const defaultState = {
   dailyLoss: 0,
@@ -46,6 +52,30 @@ export function isSignalValid(signal, ctx = {}) {
   });
   if (!rr.valid) return false;
   if (typeof ctx.minRR === 'number' && rr.rr < ctx.minRR) return false;
+
+  if (
+    !validateATRStopLoss({ entry: signal.entry, stopLoss: signal.stopLoss, atr: signal.atr })
+  )
+    return false;
+
+  if (
+    !validateSupportResistance({
+      entry: signal.entry,
+      direction: signal.direction,
+      support: signal.support,
+      resistance: signal.resistance,
+      atr: signal.atr,
+    })
+  )
+    return false;
+
+  if (
+    !validateVolumeSpike({
+      volume: signal.volume ?? ctx.volume,
+      avgVolume: ctx.avgVolume,
+    })
+  )
+    return false;
 
   if (typeof ctx.minATR === 'number' && signal.atr < ctx.minATR) return false;
   if (typeof ctx.maxATR === 'number' && signal.atr > ctx.maxATR) return false;

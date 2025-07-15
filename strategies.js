@@ -818,6 +818,439 @@ function detectCupHandleBreakout(candles) {
   return null;
 }
 
+function detectGapUpBullishMarubozu(candles) {
+  if (candles.length < 2) return null;
+  const prev = candles.at(-2);
+  const last = candles.at(-1);
+  const gap = (last.open - prev.close) / prev.close;
+  const body = last.high - last.low;
+  const bullishMarubozu =
+    last.close > last.open &&
+    Math.abs(last.open - last.low) <= body * 0.1 &&
+    Math.abs(last.high - last.close) <= body * 0.1;
+  if (gap > 0.015 && bullishMarubozu) {
+    return { name: "Gap Up + Bullish Marubozu", confidence: 0.6 };
+  }
+  return null;
+}
+
+function detectGapUpDoji(candles) {
+  if (candles.length < 2) return null;
+  const prev = candles.at(-2);
+  const last = candles.at(-1);
+  const gap = (last.open - prev.close) / prev.close;
+  const doji = Math.abs(last.open - last.close) <= (last.high - last.low) * 0.1;
+  if (gap > 0.015 && doji) {
+    return { name: "Gap Up + Doji", confidence: 0.55 };
+  }
+  return null;
+}
+
+function detectGapUpBullishEngulfing(candles) {
+  if (candles.length < 2) return null;
+  const prev = candles.at(-2);
+  const last = candles.at(-1);
+  const gap = (last.open - prev.close) / prev.close;
+  const bullishEngulf =
+    last.close > last.open &&
+    prev.close < prev.open &&
+    last.open <= prev.close &&
+    last.close >= prev.open;
+  if (gap > 0.015 && bullishEngulf) {
+    return { name: "Gap Up + Bullish Engulfing", confidence: 0.6 };
+  }
+  return null;
+}
+
+function detectGapUpInsideBarRetest(candles) {
+  if (candles.length < 3) return null;
+  const prev = candles.at(-2);
+  const last = candles.at(-1);
+  const gap = (prev.open - candles.at(-3).close) / candles.at(-3).close;
+  const inside = last.high <= prev.high && last.low >= prev.low;
+  const retest = Math.abs(last.low - prev.high) / prev.high < 0.005;
+  if (gap > 0.015 && inside && retest) {
+    return { name: "Gap Up + Inside Bar Retest", confidence: 0.55 };
+  }
+  return null;
+}
+
+function detectGapUpContinuation(candles) {
+  if (candles.length < 3) return null;
+  const first = candles.at(-3);
+  const second = candles.at(-2);
+  const last = candles.at(-1);
+  const gap = (second.open - first.close) / first.close;
+  if (gap > 0.015 && second.close > second.open && last.close > second.close) {
+    return { name: "Gap Up + Continuation", confidence: 0.55 };
+  }
+  return null;
+}
+
+function detectBreakawayGapBullish(candles) {
+  if (candles.length < 5) return null;
+  const baseHigh = Math.max(...candles.slice(-5, -1).map((c) => c.high));
+  const prev = candles.at(-2);
+  const last = candles.at(-1);
+  const gap = (last.open - prev.close) / prev.close;
+  if (gap > 0.02 && last.open > baseHigh) {
+    return { name: "Breakaway Gap (Bullish)", confidence: 0.6 };
+  }
+  return null;
+}
+
+function detectRunawayGap(candles) {
+  if (candles.length < 4) return null;
+  const prevGap = (candles.at(-3).open - candles.at(-4).close) / candles.at(-4).close;
+  const newGap = (candles.at(-1).open - candles.at(-2).close) / candles.at(-2).close;
+  if (prevGap > 0.015 && newGap > 0.015 && candles.at(-1).close > candles.at(-2).close) {
+    return { name: "Runaway Gap", confidence: 0.55 };
+  }
+  return null;
+}
+
+function detectGapUpPullbackBounce(candles) {
+  if (candles.length < 3) return null;
+  const first = candles.at(-3);
+  const pull = candles.at(-2);
+  const last = candles.at(-1);
+  const gap = (first.open - candles.at(-4)?.close) / (candles.at(-4)?.close || first.open);
+  if (gap > 0.015 && pull.close < pull.open && last.close > pull.high) {
+    return { name: "Gap Up + Pullback + Bounce", confidence: 0.55 };
+  }
+  return null;
+}
+
+function detectGapUpHighVolume(candles) {
+  if (candles.length < 2) return null;
+  const prev = candles.at(-2);
+  const last = candles.at(-1);
+  const gap = (last.open - prev.close) / prev.close;
+  const avgVol = avg(candles.slice(-6, -1).map((c) => c.volume || 0));
+  if (gap > 0.015 && last.volume > avgVol * 1.5) {
+    return { name: "Gap Up + High Volume Confirmation", confidence: 0.55 };
+  }
+  return null;
+}
+
+function detectGapUpRsiMacdBullish(candles, ctx = {}) {
+  if (candles.length < 2) return null;
+  const prev = candles.at(-2);
+  const last = candles.at(-1);
+  const gap = (last.open - prev.close) / prev.close;
+  const { features = computeFeatures(candles) } = ctx;
+  const rsiOk = features?.rsi > 50;
+  const macdOk = features?.macd?.histogram > 0;
+  if (gap > 0.015 && rsiOk && macdOk) {
+    return { name: "Gap Up + RSI/MACD Bullish Divergence", confidence: 0.55 };
+  }
+  return null;
+}
+
+function detectGapUpSupportHold(candles) {
+  if (candles.length < 2) return null;
+  const prev = candles.at(-2);
+  const last = candles.at(-1);
+  const gap = (last.open - prev.close) / prev.close;
+  const hold = last.low <= prev.high && last.close > last.open;
+  if (gap > 0.015 && hold) {
+    return { name: "Gap Up + Support Zone Hold", confidence: 0.55 };
+  }
+  return null;
+}
+
+function detectGapUpTrendlineBreakout(candles) {
+  if (candles.length < 4) return null;
+  const prevHighs = candles.slice(-4, -1).map((c) => c.high);
+  const descending = prevHighs.every((v, i, arr) => i === 0 || v < arr[i - 1]);
+  const prev = candles.at(-2);
+  const last = candles.at(-1);
+  const gap = (last.open - prev.close) / prev.close;
+  if (descending && gap > 0.015 && last.close > prev.high) {
+    return { name: "Gap Up + Trendline Breakout", confidence: 0.55 };
+  }
+  return null;
+}
+
+function detectGapUpCupHandleBreakout(candles) {
+  const cup = detectCupHandleBreakout(candles);
+  if (!cup) return null;
+  const prev = candles.at(-2);
+  const last = candles.at(-1);
+  const gap = (last.open - prev.close) / prev.close;
+  if (gap > 0.015) {
+    return { name: "Gap Up + Cup and Handle Breakout", confidence: 0.6 };
+  }
+  return null;
+}
+
+function detectGapUpRetestGapZone(candles) {
+  if (candles.length < 3) return null;
+  const gapOpen = candles.at(-3).open;
+  const gapPrevClose = candles.at(-4)?.close || gapOpen;
+  const gap = (gapOpen - gapPrevClose) / gapPrevClose;
+  const pull = candles.at(-2);
+  const last = candles.at(-1);
+  const retest = pull.low <= gapOpen && pull.low >= gapPrevClose;
+  if (gap > 0.015 && retest && last.close > pull.close) {
+    return { name: "Gap Up + Retest of Gap Zone", confidence: 0.55 };
+  }
+  return null;
+}
+
+function detectGapDownBearishMarubozu(candles) {
+  if (candles.length < 2) return null;
+  const prev = candles.at(-2);
+  const last = candles.at(-1);
+  const gap = (last.open - prev.close) / prev.close;
+  const body = last.high - last.low;
+  const bearishMarubozu =
+    last.close < last.open &&
+    Math.abs(last.open - last.high) <= body * 0.1 &&
+    Math.abs(last.low - last.close) <= body * 0.1;
+  if (gap < -0.015 && bearishMarubozu) {
+    return { name: "Gap Down + Bearish Marubozu", confidence: 0.6 };
+  }
+  return null;
+}
+
+function detectGapDownDoji(candles) {
+  if (candles.length < 2) return null;
+  const prev = candles.at(-2);
+  const last = candles.at(-1);
+  const gap = (last.open - prev.close) / prev.close;
+  const doji = Math.abs(last.open - last.close) <= (last.high - last.low) * 0.1;
+  if (gap < -0.015 && doji) {
+    return { name: "Gap Down + Doji", confidence: 0.55 };
+  }
+  return null;
+}
+
+function detectGapDownBearishEngulfing(candles) {
+  if (candles.length < 2) return null;
+  const prev = candles.at(-2);
+  const last = candles.at(-1);
+  const gap = (last.open - prev.close) / prev.close;
+  const bearishEngulf =
+    last.close < last.open &&
+    prev.close > prev.open &&
+    last.open >= prev.close &&
+    last.close <= prev.open;
+  if (gap < -0.015 && bearishEngulf) {
+    return { name: "Gap Down + Bearish Engulfing", confidence: 0.6 };
+  }
+  return null;
+}
+
+function detectGapDownInsideBarBreakdown(candles) {
+  if (candles.length < 3) return null;
+  const prev = candles.at(-2);
+  const last = candles.at(-1);
+  const gap = (prev.open - candles.at(-3).close) / candles.at(-3).close;
+  const inside = last.high <= prev.high && last.low >= prev.low;
+  const retest = Math.abs(last.high - prev.low) / prev.low < 0.005;
+  if (gap < -0.015 && inside && retest && last.close < last.open) {
+    return { name: "Gap Down + Inside Bar Breakdown", confidence: 0.55 };
+  }
+  return null;
+}
+
+function detectGapDownContinuation(candles) {
+  if (candles.length < 3) return null;
+  const first = candles.at(-3);
+  const second = candles.at(-2);
+  const last = candles.at(-1);
+  const gap = (second.open - first.close) / first.close;
+  if (gap < -0.015 && second.close < second.open && last.close < second.close) {
+    return { name: "Gap Down + Continuation", confidence: 0.55 };
+  }
+  return null;
+}
+
+function detectBreakawayGapBearish(candles) {
+  if (candles.length < 5) return null;
+  const baseLow = Math.min(...candles.slice(-5, -1).map((c) => c.low));
+  const prev = candles.at(-2);
+  const last = candles.at(-1);
+  const gap = (last.open - prev.close) / prev.close;
+  if (gap < -0.02 && last.open < baseLow) {
+    return { name: "Breakaway Gap (Bearish)", confidence: 0.6 };
+  }
+  return null;
+}
+
+function detectExhaustionGap(candles) {
+  if (candles.length < 3) return null;
+  const before = candles.at(-3);
+  const prev = candles.at(-2);
+  const last = candles.at(-1);
+  const gap = (prev.open - before.close) / before.close;
+  if (gap < -0.015 && prev.close < prev.open && last.close > prev.close) {
+    return { name: "Exhaustion Gap", confidence: 0.55 };
+  }
+  return null;
+}
+
+function detectGapDownRetestBreakdown(candles) {
+  if (candles.length < 3) return null;
+  const before = candles.at(-3);
+  const gapCandle = candles.at(-2);
+  const last = candles.at(-1);
+  const gap = (gapCandle.open - before.close) / before.close;
+  const retest = last.high >= gapCandle.open;
+  if (gap < -0.015 && retest && last.close < gapCandle.low) {
+    return { name: "Gap Down + Retest + Breakdown", confidence: 0.55 };
+  }
+  return null;
+}
+
+function detectGapDownHighVolume(candles) {
+  if (candles.length < 2) return null;
+  const prev = candles.at(-2);
+  const last = candles.at(-1);
+  const gap = (last.open - prev.close) / prev.close;
+  const avgVol = avg(candles.slice(-6, -1).map((c) => c.volume || 0));
+  if (gap < -0.015 && last.volume > avgVol * 1.5) {
+    return { name: "Gap Down + High Volume Confirmation", confidence: 0.55 };
+  }
+  return null;
+}
+
+function detectGapDownRsiMacdBearish(candles, ctx = {}) {
+  if (candles.length < 2) return null;
+  const prev = candles.at(-2);
+  const last = candles.at(-1);
+  const gap = (last.open - prev.close) / prev.close;
+  const { features = computeFeatures(candles) } = ctx;
+  const rsiOk = features?.rsi < 50;
+  const macdOk = features?.macd?.histogram < 0;
+  if (gap < -0.015 && rsiOk && macdOk) {
+    return { name: "Gap Down + RSI/MACD Bearish Divergence", confidence: 0.55 };
+  }
+  return null;
+}
+
+function detectGapDownResistanceHold(candles) {
+  if (candles.length < 2) return null;
+  const prev = candles.at(-2);
+  const last = candles.at(-1);
+  const gap = (last.open - prev.close) / prev.close;
+  const hold = last.high >= prev.low && last.close < last.open;
+  if (gap < -0.015 && hold) {
+    return { name: "Gap Down + Resistance Zone Hold", confidence: 0.55 };
+  }
+  return null;
+}
+
+function detectGapDownTrendlineBreakdown(candles) {
+  if (candles.length < 4) return null;
+  const prevLows = candles.slice(-4, -1).map((c) => c.low);
+  const ascending = prevLows.every((v, i, arr) => i === 0 || v > arr[i - 1]);
+  const prev = candles.at(-2);
+  const last = candles.at(-1);
+  const gap = (last.open - prev.close) / prev.close;
+  if (ascending && gap < -0.015 && last.close < prev.low) {
+    return { name: "Gap Down + Trendline Breakdown", confidence: 0.55 };
+  }
+  return null;
+}
+
+function detectGapDownHeadShouldersBreakdown(candles) {
+  if (candles.length < 4) return null;
+  const left = candles.at(-4);
+  const head = candles.at(-3);
+  const right = candles.at(-2);
+  const last = candles.at(-1);
+  const isHs =
+    head.high > left.high &&
+    head.high > right.high &&
+    Math.abs(left.high - right.high) / head.high < 0.05;
+  const neckline = Math.min(left.low, right.low);
+  const gap = (last.open - right.close) / right.close;
+  if (isHs && gap < -0.015 && last.close < neckline) {
+    return { name: "Gap Down + Head and Shoulders Breakdown", confidence: 0.6 };
+  }
+  return null;
+}
+
+function detectGapDownRetestGapZone(candles) {
+  if (candles.length < 3) return null;
+  const gapOpen = candles.at(-3).open;
+  const gapPrevClose = candles.at(-4)?.close || gapOpen;
+  const gap = (gapOpen - gapPrevClose) / gapPrevClose;
+  const pull = candles.at(-2);
+  const last = candles.at(-1);
+  const retest = pull.high >= gapOpen && pull.high <= gapPrevClose;
+  if (gap < -0.015 && retest && last.close < pull.close) {
+    return { name: "Gap Down + Retest of Gap Zone", confidence: 0.55 };
+  }
+  return null;
+}
+
+function detectGapFillReversal(candles) {
+  if (candles.length < 2) return null;
+  const prev = candles.at(-2);
+  const last = candles.at(-1);
+  const gap = (last.open - prev.close) / prev.close;
+  if (gap > 0.015 && last.close < prev.close) {
+    return { name: "Gap Fill Reversal (Bearish)", confidence: 0.55 };
+  }
+  if (gap < -0.015 && last.close > prev.close) {
+    return { name: "Gap Fill Reversal (Bullish)", confidence: 0.55 };
+  }
+  return null;
+}
+
+function detectIslandReversalTop(candles) {
+  if (candles.length < 3) return null;
+  const [a, b, c] = candles.slice(-3);
+  if (b.low > a.high && c.high < b.low) {
+    return { name: "Island Reversal Top", confidence: 0.55 };
+  }
+  return null;
+}
+
+function detectIslandReversalBottom(candles) {
+  if (candles.length < 3) return null;
+  const [a, b, c] = candles.slice(-3);
+  if (b.high < a.low && c.low > b.high) {
+    return { name: "Island Reversal Bottom", confidence: 0.55 };
+  }
+  return null;
+}
+
+function detectBullTrapAfterGapUp(candles) {
+  if (candles.length < 2) return null;
+  const prev = candles.at(-2);
+  const last = candles.at(-1);
+  const gap = (last.open - prev.close) / prev.close;
+  if (
+    gap > 0.015 &&
+    last.high > prev.high &&
+    last.close < prev.high &&
+    last.close < last.open
+  ) {
+    return { name: "Bull Trap After Gap Up", confidence: 0.55 };
+  }
+  return null;
+}
+
+function detectBearTrapAfterGapDown(candles) {
+  if (candles.length < 2) return null;
+  const prev = candles.at(-2);
+  const last = candles.at(-1);
+  const gap = (last.open - prev.close) / prev.close;
+  if (
+    gap < -0.015 &&
+    last.low < prev.low &&
+    last.close > prev.low &&
+    last.close > last.open
+  ) {
+    return { name: "Bear Trap After Gap Down", confidence: 0.55 };
+  }
+  return null;
+}
+
 function detectParabolicExhaustion(
   candles,
   _ctx = {},
@@ -1049,6 +1482,39 @@ export const DETECTORS = [
   detectVwapRejectionBounce,
   detectMarketSentimentReversal,
   detectTtmSqueezeBreakout,
+  detectGapUpBullishMarubozu,
+  detectGapUpDoji,
+  detectGapUpBullishEngulfing,
+  detectGapUpInsideBarRetest,
+  detectGapUpContinuation,
+  detectBreakawayGapBullish,
+  detectRunawayGap,
+  detectGapUpPullbackBounce,
+  detectGapUpHighVolume,
+  detectGapUpRsiMacdBullish,
+  detectGapUpSupportHold,
+  detectGapUpTrendlineBreakout,
+  detectGapUpCupHandleBreakout,
+  detectGapUpRetestGapZone,
+  detectGapDownBearishMarubozu,
+  detectGapDownDoji,
+  detectGapDownBearishEngulfing,
+  detectGapDownInsideBarBreakdown,
+  detectGapDownContinuation,
+  detectBreakawayGapBearish,
+  detectExhaustionGap,
+  detectGapDownRetestBreakdown,
+  detectGapDownHighVolume,
+  detectGapDownRsiMacdBearish,
+  detectGapDownResistanceHold,
+  detectGapDownTrendlineBreakdown,
+  detectGapDownHeadShouldersBreakdown,
+  detectGapDownRetestGapZone,
+  detectGapFillReversal,
+  detectIslandReversalTop,
+  detectIslandReversalBottom,
+  detectBullTrapAfterGapUp,
+  detectBearTrapAfterGapDown,
 ];
 
 export function evaluateStrategies(
@@ -1165,6 +1631,30 @@ export const reversalStrategies = [
       "Dark Cloud Cover (bearish) or Piercing Line (bullish)",
       "Volume and location near support/resistance improve reliability",
     ],
+  },
+  {
+    name: "Gap Fill Reversal (Bearish)",
+    rules: ["Gap up fades and closes below prior close"],
+  },
+  {
+    name: "Gap Fill Reversal (Bullish)",
+    rules: ["Gap down fills and closes above prior close"],
+  },
+  {
+    name: "Island Reversal Top",
+    rules: ["Gap up followed by gap down creating an island"],
+  },
+  {
+    name: "Island Reversal Bottom",
+    rules: ["Gap down followed by gap up creating an island"],
+  },
+  {
+    name: "Bull Trap After Gap Up",
+    rules: ["Gap up above prior high then reverses lower"],
+  },
+  {
+    name: "Bear Trap After Gap Down",
+    rules: ["Gap down below prior low then reverses higher"],
   },
 ];
 
@@ -1316,6 +1806,118 @@ export const momentumBreakoutStrategies = [
       "Cup & Handle pattern forms",
       "Breakout of handle high with volume",
     ],
+  },
+  {
+    name: "Gap Up + Bullish Marubozu",
+    rules: ["Gap up above prior close", "Bullish Marubozu candle"],
+  },
+  {
+    name: "Gap Up + Doji",
+    rules: ["Gap up open", "Doji candle indicates indecision"],
+  },
+  {
+    name: "Gap Up + Bullish Engulfing",
+    rules: ["Gap up", "Bullish engulfing of prior candle"],
+  },
+  {
+    name: "Gap Up + Inside Bar Retest",
+    rules: ["Gap up then inside bar retests prior high"],
+  },
+  {
+    name: "Gap Up + Continuation",
+    rules: ["Gap up followed by bullish continuation"],
+  },
+  {
+    name: "Breakaway Gap (Bullish)",
+    rules: ["Large gap above consolidation"],
+  },
+  {
+    name: "Runaway Gap",
+    rules: ["Second gap during strong trend"],
+  },
+  {
+    name: "Gap Up + Pullback + Bounce",
+    rules: ["Gap up", "Pullback candle", "Next candle bounces"],
+  },
+  {
+    name: "Gap Up + High Volume Confirmation",
+    rules: ["Gap up with volume >1.5x average"],
+  },
+  {
+    name: "Gap Up + RSI/MACD Bullish Divergence",
+    rules: ["Gap up", "RSI > 50", "MACD histogram positive"],
+  },
+  {
+    name: "Gap Up + Support Zone Hold",
+    rules: ["Gap holds above prior resistance"],
+  },
+  {
+    name: "Gap Up + Trendline Breakout",
+    rules: ["Gap up breaks descending trendline"],
+  },
+  {
+    name: "Gap Up + Cup and Handle Breakout",
+    rules: ["Gap up coincides with Cup & Handle breakout"],
+  },
+  {
+    name: "Gap Up + Retest of Gap Zone",
+    rules: ["Gap up", "Pullback retests gap zone", "Bounce"],
+  },
+  {
+    name: "Gap Down + Bearish Marubozu",
+    rules: ["Gap down", "Bearish Marubozu candle"],
+  },
+  {
+    name: "Gap Down + Doji",
+    rules: ["Gap down open", "Doji candle"],
+  },
+  {
+    name: "Gap Down + Bearish Engulfing",
+    rules: ["Gap down", "Bearish engulfing of prior candle"],
+  },
+  {
+    name: "Gap Down + Inside Bar Breakdown",
+    rules: ["Gap down then inside bar breaks lower"],
+  },
+  {
+    name: "Gap Down + Continuation",
+    rules: ["Gap down followed by bearish continuation"],
+  },
+  {
+    name: "Breakaway Gap (Bearish)",
+    rules: ["Large gap below consolidation"],
+  },
+  {
+    name: "Exhaustion Gap",
+    rules: ["Gap down then immediate bullish reversal"],
+  },
+  {
+    name: "Gap Down + Retest + Breakdown",
+    rules: ["Gap down", "Retest gap", "Next candle breaks lower"],
+  },
+  {
+    name: "Gap Down + High Volume Confirmation",
+    rules: ["Gap down with volume >1.5x average"],
+  },
+  {
+    name: "Gap Down + RSI/MACD Bearish Divergence",
+    rules: ["Gap down", "RSI < 50", "MACD histogram negative"],
+  },
+  {
+    name: "Gap Down + Resistance Zone Hold",
+    rules: ["Gap holds below prior support"],
+  },
+  {
+    name: "Gap Down + Trendline Breakdown",
+    rules: ["Gap down breaks ascending trendline"],
+  },
+  {
+    name: "Gap Down + Head and Shoulders Breakdown",
+    rules: ["H&S pattern", "Gap down below neckline"],
+  },
+  {
+    name: "Gap Down + Retest of Gap Zone",
+    rules: ["Gap down", "Pullback retests gap zone", "Fall"],
   },
 ];
 
