@@ -1,6 +1,6 @@
 // tradeLifecycle.js
 import { sendOrder, cancelOrder, getAllOrders } from './orderExecution.js';
-import { isSignalValid } from './riskEngine.js';
+import { isSignalValid, recordTradeExecution } from './riskEngine.js';
 import { calculatePositionSize } from './positionSizing.js';
 import {
   checkExposureLimits,
@@ -84,6 +84,7 @@ export async function executeSignal(signal, opts = {}) {
       newTradeQty: qty,
       preventOverlap: true,
       openSymbols: Array.from(openPositions.keys()),
+      openPositionsMap: openPositions,
     })
   )
     return null;
@@ -122,6 +123,7 @@ export async function executeSignal(signal, opts = {}) {
   if (!entryOrder) return null;
   const filled = await waitForOrderFill(entryOrder.order_id);
   if (!filled) return null;
+  recordTradeExecution({ symbol, sector: signal.sector });
 
   const exitType = signal.direction === 'Long' ? 'SELL' : 'BUY';
   const slOrder = await sendOrder('regular', {
