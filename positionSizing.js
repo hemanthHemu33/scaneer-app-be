@@ -22,9 +22,14 @@ let tradeCount = 0;
  * @param {number} [opts.vix]              Market volatility index.
  * @param {number} [opts.lotSize=1]        Minimum tradable lot size.
  * @param {number} [opts.utilizationCap=1] Max portion of capital to allocate when marginPerLot is provided.
+ * @param {number} [opts.minLotSize]       Minimum allowable quantity for F&O instruments.
+ * @param {boolean} [opts.roundToLot=true] Whether to round quantity down to nearest lot.
  * @param {number} [opts.marginPerLot]     Margin required per lot. Defaults to Zerodha intraday policy if price is supplied.
  * @param {number} [opts.marginPercent]    Broker margin percentage (if not using leverage).
  * @param {number} [opts.leverage]         Leverage multiplier available from broker.
+ * @param {number} [opts.marginBuffer=1]   Safety buffer on required margin.
+ * @param {number} [opts.exchangeMarginMultiplier=1] Exchange specified margin multiplier.
+ * @param {number} [opts.costBuffer=1]     Buffer for taxes and slippage.
  * @param {number} [opts.volatilityGuard]  ATR/VIX threshold beyond which position size is scaled down.
  * @param {Object} [opts.marketDepth]      Current market depth { buy, sell }.
  * @param {number} [opts.priceMovement]    Recent price movement for dynamic scaling.
@@ -38,9 +43,14 @@ export function calculatePositionSize({
   vix,
   lotSize = 1,
   utilizationCap = 1,
+  minLotSize,
+  roundToLot = true,
   marginPerLot,
   marginPercent,
   leverage = 0,
+  marginBuffer = 1,
+  exchangeMarginMultiplier = 1,
+  costBuffer = 1,
   volatilityGuard,
   marketDepth,
   priceMovement,
@@ -54,8 +64,11 @@ export function calculatePositionSize({
     utilizationCap = 1;
   }
 
-  // Determine risk amount
-  const riskAmount = risk <= 1 ? capital * risk : risk;
+  // Determine risk amount with optional cost buffer (taxes/slippage)
+  let riskAmount = risk <= 1 ? capital * risk : risk;
+  if (costBuffer > 1) {
+    riskAmount /= costBuffer;
+  }
   if (riskAmount <= 0) return 0;
 
   let qty = riskAmount / slPoints;
@@ -85,7 +98,9 @@ export function calculatePositionSize({
 
   qty = Math.floor(qty);
 
-  if (lotSize > 1) qty = Math.floor(qty / lotSize) * lotSize;
+  if (roundToLot && lotSize > 1) {
+    qty = Math.floor(qty / lotSize) * lotSize;
+  }
 
   const marginPct =
     typeof marginPercent === 'number'
@@ -94,13 +109,16 @@ export function calculatePositionSize({
       ? 1 / leverage
       : DEFAULT_MARGIN_PERCENT;
   const effectiveMarginPerLot =
-    marginPerLot || (price ? price * lotSize * marginPct : 0);
+    (marginPerLot || (price ? price * lotSize * marginPct : 0)) *
+    exchangeMarginMultiplier *
+    marginBuffer;
   if (effectiveMarginPerLot > 0) {
     const maxLots = Math.floor((capital * utilizationCap) / effectiveMarginPerLot);
     qty = Math.min(qty, maxLots * lotSize);
   }
 
   if (typeof minQty === 'number' && qty < minQty) return 0;
+  if (typeof minLotSize === 'number' && qty < minLotSize) return 0;
   if (typeof maxQty === 'number' && qty > maxQty) qty = maxQty;
 
   return qty > 0 ? qty : lotSize;
@@ -120,6 +138,9 @@ export function calculatePositionSize({
  * @param {number} [opts.leverage]  Leverage multiplier
  * @param {number} [opts.marginPercent] Broker margin percentage
  * @param {number} [opts.drawdown]  Current drawdown percentage (0-1)
+ * @param {number} [opts.slippage]  Expected slippage per unit
+ * @param {number} [opts.spread]    Current bid/ask spread
+ * @param {number} [opts.costBuffer] Buffer for taxes and slippage
  * @returns {Object} { stopLoss, qty, target1, target2 }
  */
 export function calculateTradeParameters({
@@ -131,6 +152,9 @@ export function calculateTradeParameters({
   leverage = 0,
   marginPercent,
   drawdown = 0,
+  slippage = 0,
+  spread = 0,
+  costBuffer = 1,
 }) {
   const dynamicSL = calculateDynamicStopLoss({ atr, entry, direction });
 
@@ -161,7 +185,7 @@ export function calculateTradeParameters({
     atr,
   });
 
-  const baseRisk = Math.abs(entry - finalSL);
+  const baseRisk = Math.abs(entry - finalSL) + slippage + spread;
   const riskAmount = capital * 0.01;
   let qty = calculatePositionSize({
     capital,
@@ -173,6 +197,7 @@ export function calculateTradeParameters({
     utilizationCap: 1,
     leverage,
     marginPercent,
+    costBuffer,
   });
 
   qty = adjustRiskBasedOnDrawdown({ drawdown, lotSize: qty });

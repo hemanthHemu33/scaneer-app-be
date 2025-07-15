@@ -57,6 +57,9 @@ export function isSignalValid(signal, ctx = {}) {
     ctx.openPositionsCount >= ctx.maxOpenPositions
   )
     return false;
+  if (ctx.preventOverlap && Array.isArray(ctx.openSymbols)) {
+    if (ctx.openSymbols.includes(signal.stock || signal.symbol)) return false;
+  }
 
   if (
     typeof ctx.minTradeValue === 'number' &&

@@ -60,3 +60,25 @@ test('min and max qty constraints applied', () => {
   assert.equal(qty, 50);
 });
 
+test('marginBuffer reduces allowed quantity', () => {
+  const qty = calculatePositionSize({
+    capital: 5000,
+    risk: 1000,
+    slPoints: 10,
+    price: 100,
+    marginPercent: 0.5,
+    marginBuffer: 1.2,
+  });
+  assert.equal(qty, 83);
+});
+
+test('costBuffer scales risk amount', () => {
+  const qty = calculatePositionSize({
+    capital: 10000,
+    risk: 1000,
+    slPoints: 10,
+    costBuffer: 1.1,
+  });
+  assert.equal(qty, 90);
+});
+

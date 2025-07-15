@@ -6,6 +6,7 @@ import {
   checkExposureLimits,
   preventReEntry,
   resolveSignalConflicts,
+  openPositions,
 } from './portfolioContext.js';
 
 /**
@@ -80,6 +81,9 @@ export async function executeSignal(signal, opts = {}) {
       ...(opts.market || {}),
       tradeValue,
       openPositionsCount: opts.openPositionsCount,
+      newTradeQty: qty,
+      preventOverlap: true,
+      openSymbols: Array.from(openPositions.keys()),
     })
   )
     return null;
