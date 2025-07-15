@@ -93,6 +93,14 @@ export async function executeSignal(signal, opts = {}) {
       tradeValue,
       sector: signal.sector || 'GEN',
       totalCapital: opts.totalCapital || opts.capital || 0,
+      sectorCaps: opts.sectorCaps,
+      exposureCap: opts.exposureCap,
+      instrumentCap: opts.instrumentCap,
+      tradeCapPct: opts.tradeCapPct,
+      reservePct: opts.reservePct,
+      maxMarginPct: opts.maxMarginPct,
+      minTradeCapital: opts.minTradeCapital,
+      maxTradeCapital: opts.maxTradeCapital,
     }) &&
     preventReEntry(symbol) &&
     resolveSignalConflicts({
