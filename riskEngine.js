@@ -15,27 +15,48 @@ const defaultState = {
   maxDailyRisk: 10000,
   tradeCount: 0,
   maxTradesPerDay: 20,
+  tradesPerInstrument: new Map(),
+  tradesPerSector: new Map(),
+  maxTradesPerInstrument: 3,
+  maxTradesPerSector: 10,
   consecutiveLosses: 0,
   maxLossStreak: 3,
   lastResetDay: new Date().getDate(),
 };
 
-const riskState = { ...defaultState };
+const riskState = {
+  ...defaultState,
+  tradesPerInstrument: new Map(),
+  tradesPerSector: new Map(),
+};
 const duplicateMap = new Map();
 const correlationMap = new Map();
 
 export function resetRiskState() {
   Object.assign(riskState, defaultState, { lastResetDay: new Date().getDate() });
+  riskState.tradesPerInstrument = new Map();
+  riskState.tradesPerSector = new Map();
   duplicateMap.clear();
   correlationMap.clear();
 }
 
-export function recordTradeResult({ pnl = 0, risk = 0 }) {
-  riskState.tradeCount += 1;
+export function recordTradeResult({ pnl = 0, risk = 0, symbol, sector }) {
+  recordTradeExecution({ symbol, sector });
   riskState.dailyLoss += pnl < 0 ? Math.abs(pnl) : 0;
   riskState.dailyRisk += risk;
   if (pnl < 0) riskState.consecutiveLosses += 1;
   else riskState.consecutiveLosses = 0;
+}
+
+export function recordTradeExecution({ symbol, sector }) {
+  riskState.tradeCount += 1;
+  if (symbol) {
+    const c = riskState.tradesPerInstrument.get(symbol) || 0;
+    riskState.tradesPerInstrument.set(symbol, c + 1);
+  }
+  const sec = sector || 'GEN';
+  const sc = riskState.tradesPerSector.get(sec) || 0;
+  riskState.tradesPerSector.set(sec, sc + 1);
 }
 
 export function isSignalValid(signal, ctx = {}) {
@@ -60,6 +81,22 @@ export function isSignalValid(signal, ctx = {}) {
   if (ctx.preventOverlap && Array.isArray(ctx.openSymbols)) {
     if (ctx.openSymbols.includes(signal.stock || signal.symbol)) return false;
   }
+  if (ctx.openPositionsMap instanceof Map) {
+    const existing = ctx.openPositionsMap.get(signal.stock || signal.symbol);
+    const dir = signal.direction === 'Long' ? 'long' : 'short';
+    if (existing && existing.side && existing.side.toLowerCase() !== dir)
+      return false;
+  }
+
+  const inst = signal.stock || signal.symbol;
+  const instCount = riskState.tradesPerInstrument.get(inst) || 0;
+  const maxPerInst = ctx.maxTradesPerInstrument ?? riskState.maxTradesPerInstrument;
+  if (instCount >= maxPerInst) return false;
+
+  const sec = signal.sector || 'GEN';
+  const secCount = riskState.tradesPerSector.get(sec) || 0;
+  const maxPerSec = ctx.maxTradesPerSector ?? riskState.maxTradesPerSector;
+  if (secCount >= maxPerSec) return false;
 
   if (
     typeof ctx.minTradeValue === 'number' &&

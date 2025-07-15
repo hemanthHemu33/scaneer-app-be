@@ -9,7 +9,7 @@ const dbMock = test.mock.module('../db.js', {
   namedExports: { connectDB: async () => ({}) }
 });
 
-const { isSignalValid, resetRiskState, riskState } = await import('../riskEngine.js');
+const { isSignalValid, resetRiskState, riskState, recordTradeExecution } = await import('../riskEngine.js');
 
 auditMock.restore();
 dbMock.restore();
@@ -117,5 +117,62 @@ test('isSignalValid enforces liquidity and volume ratio', () => {
     avgVolume: 1000,
     minVolumeRatio: 0.5,
   });
+  assert.equal(ok, false);
+});
+
+test('isSignalValid enforces per instrument trade cap', () => {
+  resetRiskState();
+  riskState.maxTradesPerInstrument = 2;
+  recordTradeExecution({ symbol: 'AAA', sector: 'IT' });
+  recordTradeExecution({ symbol: 'AAA', sector: 'IT' });
+  const sig = {
+    stock: 'AAA',
+    pattern: 'trend',
+    direction: 'Long',
+    entry: 100,
+    stopLoss: 98,
+    target2: 104,
+    atr: 1,
+    spread: 0.1,
+  };
+  const ok = isSignalValid(sig);
+  assert.equal(ok, false);
+});
+
+test('isSignalValid enforces sector trade cap', () => {
+  resetRiskState();
+  riskState.maxTradesPerSector = 1;
+  recordTradeExecution({ symbol: 'AAA', sector: 'IT' });
+  const sig = {
+    stock: 'BBB',
+    sector: 'IT',
+    pattern: 'trend',
+    direction: 'Long',
+    entry: 100,
+    stopLoss: 98,
+    target2: 104,
+    atr: 1,
+    spread: 0.1,
+  };
+  const ok = isSignalValid(sig);
+  assert.equal(ok, false);
+});
+
+test('isSignalValid blocks opposite direction with open position', () => {
+  resetRiskState();
+  const positions = new Map([
+    ['AAA', { side: 'long' }],
+  ]);
+  const sig = {
+    stock: 'AAA',
+    pattern: 'trend',
+    direction: 'Short',
+    entry: 100,
+    stopLoss: 102,
+    target2: 95,
+    atr: 1,
+    spread: 0.1,
+  };
+  const ok = isSignalValid(sig, { openPositionsMap: positions });
   assert.equal(ok, false);
 });
