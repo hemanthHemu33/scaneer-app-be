@@ -8,11 +8,29 @@ import {
   validateVolumeSpike,
 } from './riskValidator.js';
 
+function getWeekNumber(d = new Date()) {
+  const oneJan = new Date(d.getFullYear(), 0, 1);
+  return Math.floor((d - oneJan) / (7 * 24 * 60 * 60 * 1000));
+}
+
 const defaultState = {
+  // PnL tracking
   dailyLoss: 0,
+  weeklyLoss: 0,
+  monthlyLoss: 0,
   dailyRisk: 0,
+  // Limits
   maxDailyLoss: 5000,
+  maxDailyLossPct: 0,
+  maxCumulativeLoss: 0,
+  maxWeeklyDrawdown: 0,
+  maxMonthlyDrawdown: 0,
+  maxLossPerTradePct: 0,
   maxDailyRisk: 10000,
+  equity: 0,
+  equityPeak: 0,
+  equityDrawdownLimitPct: 0,
+  // Trade tracking
   tradeCount: 0,
   maxTradesPerDay: 20,
   tradesPerInstrument: new Map(),
@@ -21,7 +39,10 @@ const defaultState = {
   maxTradesPerSector: 10,
   consecutiveLosses: 0,
   maxLossStreak: 3,
+  lastTradeWasLoss: false,
   lastResetDay: new Date().getDate(),
+  lastResetWeek: getWeekNumber(),
+  lastResetMonth: new Date().getMonth(),
 };
 
 const riskState = {
@@ -33,7 +54,11 @@ const duplicateMap = new Map();
 const correlationMap = new Map();
 
 export function resetRiskState() {
-  Object.assign(riskState, defaultState, { lastResetDay: new Date().getDate() });
+  Object.assign(riskState, defaultState, {
+    lastResetDay: new Date().getDate(),
+    lastResetWeek: getWeekNumber(),
+    lastResetMonth: new Date().getMonth(),
+  });
   riskState.tradesPerInstrument = new Map();
   riskState.tradesPerSector = new Map();
   duplicateMap.clear();
@@ -42,8 +67,14 @@ export function resetRiskState() {
 
 export function recordTradeResult({ pnl = 0, risk = 0, symbol, sector }) {
   recordTradeExecution({ symbol, sector });
-  riskState.dailyLoss += pnl < 0 ? Math.abs(pnl) : 0;
+  const loss = pnl < 0 ? Math.abs(pnl) : 0;
+  riskState.dailyLoss += loss;
+  riskState.weeklyLoss += loss;
+  riskState.monthlyLoss += loss;
   riskState.dailyRisk += risk;
+  riskState.equity += pnl;
+  if (riskState.equity > riskState.equityPeak) riskState.equityPeak = riskState.equity;
+  riskState.lastTradeWasLoss = pnl < 0;
   if (pnl < 0) riskState.consecutiveLosses += 1;
   else riskState.consecutiveLosses = 0;
 }
@@ -62,16 +93,48 @@ export function recordTradeExecution({ symbol, sector }) {
 export function isSignalValid(signal, ctx = {}) {
   const now = Date.now();
   const today = new Date().getDate();
+  const week = getWeekNumber();
+  const month = new Date().getMonth();
   if (riskState.lastResetDay !== today) resetRiskState();
+  if (riskState.lastResetWeek !== week) {
+    riskState.weeklyLoss = 0;
+    riskState.lastResetWeek = week;
+  }
+  if (riskState.lastResetMonth !== month) {
+    riskState.monthlyLoss = 0;
+    riskState.lastResetMonth = month;
+  }
 
   const maxLoss = ctx.maxDailyLoss ?? riskState.maxDailyLoss;
   if (riskState.dailyLoss >= maxLoss) return false;
+  const maxLossPct = ctx.maxDailyLossPct ?? riskState.maxDailyLossPct;
+  if (
+    maxLossPct > 0 &&
+    riskState.equityPeak > 0 &&
+    riskState.dailyLoss / riskState.equityPeak >= maxLossPct
+  )
+    return false;
+  const maxCum = ctx.maxCumulativeLoss ?? riskState.maxCumulativeLoss;
+  if (maxCum > 0 && riskState.dailyLoss >= maxCum) return false;
+  const maxWeekly = ctx.maxWeeklyDrawdown ?? riskState.maxWeeklyDrawdown;
+  if (maxWeekly > 0 && riskState.weeklyLoss >= maxWeekly) return false;
+  const maxMonthly = ctx.maxMonthlyDrawdown ?? riskState.maxMonthlyDrawdown;
+  if (maxMonthly > 0 && riskState.monthlyLoss >= maxMonthly) return false;
+  const drawdownLimit =
+    ctx.equityDrawdownLimitPct ?? riskState.equityDrawdownLimitPct;
+  if (
+    drawdownLimit > 0 &&
+    riskState.equityPeak > 0 &&
+    riskState.equity < riskState.equityPeak * (1 - drawdownLimit)
+  )
+    return false;
   const maxRisk = ctx.maxDailyRisk ?? riskState.maxDailyRisk;
   if (riskState.dailyRisk >= maxRisk) return false;
   const maxTrades = ctx.maxTradesPerDay ?? riskState.maxTradesPerDay;
   if (riskState.tradeCount >= maxTrades) return false;
   const maxStreak = ctx.maxLossStreak ?? riskState.maxLossStreak;
   if (riskState.consecutiveLosses >= maxStreak) return false;
+  if (ctx.cooloffAfterLoss && riskState.lastTradeWasLoss) return false;
   if (
     typeof ctx.maxOpenPositions === 'number' &&
     typeof ctx.openPositionsCount === 'number' &&
@@ -173,6 +236,9 @@ export function isSignalValid(signal, ctx = {}) {
   if (typeof ctx.maxATR === 'number' && signal.atr > ctx.maxATR) return false;
 
   const slDist = Math.abs(signal.entry - signal.stopLoss);
+  const lossPct = slDist / signal.entry;
+  const maxPerTrade = ctx.maxLossPerTradePct ?? riskState.maxLossPerTradePct;
+  if (maxPerTrade > 0 && lossPct > maxPerTrade) return false;
   if (
     typeof signal.spread === 'number' &&
     slDist > 0 &&
