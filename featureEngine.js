@@ -47,7 +47,7 @@ export function calculateSupertrend(candles, atrLength = 14) {
 
 export function getATR(data, period = 14) {
   if (!data || data.length < 2) return null;
-  const len = Math.min(period, data.length - 1);
+  const len = Math.min(Math.floor(period), data.length - 1);
   let trSum = 0;
   for (let i = data.length - len; i < data.length; i++) {
     const high = data[i].high,
@@ -1077,10 +1077,21 @@ export function classifyVolatility(atr, price) {
 export function computeFeatures(candles = []) {
   if (!Array.isArray(candles) || candles.length === 0) return null;
 
-  const closes = candles.map((c) => c.close);
-  const highs = candles.map((c) => c.high);
-  const lows = candles.map((c) => c.low);
-  const volumes = candles.map((c) => c.volume || 0);
+  const valid = candles.filter(
+    (c) =>
+      c &&
+      c.open !== undefined &&
+      c.high !== undefined &&
+      c.low !== undefined &&
+      c.close !== undefined
+  );
+
+  if (valid.length === 0) return null;
+
+  const closes = valid.map((c) => c.close);
+  const highs = valid.map((c) => c.high);
+  const lows = valid.map((c) => c.low);
+  const volumes = valid.map((c) => c.volume || 0);
 
   const ema9 = calculateEMA(closes, 9);
   const ema21 = calculateEMA(closes, 21);
@@ -1092,73 +1103,73 @@ export function computeFeatures(candles = []) {
   const dema50 = calculateDEMA(closes, 50);
   const tema50 = calculateTEMA(closes, 50);
   const macd = calculateMACD(closes);
-  const { adx, plusDI, minusDI } = calculateADX(candles, 14) || {};
-  const vortex = calculateVortex(candles, 14);
-  const ichimoku = calculateIchimoku(candles);
+  const { adx, plusDI, minusDI } = calculateADX(valid, 14) || {};
+  const vortex = calculateVortex(valid, 14);
+  const ichimoku = calculateIchimoku(valid);
   const maEnv = calculateMAEnvelopes(closes, 20);
   const linearReg = calculateLinearRegression(closes, 20);
   const rsi = calculateRSI(closes, 14);
-  const stochastic = calculateStochastic(candles);
-  const cci = calculateCCI(candles);
+  const stochastic = calculateStochastic(valid);
+  const cci = calculateCCI(valid);
   const roc = calculateROC(closes);
   const momentum = calculateMomentum(closes);
-  const williamsR = calculateWilliamsR(candles);
+  const williamsR = calculateWilliamsR(valid);
   const trix = calculateTRIX(closes);
-  const ultOsc = calculateUltimateOscillator(candles);
+  const ultOsc = calculateUltimateOscillator(valid);
   const cmo = calculateCMO(closes);
   const connorsRsi = calculateConnorsRSI(closes);
-  const forceIndex = calculateForceIndex(candles);
-  const klinger = calculateKlinger(candles);
+  const forceIndex = calculateForceIndex(valid);
+  const klinger = calculateKlinger(valid);
   const stc = calculateSTC(closes);
   const tsi = calculateTSI(closes);
   const bollinger = calculateBollingerBands(closes);
-  const keltner = calculateKeltnerChannels(candles);
-  const donchian = calculateDonchianChannels(candles);
-  const chaikinVol = calculateChaikinVolatility(candles);
+  const keltner = calculateKeltnerChannels(valid);
+  const donchian = calculateDonchianChannels(valid);
+  const chaikinVol = calculateChaikinVolatility(valid);
   const stdDev = calculateStdDev(closes, 20);
   const histVol = calculateHistoricalVolatility(closes);
-  const fractalChaos = calculateFractalChaosBands(candles);
+  const fractalChaos = calculateFractalChaosBands(valid);
   const envelopes = calculateEnvelopes(closes);
-  const atr = getATR(candles, 14);
+  const atr = getATR(valid, 14);
   const emaSlope = calculateEMASlope(closes, 21);
   const trendStrength = adx ?? Math.abs((emaSlope / (ema21 || 1)) * 100);
   const volatilityClass = classifyVolatility(atr, closes.at(-1));
-  const supertrend = calculateSupertrend(candles, 50);
-  const vwap = calculateVWAP(candles);
-  const pivot = calculatePivotPoints(candles);
+  const supertrend = calculateSupertrend(valid, 50);
+  const vwap = calculateVWAP(valid);
+  const pivot = calculatePivotPoints(valid);
   const fibRetracements = calculateFibonacciRetracements(Math.max(...highs), Math.min(...lows));
   const fibExtensions = calculateFibonacciExtensions(Math.max(...highs), Math.min(...lows));
-  const psar = calculateParabolicSAR(candles);
-  const heikinAshi = calculateHeikinAshi(candles);
-  const renko = calculateRenko(candles);
+  const psar = calculateParabolicSAR(valid);
+  const heikinAshi = calculateHeikinAshi(valid);
+  const renko = calculateRenko(valid);
   const kagi = calculateKagi(closes);
   const pointFigure = calculatePointFigure(closes);
   const zigzag = calculateZigZag(closes);
-  const medianPrice = calculateMedianPrice(candles.at(-1));
-  const typicalPrice = calculateTypicalPrice(candles.at(-1));
-  const weightedClose = calculateWeightedClose(candles.at(-1));
-  const anchoredVwap = calculateAnchoredVWAP(candles);
-  const obv = calculateOBV(candles);
-  const cmf = calculateCMF(candles);
-  const mfi = calculateMFI(candles);
-  const adl = calculateAccumDist(candles);
-  const pvi = calculatePVI(candles);
-  const nvi = calculateNVI(candles);
+  const medianPrice = calculateMedianPrice(valid.at(-1));
+  const typicalPrice = calculateTypicalPrice(valid.at(-1));
+  const weightedClose = calculateWeightedClose(valid.at(-1));
+  const anchoredVwap = calculateAnchoredVWAP(valid);
+  const obv = calculateOBV(valid);
+  const cmf = calculateCMF(valid);
+  const mfi = calculateMFI(valid);
+  const adl = calculateAccumDist(valid);
+  const pvi = calculatePVI(valid);
+  const nvi = calculateNVI(valid);
   const volOsc = calculateVolumeOscillator(volumes);
-  const emv = calculateEMV(candles);
-  const vpt = calculateVPT(candles);
-  const volumeProfile = calculateVolumeProfile(candles);
+  const emv = calculateEMV(valid);
+  const vpt = calculateVPT(valid);
+  const volumeProfile = calculateVolumeProfile(valid);
 
-  const ttmSqueeze = calculateTTMSqueeze(candles);
+  const ttmSqueeze = calculateTTMSqueeze(valid);
   const zScore = calculateZScore(closes);
-  const elderImpulse = calculateElderImpulse(candles);
-  const donchianWidth = calculateDonchianWidth(candles);
-  const ichimokuBase = calculateIchimokuBaseLine(candles);
-  const ichimokuConversion = calculateIchimokuConversionLine(candles);
-  const anchoredMomentum = calculateAnchoredMomentum(candles);
-  const atrBands = calculateATRBands(candles);
-  const dynamicStop = calculateDynamicStopLoss(candles);
-  const atrTrailingStop = calculateATRTrailingStop(candles);
+  const elderImpulse = calculateElderImpulse(valid);
+  const donchianWidth = calculateDonchianWidth(valid);
+  const ichimokuBase = calculateIchimokuBaseLine(valid);
+  const ichimokuConversion = calculateIchimokuConversionLine(valid);
+  const anchoredMomentum = calculateAnchoredMomentum(valid);
+  const atrBands = calculateATRBands(valid);
+  const dynamicStop = calculateDynamicStopLoss(valid);
+  const atrTrailingStop = calculateATRTrailingStop(valid);
   const laguerreRsi = calculateLaguerreRSI(closes);
   const rsiLaguerre = calculateRSILaguerre(closes);
   const trendIntensity = calculateTrendIntensityIndex(closes);
