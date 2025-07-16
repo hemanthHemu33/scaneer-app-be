@@ -1356,7 +1356,14 @@ export async function getHigherTimeframeData(symbol, timeframe = "15minute") {
 
 export function getSupportResistanceLevels(symbol) {
   const token = symbolTokenMap[symbol];
-  const candles = candleHistory[token] || [];
+  const candles = (candleHistory[token] || []).filter(
+    (c) =>
+      c &&
+      typeof c.high === "number" &&
+      !isNaN(c.high) &&
+      typeof c.low === "number" &&
+      !isNaN(c.low)
+  );
   if (!candles.length) return { support: null, resistance: null };
   const lows = candles.map((c) => c.low);
   const highs = candles.map((c) => c.high);

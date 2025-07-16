@@ -90,10 +90,14 @@ export async function analyzeCandles(
     const validCandles = candles.filter(
       (c) =>
         c &&
-        c.open !== undefined &&
-        c.high !== undefined &&
-        c.low !== undefined &&
-        c.close !== undefined
+        typeof c.open === "number" &&
+        !isNaN(c.open) &&
+        typeof c.high === "number" &&
+        !isNaN(c.high) &&
+        typeof c.low === "number" &&
+        !isNaN(c.low) &&
+        typeof c.close === "number" &&
+        !isNaN(c.close)
     );
     if (validCandles.length < 5) return null;
     const features = computeFeatures(validCandles);
