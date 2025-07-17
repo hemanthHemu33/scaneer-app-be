@@ -2,16 +2,31 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 const auditMock = test.mock.module('../auditLogger.js', {
-  namedExports: { logSignalRejected: () => {} }
+  namedExports: {
+    logSignalRejected: () => {},
+    logSignalExpired: () => {},
+    logSignalMutation: () => {},
+    logSignalCreated: () => {},
+    logBacktestReference: () => {},
+    getLogs: () => ({}),
+  }
 });
+const kiteMock = test.mock.module('../kite.js', { namedExports: { getMA: () => null } });
 const dbMock = test.mock.module('../db.js', {
-  defaultExport: {},
+  defaultExport: {
+    collection: () => ({
+      find: () => ({ toArray: async () => [] }),
+      deleteMany: async () => {},
+      insertMany: async () => {},
+    }),
+  },
   namedExports: { connectDB: async () => ({}) }
 });
 
 const { isSignalValid, resetRiskState, riskState, recordTradeExecution } = await import('../riskEngine.js');
 
 auditMock.restore();
+kiteMock.restore();
 dbMock.restore();
 
 test('isSignalValid blocks low RR', () => {
@@ -226,6 +241,82 @@ test('isSignalValid blocks excessive slippage and spread', () => {
     maxSpreadPct: 0.3,
     slippage: 0.05,
     maxSlippage: 0.02,
+  });
+  assert.equal(ok, false);
+});
+
+test('isSignalValid blocks near market close', () => {
+  resetRiskState();
+  const sig = {
+    stock: 'AAA',
+    pattern: 'trend',
+    direction: 'Long',
+    entry: 100,
+    stopLoss: 98,
+    target2: 104,
+    atr: 1,
+    spread: 0.1,
+  };
+  const ok = isSignalValid(sig, {
+    blockMinutesBeforeClose: 10,
+    now: new Date('2023-01-05T09:56:00Z'),
+  });
+  assert.equal(ok, false);
+});
+
+test('isSignalValid blocks right after open', () => {
+  resetRiskState();
+  const sig = {
+    stock: 'AAA',
+    pattern: 'trend',
+    direction: 'Long',
+    entry: 100,
+    stopLoss: 98,
+    target2: 104,
+    atr: 1,
+    spread: 0.1,
+  };
+  const ok = isSignalValid(sig, {
+    blockMinutesAfterOpen: 10,
+    now: new Date('2023-01-05T03:47:00Z'),
+  });
+  assert.equal(ok, false);
+});
+
+test('isSignalValid blocks during major event', () => {
+  resetRiskState();
+  const sig = {
+    stock: 'AAA',
+    pattern: 'trend',
+    direction: 'Long',
+    entry: 100,
+    stopLoss: 98,
+    target2: 104,
+    atr: 1,
+    spread: 0.1,
+  };
+  const ok = isSignalValid(sig, { majorEventActive: true });
+  assert.equal(ok, false);
+});
+
+test('isSignalValid blocks during earnings week', () => {
+  resetRiskState();
+  const sig = {
+    stock: 'AAA',
+    pattern: 'trend',
+    direction: 'Long',
+    entry: 100,
+    stopLoss: 98,
+    target2: 104,
+    atr: 1,
+    spread: 0.1,
+  };
+  const dt = new Date('2023-01-05T06:00:00Z');
+  const oneJan = new Date(dt.getFullYear(), 0, 1);
+  const week = Math.floor((dt - oneJan) / (7 * 24 * 60 * 60 * 1000));
+  const ok = isSignalValid(sig, {
+    now: dt,
+    earningsCalendar: { AAA: [week] },
   });
   assert.equal(ok, false);
 });

@@ -3,6 +3,7 @@
 import {
   validateRR,
   checkMarketConditions,
+  checkTimingFilters,
   validateATRStopLoss,
   validateSupportResistance,
   validateVolumeSpike,
@@ -278,6 +279,20 @@ export function isSignalValid(signal, ctx = {}) {
     eventActive: ctx.eventActive,
   });
   if (!marketOk) return false;
+
+  const timingOk = checkTimingFilters({
+    now: ctx.now,
+    minutesBeforeClose: ctx.blockMinutesBeforeClose,
+    minutesAfterOpen: ctx.blockMinutesAfterOpen,
+    holidays: ctx.holidays,
+    specialSessions: ctx.specialSessions,
+    eventActive: ctx.majorEventActive,
+    earningsCalendar: ctx.earningsCalendar,
+    symbol: signal.stock || signal.symbol,
+    indexRebalanceDays: ctx.indexRebalanceDays,
+    expiryDates: ctx.expiryDates,
+  });
+  if (!timingOk) return false;
 
   const key = `${signal.stock || signal.symbol}-${signal.direction}-${signal.pattern || signal.algoSignal?.strategy}`;
   const dupWindow = ctx.duplicateWindowMs || 5 * 60 * 1000;

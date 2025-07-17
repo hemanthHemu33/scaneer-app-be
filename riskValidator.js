@@ -1,6 +1,7 @@
 // riskValidator.js
 // Provides pre-execution risk validation utilities
 import { logSignalRejected } from './auditLogger.js';
+import { toISTDate } from './util.js';
 
 export function getMinRRForStrategy(strategy, winrate = 0) {
   const s = (strategy || '').toLowerCase();
@@ -164,6 +165,37 @@ export function checkMarketConditions({
   if (typeof spread === 'number' && spread > 0.3) return false;
   if (typeof volume === 'number' && volume <= 0) return false;
   if (newsImpact || eventActive) return false;
+  return true;
+}
+
+export function checkTimingFilters({
+  now = new Date(),
+  minutesBeforeClose = 0,
+  minutesAfterOpen = 0,
+  holidays = [],
+  specialSessions = [],
+  eventActive = false,
+  earningsCalendar = {},
+  symbol,
+  indexRebalanceDays = [],
+  expiryDates = [],
+}) {
+  const local = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+  const total = local.getHours() * 60 + local.getMinutes();
+  const open = 9 * 60 + 15;
+  const close = 15 * 60 + 30;
+  if (minutesBeforeClose && close - total <= minutesBeforeClose) return false;
+  if (minutesAfterOpen && total - open < minutesAfterOpen) return false;
+  const dateStr = toISTDate(local);
+  if (holidays.includes(dateStr)) return false;
+  if (specialSessions.includes(dateStr)) return false;
+  if (eventActive) return false;
+  if (indexRebalanceDays.includes(dateStr)) return false;
+  if (expiryDates.includes(dateStr)) return false;
+  const oneJan = new Date(local.getFullYear(), 0, 1);
+  const week = Math.floor((local - oneJan) / (7 * 24 * 60 * 60 * 1000));
+  if (symbol && Array.isArray(earningsCalendar[symbol]) && earningsCalendar[symbol].includes(week))
+    return false;
   return true;
 }
 
