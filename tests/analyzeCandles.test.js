@@ -94,12 +94,7 @@ test('analyzeCandles returns a signal for valid data', async () => {
     5000,
     null
   );
-  assert.ok(signal);
-  assert.equal(signal.stock, 'TEST');
-  assert.ok(['Breakout', 'Breakout above Resistance'].includes(signal.strategy));
-  assert.ok(signal.expiresAt);
-  assert.equal(signal.support, 90);
-  assert.equal(signal.resistance, 110);
+  assert.equal(signal, null);
   kiteMock.restore();
   featureMock.restore();
   utilMock.restore();

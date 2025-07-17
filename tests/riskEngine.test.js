@@ -320,3 +320,103 @@ test('isSignalValid blocks during earnings week', () => {
   });
   assert.equal(ok, false);
 });
+
+test('isSignalValid blocks low confidence', () => {
+  resetRiskState();
+  const sig = {
+    stock: 'LOW',
+    pattern: 'trend',
+    direction: 'Long',
+    entry: 100,
+    stopLoss: 98,
+    target2: 104,
+    atr: 1,
+    confidence: 0.5,
+    spread: 0.1,
+  };
+  const ok = isSignalValid(sig, { minConfidence: 0.6 });
+  assert.equal(ok, false);
+});
+
+test('isSignalValid blocks high risk score', () => {
+  resetRiskState();
+  const sig = {
+    stock: 'RS',
+    pattern: 'trend',
+    direction: 'Long',
+    entry: 100,
+    stopLoss: 98,
+    target2: 104,
+    atr: 1,
+    riskScore: 7,
+    spread: 0.1,
+  };
+  const ok = isSignalValid(sig, { maxRiskScore: 5 });
+  assert.equal(ok, false);
+});
+
+test('isSignalValid blocks excessive SL vs ATR', () => {
+  resetRiskState();
+  const sig = {
+    stock: 'SL',
+    pattern: 'trend',
+    direction: 'Long',
+    entry: 100,
+    stopLoss: 95,
+    target2: 110,
+    atr: 1,
+    spread: 0.1,
+  };
+  const ok = isSignalValid(sig, { maxSLATR: 2 });
+  assert.equal(ok, false);
+});
+
+test('isSignalValid blocks low rvol', () => {
+  resetRiskState();
+  const sig = {
+    stock: 'VOL',
+    pattern: 'trend',
+    direction: 'Long',
+    entry: 100,
+    stopLoss: 98,
+    target2: 104,
+    atr: 1,
+    rvol: 0.8,
+    spread: 0.1,
+  };
+  const ok = isSignalValid(sig, { minRvol: 1 });
+  assert.equal(ok, false);
+});
+
+test('isSignalValid blocks near circuit limit', () => {
+  resetRiskState();
+  const sig = {
+    stock: 'CIR',
+    pattern: 'trend',
+    direction: 'Long',
+    entry: 100.5,
+    stopLoss: 98,
+    target2: 104,
+    atr: 1,
+    spread: 0.1,
+  };
+  const ok = isSignalValid(sig, { upperCircuit: 101 });
+  assert.equal(ok, false);
+});
+
+test('isSignalValid blocks gap zone trades', () => {
+  resetRiskState();
+  const sig = {
+    stock: 'GAP',
+    pattern: 'trend',
+    direction: 'Long',
+    entry: 100,
+    stopLoss: 98,
+    target2: 104,
+    atr: 1,
+    inGapZone: true,
+    spread: 0.1,
+  };
+  const ok = isSignalValid(sig);
+  assert.equal(ok, false);
+});

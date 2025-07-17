@@ -183,6 +183,22 @@ export function isSignalValid(signal, ctx = {}) {
     return false;
   if (ctx.allowPyramiding === false && ctx.hasPositionForSymbol) return false;
 
+  const conf = signal.confidence ?? signal.confidenceScore ?? 0;
+  if (typeof ctx.minConfidence === 'number' && conf < ctx.minConfidence)
+    return false;
+  if (
+    typeof ctx.maxRiskScore === 'number' &&
+    typeof signal.riskScore === 'number' &&
+    signal.riskScore > ctx.maxRiskScore
+  )
+    return false;
+
+  const upper = signal.upperCircuit ?? ctx.upperCircuit;
+  const lower = signal.lowerCircuit ?? ctx.lowerCircuit;
+  if (typeof upper === 'number' && signal.entry >= upper * 0.99) return false;
+  if (typeof lower === 'number' && signal.entry <= lower * 1.01) return false;
+  if (signal.inGapZone || ctx.inGapZone) return false;
+
   if (signal.expiresAt && now > new Date(signal.expiresAt).getTime()) return false;
 
   const rr = validateRR({
@@ -194,6 +210,13 @@ export function isSignalValid(signal, ctx = {}) {
   });
   if (!rr.valid) return false;
   if (typeof ctx.minRR === 'number' && rr.rr < ctx.minRR) return false;
+  if (rr.rr < 2) return false;
+
+  if (
+    signal.atr &&
+    Math.abs(signal.entry - signal.stopLoss) > (ctx.maxSLATR ?? 2) * signal.atr
+  )
+    return false;
 
   if (
     !validateATRStopLoss({ entry: signal.entry, stopLoss: signal.stopLoss, atr: signal.atr })
@@ -216,6 +239,12 @@ export function isSignalValid(signal, ctx = {}) {
       volume: signal.volume ?? ctx.volume,
       avgVolume: ctx.avgVolume,
     })
+  )
+    return false;
+  if (
+    typeof ctx.minRvol === 'number' &&
+    typeof (signal.rvol ?? ctx.rvol) === 'number' &&
+    (signal.rvol ?? ctx.rvol) < ctx.minRvol
   )
     return false;
 
