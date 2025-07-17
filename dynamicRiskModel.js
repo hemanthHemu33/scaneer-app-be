@@ -114,6 +114,19 @@ export function adjustRiskBasedOnDrawdown({ drawdown, lotSize }) {
 }
 
 /**
+ * Scale down lot size when a losing streak occurs.
+ * @param {Object} opts
+ * @param {number} opts.lossStreak - Consecutive losing trades
+ * @param {number} opts.lotSize - Proposed lot size
+ * @returns {number} adjusted lot size
+ */
+export function adjustRiskAfterLossStreak({ lossStreak = 0, lotSize }) {
+  if (lossStreak >= 3) return Math.floor(lotSize * 0.5);
+  if (lossStreak === 2) return Math.floor(lotSize * 0.75);
+  return lotSize;
+}
+
+/**
  * Perform real-time risk recalculations.
  * @param {Object} opts
  * @param {number} opts.atr - Latest ATR
