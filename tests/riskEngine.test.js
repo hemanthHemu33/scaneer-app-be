@@ -209,3 +209,23 @@ test('isSignalValid enforces maxLossPerTradePct', () => {
   const ok = isSignalValid(sig, { maxLossPerTradePct: 0.05 });
   assert.equal(ok, false);
 });
+
+test('isSignalValid blocks excessive slippage and spread', () => {
+  resetRiskState();
+  const sig = {
+    stock: 'HHH',
+    pattern: 'trend',
+    direction: 'Long',
+    entry: 100,
+    stopLoss: 98,
+    target2: 104,
+    atr: 1,
+    spread: 0.5,
+  };
+  const ok = isSignalValid(sig, {
+    maxSpreadPct: 0.3,
+    slippage: 0.05,
+    maxSlippage: 0.02,
+  });
+  assert.equal(ok, false);
+});
