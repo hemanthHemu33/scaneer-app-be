@@ -6,6 +6,7 @@ import {
   validateATRStopLoss,
   validateSupportResistance,
   validateVolumeSpike,
+  validateVolatilitySlippage,
 } from './riskValidator.js';
 
 function getWeekNumber(d = new Date()) {
@@ -229,6 +230,25 @@ export function isSignalValid(signal, ctx = {}) {
     typeof ctx.avgVolume === 'number' &&
     typeof (signal.liquidity ?? ctx.volume) === 'number' &&
     (signal.liquidity ?? ctx.volume) < ctx.avgVolume * ctx.minVolumeRatio
+  )
+    return false;
+
+  if (
+    !validateVolatilitySlippage({
+      atr: signal.atr,
+      minATR: ctx.minVolatility,
+      maxATR: ctx.maxVolatility,
+      dailyRangePct: ctx.dailyRangePct,
+      maxDailySpikePct: ctx.rangeSpikeThreshold,
+      wickPct: ctx.wickPct,
+      volume: signal.liquidity ?? ctx.volume,
+      avgVolume: ctx.avgVolume,
+      consolidationRatio: ctx.consolidationVolumeRatio,
+      slippage: ctx.slippage,
+      maxSlippage: ctx.maxSlippage,
+      spread: signal.spread,
+      maxSpreadPct: ctx.maxSpreadPct,
+    })
   )
     return false;
 

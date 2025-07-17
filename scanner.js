@@ -49,6 +49,10 @@ const FILTERS = {
   maxSpread: MODE === "strict" ? 1.5 : 2.0,
   minLiquidity: MODE === "strict" ? 500 : 300,
   maxATR: MODE === "strict" ? 3.5 : 5.0,
+  rangeSpike: MODE === "strict" ? 10 : 15,
+  consolidationRatio: MODE === "strict" ? 0.5 : 0.3,
+  maxSlippage: MODE === "strict" ? 0.02 : 0.05,
+  maxSpreadPct: MODE === "strict" ? 0.3 : 0.5,
 };
 
 function logError(context, err) {
@@ -137,6 +141,21 @@ export async function analyzeCandles(
       volatilityClass,
     } = features;
     const last = validCandles.at(-1);
+    let dailyRangePct = 0;
+    if (Array.isArray(dailyHistory) && dailyHistory.length) {
+      const d = dailyHistory[dailyHistory.length - 1];
+      const ref = d.close ?? d.open ?? 1;
+      dailyRangePct = ref ? ((d.high - d.low) / ref) * 100 : 0;
+    }
+
+    let wickPct = 0;
+    if (last) {
+      const body = Math.abs(last.close - last.open) || 1;
+      const upper = last.high - Math.max(last.close, last.open);
+      const lower = Math.min(last.close, last.open) - last.low;
+      const wick = Math.max(upper, lower);
+      wickPct = wick / body;
+    }
     const expiryMinutes = calculateExpiryMinutes({ atr: atrValue, rvol });
     const expiresAt = new Date(
       Date.now() + expiryMinutes * 60 * 1000
@@ -211,6 +230,15 @@ export async function analyzeCandles(
       marketRegime: marketContext.regime,
       minATR: FILTERS.atrThreshold,
       maxATR: FILTERS.maxATR,
+      minVolatility: FILTERS.atrThreshold,
+      maxVolatility: FILTERS.maxATR,
+      dailyRangePct,
+      rangeSpikeThreshold: FILTERS.rangeSpike,
+      wickPct,
+      consolidationVolumeRatio: FILTERS.consolidationRatio,
+      slippage,
+      maxSlippage: FILTERS.maxSlippage,
+      maxSpreadPct: FILTERS.maxSpreadPct,
       minRR: RISK_REWARD_RATIO,
       minLiquidity: FILTERS.minLiquidity,
       minVolumeRatio: 0.5,

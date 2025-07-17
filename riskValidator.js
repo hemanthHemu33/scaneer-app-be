@@ -98,6 +98,55 @@ export function validateVolumeSpike({ volume, avgVolume, minSpike = 1.5 }) {
   return volume >= avgVolume * minSpike;
 }
 
+// Additional volatility and slippage checks
+export function validateVolatilitySlippage({
+  atr,
+  minATR,
+  maxATR,
+  dailyRangePct,
+  maxDailySpikePct,
+  wickPct,
+  volume,
+  avgVolume,
+  consolidationRatio = 0.3,
+  slippage,
+  maxSlippage,
+  spread,
+  maxSpreadPct,
+}) {
+  if (typeof minATR === 'number' && typeof atr === 'number' && atr < minATR)
+    return false;
+  if (typeof maxATR === 'number' && typeof atr === 'number' && atr > maxATR)
+    return false;
+  if (
+    typeof maxDailySpikePct === 'number' &&
+    typeof dailyRangePct === 'number' &&
+    dailyRangePct > maxDailySpikePct
+  )
+    return false;
+  if (typeof wickPct === 'number' && wickPct > 0.6) return false;
+  if (
+    typeof volume === 'number' &&
+    typeof avgVolume === 'number' &&
+    typeof consolidationRatio === 'number' &&
+    volume < avgVolume * consolidationRatio
+  )
+    return false;
+  if (
+    typeof slippage === 'number' &&
+    typeof maxSlippage === 'number' &&
+    slippage > maxSlippage
+  )
+    return false;
+  if (
+    typeof spread === 'number' &&
+    typeof maxSpreadPct === 'number' &&
+    spread > maxSpreadPct
+  )
+    return false;
+  return true;
+}
+
 export function checkMarketConditions({
   atr,
   avgAtr,

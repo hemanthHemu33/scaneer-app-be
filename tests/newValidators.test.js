@@ -8,6 +8,7 @@ const {
   validateATRStopLoss,
   validateSupportResistance,
   validateVolumeSpike,
+  validateVolatilitySlippage,
 } = await import('../riskValidator.js');
 
 auditMock.restore();
@@ -37,4 +38,35 @@ test('validateSupportResistance respects levels', () => {
 test('validateVolumeSpike requires spike over average', () => {
   assert.equal(validateVolumeSpike({ volume: 150, avgVolume: 100 }), true);
   assert.equal(validateVolumeSpike({ volume: 120, avgVolume: 100, minSpike: 1.3 }), false);
+});
+
+test('validateVolatilitySlippage enforces rules', () => {
+  assert.equal(
+    validateVolatilitySlippage({ atr: 0.5, minATR: 1 }),
+    false
+  );
+  assert.equal(
+    validateVolatilitySlippage({ atr: 2.5, maxATR: 2 }),
+    false
+  );
+  assert.equal(
+    validateVolatilitySlippage({ dailyRangePct: 20, maxDailySpikePct: 10 }),
+    false
+  );
+  assert.equal(
+    validateVolatilitySlippage({ spread: 0.4, maxSpreadPct: 0.3 }),
+    false
+  );
+  assert.equal(
+    validateVolatilitySlippage({ slippage: 0.05, maxSlippage: 0.02 }),
+    false
+  );
+  assert.equal(
+    validateVolatilitySlippage({ volume: 50, avgVolume: 200, consolidationRatio: 0.3 }),
+    false
+  );
+  assert.equal(
+    validateVolatilitySlippage({ atr: 1.5, minATR: 1, maxATR: 2, spread: 0.2, maxSpreadPct: 0.3 }),
+    true
+  );
 });
