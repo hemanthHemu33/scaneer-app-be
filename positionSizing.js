@@ -1,6 +1,10 @@
 // positionSizing.js
 
-import { calculateDynamicStopLoss, adjustRiskBasedOnDrawdown } from './dynamicRiskModel.js';
+import {
+  calculateDynamicStopLoss,
+  adjustRiskBasedOnDrawdown,
+  adjustRiskAfterLossStreak,
+} from './dynamicRiskModel.js';
 import { adjustStopLoss } from './riskValidator.js';
 import { DEFAULT_MARGIN_PERCENT } from './util.js';
 
@@ -78,6 +82,8 @@ export function dollarVolatilitySizing({ capital, atr, price, riskPercent = 0.01
  * @param {number} opts.slPoints           Stop loss distance in points.
  * @param {number} [opts.price]            Entry price used for margin estimation.
  * @param {number} [opts.volatility]       Instrument volatility (e.g. ATR).
+ * @param {number} [opts.drawdown]         Current equity drawdown (0-1).
+ * @param {number} [opts.lossStreak]       Current consecutive loss count.
  * @param {number} [opts.vix]              Market volatility index.
  * @param {number} [opts.lotSize=1]        Minimum tradable lot size.
  * @param {number} [opts.utilizationCap=1] Max portion of capital to allocate when marginPerLot is provided.
@@ -103,6 +109,8 @@ export function calculatePositionSize({
   slPoints,
   price,
   volatility,
+  drawdown,
+  lossStreak = 0,
   vix,
   lotSize = 1,
   utilizationCap = 1,
@@ -230,6 +238,13 @@ export function calculatePositionSize({
     qty = Math.min(qty, maxLots * lotSize);
   }
 
+  if (typeof drawdown === 'number') {
+    qty = adjustRiskBasedOnDrawdown({ drawdown, lotSize: qty });
+  }
+  if (typeof lossStreak === 'number') {
+    qty = adjustRiskAfterLossStreak({ lossStreak, lotSize: qty });
+  }
+
   if (typeof minQty === 'number' && qty < minQty) return 0;
   if (typeof minLotSize === 'number' && qty < minLotSize) return 0;
   if (typeof maxQty === 'number' && qty > maxQty) qty = maxQty;
@@ -306,6 +321,8 @@ export function calculateTradeParameters({
     slPoints: baseRisk,
     price: entry,
     volatility: atr,
+    drawdown,
+    lossStreak: 0,
     lotSize: 1,
     utilizationCap: 1,
     leverage,
@@ -314,6 +331,7 @@ export function calculateTradeParameters({
   });
 
   qty = adjustRiskBasedOnDrawdown({ drawdown, lotSize: qty });
+  qty = adjustRiskAfterLossStreak({ lossStreak: 0, lotSize: qty });
 
   const rrMultiplier = atr > 2 ? RISK_REWARD_RATIO + 0.5 : RISK_REWARD_RATIO;
   const target1 =

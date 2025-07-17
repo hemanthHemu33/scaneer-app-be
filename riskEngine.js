@@ -42,6 +42,12 @@ const defaultState = {
   consecutiveLosses: 0,
   maxLossStreak: 3,
   lastTradeWasLoss: false,
+  lastTradeTime: 0,
+  systemPaused: false,
+  signalCount: 0,
+  maxSignalsPerDay: Infinity,
+  signalFloodThreshold: 0,
+  volatilityThrottleMs: 0,
   lastResetDay: new Date().getDate(),
   lastResetWeek: getWeekNumber(),
   lastResetMonth: new Date().getMonth(),
@@ -61,6 +67,9 @@ export function resetRiskState() {
     lastResetWeek: getWeekNumber(),
     lastResetMonth: new Date().getMonth(),
   });
+  riskState.signalCount = 0;
+  riskState.systemPaused = false;
+  riskState.lastTradeTime = 0;
   riskState.tradesPerInstrument = new Map();
   riskState.tradesPerSector = new Map();
   duplicateMap.clear();
@@ -79,6 +88,14 @@ export function recordTradeResult({ pnl = 0, risk = 0, symbol, sector }) {
   riskState.lastTradeWasLoss = pnl < 0;
   if (pnl < 0) riskState.consecutiveLosses += 1;
   else riskState.consecutiveLosses = 0;
+  riskState.lastTradeTime = Date.now();
+  if (
+    riskState.dailyLoss >= riskState.maxDailyLoss ||
+    (riskState.equityPeak > 0 &&
+      riskState.equity < riskState.equityPeak * (1 - riskState.equityDrawdownLimitPct))
+  ) {
+    riskState.systemPaused = true;
+  }
 }
 
 export function recordTradeExecution({ symbol, sector }) {
@@ -90,6 +107,7 @@ export function recordTradeExecution({ symbol, sector }) {
   const sec = sector || 'GEN';
   const sc = riskState.tradesPerSector.get(sec) || 0;
   riskState.tradesPerSector.set(sec, sc + 1);
+  riskState.lastTradeTime = Date.now();
 }
 
 export function isSignalValid(signal, ctx = {}) {
@@ -105,6 +123,26 @@ export function isSignalValid(signal, ctx = {}) {
   if (riskState.lastResetMonth !== month) {
     riskState.monthlyLoss = 0;
     riskState.lastResetMonth = month;
+  }
+
+  riskState.signalCount += 1;
+  if (riskState.systemPaused) return false;
+  const maxSignals = ctx.maxSignalsPerDay ?? riskState.maxSignalsPerDay;
+  if (riskState.signalCount > maxSignals) return false;
+  if (
+    typeof ctx.highVolatilityThresh === 'number' &&
+    typeof ctx.volatility === 'number' &&
+    ctx.volatility > ctx.highVolatilityThresh
+  ) {
+    const interval = (ctx.throttleMs ?? riskState.volatilityThrottleMs) || 60000;
+    if (now - riskState.lastTradeTime < interval) return false;
+  }
+  if (
+    typeof ctx.signalFloodThreshold === 'number' &&
+    riskState.signalCount > ctx.signalFloodThreshold
+  ) {
+    const interval = ctx.signalFloodThrottleMs || 60000;
+    if (now - riskState.lastTradeTime < interval) return false;
   }
 
   const maxLoss = ctx.maxDailyLoss ?? riskState.maxDailyLoss;

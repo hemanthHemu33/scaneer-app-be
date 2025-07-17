@@ -15,6 +15,7 @@ const {
   calculateLotSize,
   checkExposureCap,
   adjustRiskBasedOnDrawdown,
+  adjustRiskAfterLossStreak,
 } = await import('../dynamicRiskModel.js');
 
 dbMock.restore();
@@ -51,5 +52,10 @@ test('checkExposureCap blocks excess exposure', () => {
 
 test('adjustRiskBasedOnDrawdown scales size', () => {
   const size = adjustRiskBasedOnDrawdown({ drawdown: 0.06, lotSize: 100 });
+  assert.equal(size, 50);
+});
+
+test('adjustRiskAfterLossStreak reduces qty', () => {
+  const size = adjustRiskAfterLossStreak({ lossStreak: 3, lotSize: 100 });
   assert.equal(size, 50);
 });

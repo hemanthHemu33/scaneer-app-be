@@ -420,3 +420,37 @@ test('isSignalValid blocks gap zone trades', () => {
   const ok = isSignalValid(sig);
   assert.equal(ok, false);
 });
+
+test('isSignalValid respects system pause', () => {
+  resetRiskState();
+  riskState.systemPaused = true;
+  const sig = {
+    stock: 'PAUSE',
+    pattern: 'trend',
+    direction: 'Long',
+    entry: 100,
+    stopLoss: 98,
+    target2: 104,
+    atr: 1,
+    spread: 0.1,
+  };
+  const ok = isSignalValid(sig);
+  assert.equal(ok, false);
+});
+
+test('isSignalValid throttles in high volatility', () => {
+  resetRiskState();
+  riskState.lastTradeTime = Date.now();
+  const sig = {
+    stock: 'VOL',
+    pattern: 'trend',
+    direction: 'Long',
+    entry: 100,
+    stopLoss: 98,
+    target2: 104,
+    atr: 5,
+    spread: 0.1,
+  };
+  const ok = isSignalValid(sig, { volatility: 5, highVolatilityThresh: 4, throttleMs: 60000 });
+  assert.equal(ok, false);
+});
