@@ -29,6 +29,8 @@ import { signalQualityScore } from "./confidence.js";
 import { sendToExecution } from "./orderExecution.js";
 import { initAccountBalance, getAccountBalance } from "./account.js";
 import { buildSignal } from "./signalBuilder.js";
+import { getSector } from "./sectors.js";
+import { recordSectorSignal } from "./sectorSignals.js";
 // 📊 Signal history tracking
 const signalHistory = {};
 let accountBalance = 0;
@@ -322,6 +324,9 @@ export async function analyzeCandles(
 
     signal.expiresAt = toISTISOString(expiresAt);
     signal.ai = null; // Step 8: final enrichment placeholder
+
+    const sector = getSector(symbol);
+    recordSectorSignal(sector, signal.direction);
 
     return signal;
   } catch (err) {
