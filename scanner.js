@@ -6,6 +6,10 @@ import {
   calculateExpiryMinutes,
   toISTISOString,
   getMAForSymbol,
+  isStrongPriceAction,
+  getWickNoise,
+  isAtrStable,
+  isAwayFromConsolidation,
 } from "./util.js";
 
 import { getSupportResistanceLevels, historicalCache } from "./kite.js";
@@ -148,14 +152,9 @@ export async function analyzeCandles(
       dailyRangePct = ref ? ((d.high - d.low) / ref) * 100 : 0;
     }
 
-    let wickPct = 0;
-    if (last) {
-      const body = Math.abs(last.close - last.open) || 1;
-      const upper = last.high - Math.max(last.close, last.open);
-      const lower = Math.min(last.close, last.open) - last.low;
-      const wick = Math.max(upper, lower);
-      wickPct = wick / body;
-    }
+    const wickPct = last ? getWickNoise(last) : 0;
+    const strongPriceAction = isStrongPriceAction(validCandles);
+    const atrStable = isAtrStable(validCandles);
     const expiryMinutes = calculateExpiryMinutes({ atr: atrValue, rvol });
     const expiresAt = new Date(
       Date.now() + expiryMinutes * 60 * 1000
@@ -248,6 +247,7 @@ export async function analyzeCandles(
     // Step 6: Position sizing after risk filter
     const baseRisk = Math.abs(base.entry - base.stopLoss);
     const riskReward = Math.abs((base.target2 ?? base.target1) - base.entry) / baseRisk;
+    const consolidationOk = isAwayFromConsolidation(validCandles.slice(0, -1), base.entry);
     let qty = calculatePositionSize({
       capital: accountBalance,
       risk: accountBalance * riskPerTradePercentage,
@@ -297,7 +297,15 @@ export async function analyzeCandles(
       strategyConfidence: base.confidence,
       support,
       resistance,
-      finalScore: signalQualityScore({ atr: atrValue, rvol }),
+      finalScore: signalQualityScore({
+        atr: atrValue,
+        rvol,
+        strongPriceAction,
+        cleanBody: wickPct < 0.3,
+        rrRatio: riskReward,
+        atrStable,
+        awayFromConsolidation: consolidationOk,
+      }),
       expiresAt,
       riskAmount: accountBalance * riskPerTradePercentage,
       accountBalance,
