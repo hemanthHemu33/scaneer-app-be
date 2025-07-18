@@ -29,10 +29,31 @@ export function confirmationScore(count = 0) {
   return Math.min(count / 3, 1); // saturate at 3
 }
 
-export function signalQualityScore({ atr, rvol }) {
-  const atrScore = Math.min(atr / 2, 1); // ATR around 2 considered strong
-  const volumeScore = Math.min(rvol / 2, 1); // RVOL 2 or higher is strong
-  return (atrScore + volumeScore) / 2;
+export function signalQualityScore({
+  atr,
+  rvol,
+  strongPriceAction = false,
+  cleanBody = true,
+  rrRatio = 1,
+  atrStable = true,
+  awayFromConsolidation = true,
+} = {}) {
+  const atrScore = Math.min(atr / 2, 1);
+  const volumeScore = Math.min(rvol / 2, 1);
+  const priceActionScore = strongPriceAction ? 1 : 0.5;
+  const wickScore = cleanBody ? 1 : 0.5;
+  const rrScore = Math.min(rrRatio / 3, 1);
+  const stabilityScore = atrStable ? 1 : 0.5;
+  const consolidationScore = awayFromConsolidation ? 1 : 0.5;
+  return (
+    atrScore * 0.2 +
+    volumeScore * 0.2 +
+    priceActionScore * 0.2 +
+    wickScore * 0.1 +
+    rrScore * 0.2 +
+    stabilityScore * 0.05 +
+    consolidationScore * 0.05
+  );
 }
 
 export function computeConfidenceScore({
