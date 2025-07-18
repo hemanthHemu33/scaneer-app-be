@@ -8,8 +8,10 @@ import {
   validateSupportResistance,
   validateVolumeSpike,
   validateVolatilitySlippage,
+  isSLInvalid,
 } from './riskValidator.js';
 import { calculateStdDev, calculateZScore } from './util.js';
+import { resolveSignalConflicts } from './portfolioContext.js';
 
 function getWeekNumber(d = new Date()) {
   const oneJan = new Date(d.getFullYear(), 0, 1);
@@ -185,12 +187,21 @@ export function isSignalValid(signal, ctx = {}) {
   if (ctx.preventOverlap && Array.isArray(ctx.openSymbols)) {
     if (ctx.openSymbols.includes(signal.stock || signal.symbol)) return false;
   }
+  const dir = signal.direction === 'Long' ? 'long' : 'short';
   if (ctx.openPositionsMap instanceof Map) {
     const existing = ctx.openPositionsMap.get(signal.stock || signal.symbol);
-    const dir = signal.direction === 'Long' ? 'long' : 'short';
     if (existing && existing.side && existing.side.toLowerCase() !== dir)
       return false;
   }
+  if (
+    ctx.resolveConflicts &&
+    !resolveSignalConflicts({
+      symbol: signal.stock || signal.symbol,
+      side: dir,
+      strategy: signal.algoSignal?.strategy || signal.pattern,
+    })
+  )
+    return false;
 
   const inst = signal.stock || signal.symbol;
   const instCount = riskState.tradesPerInstrument.get(inst) || 0;
@@ -290,8 +301,8 @@ export function isSignalValid(signal, ctx = {}) {
     winrate: ctx.winrate || 0,
   });
   if (!rr.valid) return false;
-  if (typeof ctx.minRR === 'number' && rr.rr < ctx.minRR) return false;
-  if (rr.rr < 2) return false;
+  const minRR = ctx.minRR ?? 2;
+  if (rr.rr < minRR) return false;
 
   if (
     signal.atr &&
@@ -301,6 +312,16 @@ export function isSignalValid(signal, ctx = {}) {
 
   if (
     !validateATRStopLoss({ entry: signal.entry, stopLoss: signal.stopLoss, atr: signal.atr })
+  )
+    return false;
+
+  if (
+    isSLInvalid({
+      price: ctx.currentPrice ?? signal.entry,
+      stopLoss: signal.stopLoss,
+      atr: signal.atr,
+      structureBreak: ctx.structureBreak,
+    })
   )
     return false;
 
@@ -333,6 +354,13 @@ export function isSignalValid(signal, ctx = {}) {
     typeof ctx.minLiquidity === 'number' &&
     typeof (signal.liquidity ?? ctx.volume) === 'number' &&
     (signal.liquidity ?? ctx.volume) < ctx.minLiquidity
+  )
+    return false;
+
+  if (
+    typeof ctx.minVolume === 'number' &&
+    typeof (signal.liquidity ?? ctx.volume) === 'number' &&
+    (signal.liquidity ?? ctx.volume) < ctx.minVolume
   )
     return false;
 

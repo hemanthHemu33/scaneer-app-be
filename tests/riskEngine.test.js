@@ -518,3 +518,35 @@ test('isSignalValid enforces entry std dev and z-score', () => {
   const ok = isSignalValid(sig, { entryStdDev: 2, maxEntryStdDev: 1.5, zScore: 0.2, minZScoreAbs: 0.5 });
   assert.equal(ok, false);
 });
+
+test('isSignalValid respects configured RR threshold', () => {
+  resetRiskState();
+  const sig = {
+    stock: 'RR',
+    pattern: 'trend',
+    direction: 'Long',
+    entry: 100,
+    stopLoss: 99,
+    target2: 101.5,
+    atr: 1,
+    spread: 0.1,
+  };
+  const ok = isSignalValid(sig, { minRR: 1.5 });
+  assert.equal(ok, true);
+});
+
+test('isSignalValid blocks invalid stop-loss alignment', () => {
+  resetRiskState();
+  const sig = {
+    stock: 'SL',
+    pattern: 'trend',
+    direction: 'Long',
+    entry: 100,
+    stopLoss: 99.9,
+    target2: 104,
+    atr: 1,
+    spread: 0.1,
+  };
+  const ok = isSignalValid(sig);
+  assert.equal(ok, false);
+});
