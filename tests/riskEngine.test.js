@@ -454,3 +454,67 @@ test('isSignalValid throttles in high volatility', () => {
   const ok = isSignalValid(sig, { volatility: 5, highVolatilityThresh: 4, throttleMs: 60000 });
   assert.equal(ok, false);
 });
+
+test('isSignalValid enforces backtest win rate threshold', () => {
+  resetRiskState();
+  const sig = {
+    stock: 'AAA',
+    pattern: 'trend',
+    direction: 'Long',
+    entry: 100,
+    stopLoss: 98,
+    target2: 104,
+    atr: 1,
+    spread: 0.1,
+  };
+  const ok = isSignalValid(sig, { backtestWinRate: 0.4, minBacktestWinRate: 0.5 });
+  assert.equal(ok, false);
+});
+
+test('isSignalValid enforces ML confidence threshold', () => {
+  resetRiskState();
+  const sig = {
+    stock: 'AAA',
+    pattern: 'trend',
+    direction: 'Long',
+    entry: 100,
+    stopLoss: 98,
+    target2: 104,
+    atr: 1,
+    spread: 0.1,
+  };
+  const ok = isSignalValid(sig, { mlConfidence: 0.4, minMlConfidence: 0.6 });
+  assert.equal(ok, false);
+});
+
+test('isSignalValid enforces recent accuracy threshold', () => {
+  resetRiskState();
+  const sig = {
+    stock: 'AAA',
+    pattern: 'trend',
+    direction: 'Long',
+    entry: 100,
+    stopLoss: 98,
+    target2: 104,
+    atr: 1,
+    spread: 0.1,
+  };
+  const ok = isSignalValid(sig, { recentAccuracy: 0.4, minRecentAccuracy: 0.5 });
+  assert.equal(ok, false);
+});
+
+test('isSignalValid enforces entry std dev and z-score', () => {
+  resetRiskState();
+  const sig = {
+    stock: 'AAA',
+    pattern: 'trend',
+    direction: 'Long',
+    entry: 100,
+    stopLoss: 98,
+    target2: 104,
+    atr: 1,
+    spread: 0.1,
+  };
+  const ok = isSignalValid(sig, { entryStdDev: 2, maxEntryStdDev: 1.5, zScore: 0.2, minZScoreAbs: 0.5 });
+  assert.equal(ok, false);
+});

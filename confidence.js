@@ -6,6 +6,16 @@ import { countSectorSignals } from './sectorSignals.js';
 
 // In-memory strategy statistics { symbol: { strategy: { wins, trades } } }
 export const strategyStats = {};
+// Track last 10 results per strategy for short-term accuracy
+export const recentStrategyResults = {};
+
+function _pushRecent(symbol, strategy, win) {
+  if (!recentStrategyResults[symbol]) recentStrategyResults[symbol] = {};
+  const arr = recentStrategyResults[symbol][strategy] || [];
+  arr.push(win ? 1 : 0);
+  if (arr.length > 10) arr.shift();
+  recentStrategyResults[symbol][strategy] = arr;
+}
 
 export function recordStrategyResult(symbol, strategy, win) {
   if (!strategyStats[symbol]) strategyStats[symbol] = {};
@@ -13,12 +23,20 @@ export function recordStrategyResult(symbol, strategy, win) {
   stat.trades += 1;
   if (win) stat.wins += 1;
   strategyStats[symbol][strategy] = stat;
+  _pushRecent(symbol, strategy, win);
 }
 
 export function getStrategyHitRate(symbol, strategy) {
   const stat = strategyStats[symbol]?.[strategy];
   if (!stat || stat.trades === 0) return 0.5;
   return stat.wins / stat.trades;
+}
+
+export function getRecentAccuracy(symbol, strategy) {
+  const arr = recentStrategyResults[symbol]?.[strategy];
+  if (!arr || arr.length === 0) return 0.5;
+  const wins = arr.reduce((a, b) => a + b, 0);
+  return wins / arr.length;
 }
 
 export function timeOfDayScore(date = new Date()) {
