@@ -5,6 +5,7 @@ import {
   calculateRSI,
   calculateSupertrend,
   calculateVWAP,
+  calculateAnchoredVWAP,
   getATR,
   computeFeatures,
 } from "./featureEngine.js";
@@ -1513,6 +1514,8 @@ export const DETECTORS = [
   detectGapFillReversal,
   detectIslandReversalTop,
   detectIslandReversalBottom,
+  detectAnchoredVwapBreakout,
+  detectGapEngulfingConfluence,
   detectBullTrapAfterGapUp,
   detectBearTrapAfterGapDown,
 ];
@@ -2337,4 +2340,40 @@ for (const s of [
   ...expertStrategies,
 ]) {
   STRATEGY_CATALOG[s.name] = s;
+}
+
+function detectAnchoredVwapBreakout(candles) {
+  if (candles.length < 50) return null;
+  const closes = candles.map(c => c.close);
+  const ema200 = calculateEMA(closes, 200);
+  const anchored = calculateAnchoredVWAP(candles);
+  const last = candles.at(-1);
+  const prev = candles.at(-2);
+  if (
+    anchored &&
+    last.close > anchored &&
+    prev.close <= anchored &&
+    Math.abs(anchored - ema200) / ema200 < 0.01
+  ) {
+    return { name: 'Anchored VWAP Breakout', confidence: 0.6 };
+  }
+  return null;
+}
+
+function detectGapEngulfingConfluence(candles) {
+  if (candles.length < 2) return null;
+  const prev = candles.at(-2);
+  const last = candles.at(-1);
+  const gap = (last.open - prev.close) / prev.close;
+  const engulfBull =
+    last.close > last.open && prev.close < prev.open && last.open <= prev.close && last.close >= prev.open;
+  const engulfBear =
+    last.close < last.open && prev.close > prev.open && last.open >= prev.close && last.close <= prev.open;
+  if (gap > 0.01 && engulfBull) {
+    return { name: 'Gap Up + Bullish Engulfing', confidence: 0.6 };
+  }
+  if (gap < -0.01 && engulfBear) {
+    return { name: 'Gap Down + Bearish Engulfing', confidence: 0.6 };
+  }
+  return null;
 }

@@ -1795,3 +1795,28 @@ export function isAwayFromConsolidation(candles = [], entry, lookback = 10) {
   const zoneHigh = high - range * 0.2;
   return entry < zoneLow || entry > zoneHigh;
 }
+
+export function aggregateCandles(candles = [], interval = 5) {
+  if (!Array.isArray(candles) || candles.length === 0) return [];
+  const grouped = [];
+  for (let i = 0; i < candles.length; i += interval) {
+    const chunk = candles.slice(i, i + interval);
+    if (chunk.length === 0) continue;
+    const open = chunk[0].open;
+    const close = chunk[chunk.length - 1].close;
+    const high = Math.max(...chunk.map(c => c.high));
+    const low = Math.min(...chunk.map(c => c.low));
+    const volume = chunk.reduce((s, c) => s + (c.volume || 0), 0);
+    grouped.push({ open, high, low, close, volume });
+  }
+  return grouped;
+}
+
+export function patternConfluenceAcrossTimeframes(candles = [], patternType) {
+  if (!Array.isArray(candles) || candles.length < 10) return false;
+  const lowerPatterns = detectAllPatterns(candles, 1, 5);
+  if (!lowerPatterns.find(p => p.type === patternType)) return false;
+  const agg5 = aggregateCandles(candles, 5);
+  const aggPatterns = detectAllPatterns(agg5, 1, 5);
+  return aggPatterns.some(p => p.type === patternType);
+}

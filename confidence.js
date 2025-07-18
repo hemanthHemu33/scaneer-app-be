@@ -1,5 +1,8 @@
 // confidence.js
 import { getHigherTimeframeData } from './kite.js';
+import { patternConfluenceAcrossTimeframes } from './util.js';
+import { getSector } from './sectors.js';
+import { countSectorSignals } from './sectorSignals.js';
 
 // In-memory strategy statistics { symbol: { strategy: { wins, trades } } }
 export const strategyStats = {};
@@ -83,6 +86,7 @@ export function evaluateCoreFactors(context = {}, pattern = {}) {
     ema9 = 0,
     ema21 = 0,
     ema50 = 0,
+    ema200 = 0,
     rsi = 50,
     macd = {},
     supertrend = {},
@@ -110,6 +114,9 @@ export function evaluateCoreFactors(context = {}, pattern = {}) {
   if ((direction === 'Long' && ema9 > ema21) || (direction === 'Short' && ema9 < ema21)) confirm += 1;
   scores.push(confirm / 3);
 
+  const confluence = patternConfluenceAcrossTimeframes(context.candles || [], pattern.type);
+  scores.push(confluence ? 1 : 0.5);
+
   if (typeof pattern.strength === 'number') scores.push(Math.min(pattern.strength / 3, 1));
   else scores.push(0.5);
 
@@ -134,6 +141,12 @@ export function evaluateCoreFactors(context = {}, pattern = {}) {
     }
   }
   scores.push(keyLevel);
+
+  if (ema200 && vwap && Math.abs(vwap - ema200) / ema200 < 0.01 && Math.abs(price - vwap) / price < 0.005) {
+    scores.push(1);
+  } else {
+    scores.push(0.5);
+  }
 
   const higherOk =
     (direction === 'Long' && hSuper.signal === 'Buy' && price >= hEMA50) ||
@@ -161,6 +174,7 @@ export async function evaluateTrendConfidence(context = {}, pattern = {}) {
     symbol,
     quality = 0.5,
     history = {},
+    candles = [],
   } = context;
 
   const {
@@ -267,6 +281,8 @@ export async function evaluateTrendConfidence(context = {}, pattern = {}) {
       (s) => Date.now() - s.timestamp < 5 * 60 * 1000 && s.direction === pattern.direction
     ).length;
   }
+  const sector = getSector(symbol);
+  confirmations += countSectorSignals(sector, pattern.direction);
   const baseScore = confidence === 'High' ? 0.8 : confidence === 'Medium' ? 0.6 : 0.4;
   const hitRate = getStrategyHitRate(symbol, pattern.type);
   const dynamicScore = computeConfidenceScore({
@@ -277,7 +293,7 @@ export async function evaluateTrendConfidence(context = {}, pattern = {}) {
   });
   const finalScore = (baseScore + dynamicScore) / 2;
   const core = evaluateCoreFactors(
-    { features, last, rvol: features.rvol, higherTimeframe: higherTF },
+    { features, last, rvol: features.rvol, higherTimeframe: higherTF, candles },
     pattern
   );
   const combined = finalScore * 0.8 + core.score * 0.2;
