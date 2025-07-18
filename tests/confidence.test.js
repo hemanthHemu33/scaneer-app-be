@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { computeConfidenceScore } from '../confidence.js';
+import { computeConfidenceScore, recordStrategyResult, getRecentAccuracy } from '../confidence.js';
 
 test('computeConfidenceScore blends factors', () => {
   const score = computeConfidenceScore({
@@ -96,4 +96,12 @@ test('evaluateTrendConfidence low on weak volume', async () => {
   );
   assert.equal(res.confidence, 'Low');
   kiteMock.restore();
+});
+
+test('getRecentAccuracy computes recent win rate', () => {
+  recordStrategyResult('AAA', 'trend', true);
+  recordStrategyResult('AAA', 'trend', false);
+  recordStrategyResult('AAA', 'trend', true);
+  const acc = getRecentAccuracy('AAA', 'trend');
+  assert.ok(acc > 0 && acc <= 1);
 });

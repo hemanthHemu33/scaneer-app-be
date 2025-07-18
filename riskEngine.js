@@ -9,6 +9,7 @@ import {
   validateVolumeSpike,
   validateVolatilitySlippage,
 } from './riskValidator.js';
+import { calculateStdDev, calculateZScore } from './util.js';
 
 function getWeekNumber(d = new Date()) {
   const oneJan = new Date(d.getFullYear(), 0, 1);
@@ -223,6 +224,48 @@ export function isSignalValid(signal, ctx = {}) {
 
   const conf = signal.confidence ?? signal.confidenceScore ?? 0;
   if (typeof ctx.minConfidence === 'number' && conf < ctx.minConfidence)
+    return false;
+  if (ctx.entryStdDev === undefined && Array.isArray(ctx.prices)) {
+    ctx.entryStdDev = calculateStdDev(
+      ctx.prices,
+      ctx.stdLookback || Math.min(5, ctx.prices.length)
+    );
+  }
+  if (ctx.zScore === undefined && Array.isArray(ctx.prices)) {
+    ctx.zScore = calculateZScore(
+      ctx.prices,
+      ctx.zLookback || Math.min(20, ctx.prices.length)
+    );
+  }
+  if (
+    typeof ctx.minMlConfidence === 'number' &&
+    typeof ctx.mlConfidence === 'number' &&
+    ctx.mlConfidence < ctx.minMlConfidence
+  )
+    return false;
+  if (
+    typeof ctx.minBacktestWinRate === 'number' &&
+    typeof ctx.backtestWinRate === 'number' &&
+    ctx.backtestWinRate < ctx.minBacktestWinRate
+  )
+    return false;
+  if (
+    typeof ctx.minRecentAccuracy === 'number' &&
+    typeof ctx.recentAccuracy === 'number' &&
+    ctx.recentAccuracy < ctx.minRecentAccuracy
+  )
+    return false;
+  if (
+    typeof ctx.maxEntryStdDev === 'number' &&
+    typeof ctx.entryStdDev === 'number' &&
+    ctx.entryStdDev > ctx.maxEntryStdDev
+  )
+    return false;
+  if (
+    typeof ctx.minZScoreAbs === 'number' &&
+    typeof ctx.zScore === 'number' &&
+    Math.abs(ctx.zScore) < ctx.minZScoreAbs
+  )
     return false;
   if (
     typeof ctx.maxRiskScore === 'number' &&
