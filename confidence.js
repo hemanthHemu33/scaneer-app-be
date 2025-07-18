@@ -49,6 +49,83 @@ export function computeConfidenceScore({
   return Math.max(0, Math.min(score, 1));
 }
 
+export function evaluateCoreFactors(context = {}, pattern = {}) {
+  const {
+    features = {},
+    last = {},
+    rvol = 1,
+    higherTimeframe = {},
+    retested = false,
+  } = context;
+
+  const {
+    ema9 = 0,
+    ema21 = 0,
+    ema50 = 0,
+    rsi = 50,
+    macd = {},
+    supertrend = {},
+    vwap,
+    pivot = {},
+    fibRetracements = {},
+  } = features;
+
+  const { ema50: hEMA50 = 0, supertrend: hSuper = {} } = higherTimeframe;
+
+  const direction = pattern.direction;
+  const price = last?.close ?? pattern.breakout ?? 0;
+
+  const scores = [];
+
+  const up = ema9 > ema21 && ema21 > ema50;
+  const down = ema9 < ema21 && ema21 < ema50;
+  scores.push((direction === 'Long' && up) || (direction === 'Short' && down) ? 1 : 0);
+
+  let confirm = 0;
+  if ((direction === 'Long' && rsi >= 50) || (direction === 'Short' && rsi <= 50)) confirm += 1;
+  if (macd && typeof macd.histogram === 'number') {
+    if ((direction === 'Long' && macd.histogram > 0) || (direction === 'Short' && macd.histogram < 0)) confirm += 1;
+  }
+  if ((direction === 'Long' && ema9 > ema21) || (direction === 'Short' && ema9 < ema21)) confirm += 1;
+  scores.push(confirm / 3);
+
+  if (typeof pattern.strength === 'number') scores.push(Math.min(pattern.strength / 3, 1));
+  else scores.push(0.5);
+
+  scores.push(Math.min((rvol || 1) / 2, 1));
+
+  if (pattern.type === 'Breakout') scores.push(retested ? 1 : 0);
+  else scores.push(0.5);
+
+  let keyLevel = 0;
+  if (vwap && price) {
+    if (Math.abs(price - vwap) / price < 0.005) keyLevel = 1;
+  }
+  if (!keyLevel && pivot?.pp && price) {
+    if (Math.abs(price - pivot.pp) / price < 0.005) keyLevel = 1;
+  }
+  if (!keyLevel && fibRetracements && price) {
+    for (const lvl of Object.values(fibRetracements)) {
+      if (Math.abs(price - lvl) / price < 0.01) {
+        keyLevel = 1;
+        break;
+      }
+    }
+  }
+  scores.push(keyLevel);
+
+  const higherOk =
+    (direction === 'Long' && hSuper.signal === 'Buy' && price >= hEMA50) ||
+    (direction === 'Short' && hSuper.signal === 'Sell' && price <= hEMA50);
+  scores.push(higherOk ? 1 : 0.5);
+
+  const stOk = supertrend.signal === (direction === 'Long' ? 'Buy' : 'Sell');
+  scores.push(stOk ? 1 : 0);
+
+  const total = scores.reduce((a, b) => a + b, 0);
+  return { score: total / scores.length };
+}
+
 export async function evaluateTrendConfidence(context = {}, pattern = {}) {
   const {
     features = {},
@@ -178,8 +255,13 @@ export async function evaluateTrendConfidence(context = {}, pattern = {}) {
     date: new Date(),
   });
   const finalScore = (baseScore + dynamicScore) / 2;
+  const core = evaluateCoreFactors(
+    { features, last, rvol: features.rvol, higherTimeframe: higherTF },
+    pattern
+  );
+  const combined = finalScore * 0.8 + core.score * 0.2;
   const finalConfidence =
-    finalScore >= 0.75 ? 'High' : finalScore >= 0.5 ? 'Medium' : 'Low';
+    combined >= 0.75 ? 'High' : combined >= 0.5 ? 'Medium' : 'Low';
 
-  return { confidence: finalConfidence, score: finalScore };
+  return { confidence: finalConfidence, score: combined };
 }
