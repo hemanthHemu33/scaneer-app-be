@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { computeConfidenceScore, recordStrategyResult, getRecentAccuracy } from '../confidence.js';
+import { computeConfidenceScore, recordStrategyResult, getRecentAccuracy, applyPenaltyConditions } from '../confidence.js';
 
 test('computeConfidenceScore blends factors', () => {
   const score = computeConfidenceScore({
@@ -21,6 +21,16 @@ test('computeConfidenceScore low factors', () => {
     date: new Date('2023-01-01T15:00:00Z')
   });
   assert.ok(score < 0.5);
+});
+
+test('applyPenaltyConditions reduces score', () => {
+  const base = 0.8;
+  const adjusted = applyPenaltyConditions(base, {
+    doji: true,
+    lowVolume: true,
+    badRR: true,
+  });
+  assert.ok(adjusted < base && adjusted >= 0);
 });
 
 test('evaluateTrendConfidence basic high', async () => {
