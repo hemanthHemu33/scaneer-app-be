@@ -17,7 +17,7 @@ import { candleHistory, symbolTokenMap } from "./dataEngine.js";
 import { evaluateAllStrategies } from "./strategyEngine.js";
 import { evaluateStrategies } from "./strategies.js";
 import { RISK_REWARD_RATIO, calculatePositionSize } from "./positionSizing.js";
-import { isSignalValid } from "./riskEngine.js";
+import { isSignalValid, riskState } from "./riskEngine.js";
 import { startExitMonitor } from "./exitManager.js";
 import { openPositions, recordExit } from "./portfolioContext.js";
 import { logTrade } from "./tradeLogger.js";
@@ -25,7 +25,7 @@ import {
   marketContext,
   filterStrategiesByRegime,
 } from "./smartStrategySelector.js";
-import { signalQualityScore } from "./confidence.js";
+import { signalQualityScore, applyPenaltyConditions } from "./confidence.js";
 import { sendToExecution } from "./orderExecution.js";
 import { initAccountBalance, getAccountBalance } from "./account.js";
 import { buildSignal } from "./signalBuilder.js";
@@ -324,6 +324,23 @@ export async function analyzeCandles(
 
     signal.expiresAt = toISTISOString(expiresAt);
     signal.ai = null; // Step 8: final enrichment placeholder
+
+    const penaltyAdjusted = applyPenaltyConditions(signal.confidenceScore, {
+      doji: wickPct > 0.6 || !strongPriceAction,
+      lowVolume: liquidity && avgVolume && liquidity < avgVolume * 0.5,
+      againstTrend:
+        (base.direction === "Long" && isDowntrend) ||
+        (base.direction === "Short" && isUptrend),
+      lateSession: new Date(signal.generatedAt).getHours() >= 15,
+      signalOverload: riskState.signalCount > 10,
+      wickHeavy: wickPct > 0.6,
+      badRR: riskReward < 1.5,
+      positionConflict:
+        openPositions.has(symbol) &&
+        openPositions.get(symbol).side !== (base.direction === "Long" ? "buy" : "sell"),
+    });
+    signal.confidence = penaltyAdjusted;
+    signal.confidenceScore = penaltyAdjusted;
 
     const sector = getSector(symbol);
     recordSectorSignal(sector, signal.direction);

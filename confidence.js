@@ -91,6 +91,22 @@ export function computeConfidenceScore({
   return Math.max(0, Math.min(score, 1));
 }
 
+export function applyPenaltyConditions(score = 1, conditions = {}) {
+  let penalty = 0;
+  if (conditions.doji) penalty += 0.1;
+  if (conditions.lowVolume) penalty += 0.1;
+  if (conditions.againstTrend) penalty += 0.1;
+  if (conditions.lateSession) penalty += 0.05;
+  if (conditions.signalOverload) penalty += 0.05;
+  if (conditions.backToBack) penalty += 0.05;
+  if (conditions.wickHeavy) penalty += 0.05;
+  if (conditions.badRR) penalty += 0.1;
+  if (conditions.eventRisk) penalty += 0.1;
+  if (conditions.positionConflict) penalty += 0.1;
+  const factor = Math.max(0, 1 - penalty);
+  return Math.max(0, score * factor);
+}
+
 export function evaluateCoreFactors(context = {}, pattern = {}) {
   const {
     features = {},
