@@ -137,6 +137,7 @@ export async function analyzeCandles(
       ema50,
       ema200,
       rsi,
+      adx,
       supertrend,
       vwap,
       atr: atrValue = 1,
@@ -164,6 +165,9 @@ export async function analyzeCandles(
 
     const isUptrend = ema9 > ema21 && ema21 > ema50;
     const isDowntrend = ema9 < ema21 && ema21 < ema50;
+    const vwapParticipation = vwap
+      ? 1 - Math.abs(last.close - vwap) / last.close
+      : 1;
 
     // ⚠️ Momentum filter
     if (rsi > 45 && rsi < 55 && atrValue < 1) {
@@ -224,11 +228,16 @@ export async function analyzeCandles(
     const riskOk = isSignalValid(preliminary, {
       avgAtr: atrValue,
       indexTrend: isUptrend ? "up" : isDowntrend ? "down" : "sideways",
+      indexVolatility: marketContext.vix,
       timeSinceSignal: 0,
       volume: liquidity,
       avgVolume,
       currentPrice: liveTick ? liveTick.last_price : last.close,
       marketRegime: marketContext.regime,
+      vwapParticipation,
+      rsi,
+      adx,
+      requireMomentum: true,
       minATR: FILTERS.atrThreshold,
       maxATR: FILTERS.maxATR,
       minVolatility: FILTERS.atrThreshold,
@@ -243,6 +252,13 @@ export async function analyzeCandles(
       minRR: RISK_REWARD_RATIO,
       minLiquidity: FILTERS.minLiquidity,
       minVolumeRatio: 0.5,
+      minVwapParticipation: 0.98,
+      maxIndexVolatility: 20,
+      blockWatchlist: true,
+      addToWatchlist: false,
+      maxSignalAgeMinutes: 5,
+      strategyFailWindowMs: 15 * 60 * 1000,
+      minSLDistancePct: 0.001,
     });
     if (!riskOk) return null;
 

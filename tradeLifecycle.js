@@ -85,6 +85,8 @@ export async function executeSignal(signal, opts = {}) {
       preventOverlap: true,
       openSymbols: Array.from(openPositions.keys()),
       openPositionsMap: openPositions,
+      addToWatchlist: true,
+      blockWatchlist: true,
     })
   )
     return null;

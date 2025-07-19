@@ -63,6 +63,9 @@ const riskState = {
 };
 const duplicateMap = new Map();
 const correlationMap = new Map();
+const watchList = new Set();
+const timeBuckets = new Map();
+const strategyFailMap = new Map();
 
 export function resetRiskState() {
   Object.assign(riskState, defaultState, {
@@ -77,9 +80,12 @@ export function resetRiskState() {
   riskState.tradesPerSector = new Map();
   duplicateMap.clear();
   correlationMap.clear();
+  watchList.clear();
+  timeBuckets.clear();
+  strategyFailMap.clear();
 }
 
-export function recordTradeResult({ pnl = 0, risk = 0, symbol, sector }) {
+export function recordTradeResult({ pnl = 0, risk = 0, symbol, sector, strategy }) {
   recordTradeExecution({ symbol, sector });
   const loss = pnl < 0 ? Math.abs(pnl) : 0;
   riskState.dailyLoss += loss;
@@ -92,6 +98,9 @@ export function recordTradeResult({ pnl = 0, risk = 0, symbol, sector }) {
   if (pnl < 0) riskState.consecutiveLosses += 1;
   else riskState.consecutiveLosses = 0;
   riskState.lastTradeTime = Date.now();
+  if (pnl < 0 && symbol && strategy) {
+    strategyFailMap.set(`${symbol}-${strategy}`, Date.now());
+  }
   if (
     riskState.dailyLoss >= riskState.maxDailyLoss ||
     (riskState.equityPeak > 0 &&
@@ -106,6 +115,7 @@ export function recordTradeExecution({ symbol, sector }) {
   if (symbol) {
     const c = riskState.tradesPerInstrument.get(symbol) || 0;
     riskState.tradesPerInstrument.set(symbol, c + 1);
+    watchList.add(symbol);
   }
   const sec = sector || 'GEN';
   const sc = riskState.tradesPerSector.get(sec) || 0;
@@ -130,6 +140,20 @@ export function isSignalValid(signal, ctx = {}) {
 
   riskState.signalCount += 1;
   if (riskState.systemPaused) return false;
+  const bucketMs = ctx.timeBucketMs || 60 * 1000;
+  const bucket = Math.floor(now / bucketMs);
+  const count = timeBuckets.get(bucket) || 0;
+  if (
+    typeof ctx.maxSimultaneousSignals === 'number' &&
+    count >= ctx.maxSimultaneousSignals
+  )
+    return false;
+  timeBuckets.set(bucket, count + 1);
+  if (timeBuckets.size > 10) {
+    for (const [k] of timeBuckets) {
+      if (k < bucket - 10) timeBuckets.delete(k);
+    }
+  }
   const maxSignals = ctx.maxSignalsPerDay ?? riskState.maxSignalsPerDay;
   if (riskState.signalCount > maxSignals) return false;
   if (
@@ -147,6 +171,26 @@ export function isSignalValid(signal, ctx = {}) {
     const interval = ctx.signalFloodThrottleMs || 60000;
     if (now - riskState.lastTradeTime < interval) return false;
   }
+
+  if (
+    typeof ctx.indexVolatility === 'number' &&
+    typeof ctx.maxIndexVolatility === 'number' &&
+    ctx.indexVolatility > ctx.maxIndexVolatility
+  )
+    return false;
+  if (
+    typeof ctx.vwapParticipation === 'number' &&
+    typeof ctx.minVwapParticipation === 'number' &&
+    ctx.vwapParticipation < ctx.minVwapParticipation
+  )
+    return false;
+  if (ctx.negativeNews) return false;
+  if (
+    ctx.maxSignalAgeMinutes &&
+    signal.generatedAt &&
+    now - new Date(signal.generatedAt).getTime() > ctx.maxSignalAgeMinutes * 60 * 1000
+  )
+    return false;
 
   const maxLoss = ctx.maxDailyLoss ?? riskState.maxDailyLoss;
   if (riskState.dailyLoss >= maxLoss) return false;
@@ -204,6 +248,14 @@ export function isSignalValid(signal, ctx = {}) {
     return false;
 
   const inst = signal.stock || signal.symbol;
+  if (ctx.blockWatchlist && watchList.has(inst)) return false;
+  const stratKey = `${inst}-${signal.algoSignal?.strategy || signal.pattern}`;
+  if (
+    ctx.strategyFailWindowMs &&
+    strategyFailMap.has(stratKey) &&
+    now - strategyFailMap.get(stratKey) < ctx.strategyFailWindowMs
+  )
+    return false;
   const instCount = riskState.tradesPerInstrument.get(inst) || 0;
   const maxPerInst = ctx.maxTradesPerInstrument ?? riskState.maxTradesPerInstrument;
   if (instCount >= maxPerInst) return false;
@@ -234,7 +286,11 @@ export function isSignalValid(signal, ctx = {}) {
   if (ctx.allowPyramiding === false && ctx.hasPositionForSymbol) return false;
 
   const conf = signal.confidence ?? signal.confidenceScore ?? 0;
-  if (typeof ctx.minConfidence === 'number' && conf < ctx.minConfidence)
+  const aiOverride =
+    typeof ctx.aiOverrideThreshold === 'number' &&
+    typeof ctx.mlConfidence === 'number' &&
+    ctx.mlConfidence >= ctx.aiOverrideThreshold;
+  if (typeof ctx.minConfidence === 'number' && conf < ctx.minConfidence && !aiOverride)
     return false;
   if (ctx.entryStdDev === undefined && Array.isArray(ctx.prices)) {
     ctx.entryStdDev = calculateStdDev(
@@ -344,6 +400,15 @@ export function isSignalValid(signal, ctx = {}) {
   )
     return false;
   if (
+    ctx.requireMomentum &&
+    typeof ctx.rsi === 'number' &&
+    ((signal.direction === 'Long' && ctx.rsi < (ctx.minRsi ?? 55)) ||
+      (signal.direction === 'Short' && ctx.rsi > (ctx.maxRsi ?? 45)))
+  )
+    return false;
+  if (ctx.requireMomentum && typeof ctx.adx === 'number' && ctx.adx < (ctx.minAdx ?? 20))
+    return false;
+  if (
     typeof ctx.minRvol === 'number' &&
     typeof (signal.rvol ?? ctx.rvol) === 'number' &&
     (signal.rvol ?? ctx.rvol) < ctx.minRvol
@@ -393,6 +458,12 @@ export function isSignalValid(signal, ctx = {}) {
 
   if (typeof ctx.minATR === 'number' && signal.atr < ctx.minATR) return false;
   if (typeof ctx.maxATR === 'number' && signal.atr > ctx.maxATR) return false;
+
+  if (
+    typeof ctx.minSLDistancePct === 'number' &&
+    Math.abs(signal.entry - signal.stopLoss) / signal.entry < ctx.minSLDistancePct
+  )
+    return false;
 
   const slDist = Math.abs(signal.entry - signal.stopLoss);
   const lossPct = slDist / signal.entry;
@@ -450,7 +521,8 @@ export function isSignalValid(signal, ctx = {}) {
     correlationMap.set(group, now);
   }
 
+  if (ctx.addToWatchlist) watchList.add(inst);
   return true;
 }
 
-export { riskState };
+export { riskState, watchList };
