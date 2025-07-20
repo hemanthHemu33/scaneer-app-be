@@ -1,5 +1,6 @@
 import { kc, initSession, tickBuffer, candleHistory, symbolTokenMap } from './kite.js';
 import db from './db.js';
+import { logError } from './logger.js';
 
 export function getLiveTicks(token) {
   return tickBuffer[token] || [];
@@ -33,7 +34,7 @@ export async function getFundamentals(symbol) {
   try {
     return await db.collection('fundamentals').findOne({ symbol });
   } catch (err) {
-    console.error('Fundamental fetch error', err.message);
+    logError('Fundamental fetch error', err);
     return null;
   }
 }
@@ -42,7 +43,7 @@ export async function getNews(symbol) {
   try {
     return await db.collection('news').find({ symbol }).toArray();
   } catch (err) {
-    console.error('News fetch error', err.message);
+    logError('News fetch error', err);
     return [];
   }
 }

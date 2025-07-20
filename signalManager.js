@@ -2,6 +2,7 @@ export const activeSignals = new Map(); // symbol -> Map<signalId, info>
 import { sendNotification } from './telegram.js';
 import { logSignalExpired, logSignalMutation } from './auditLogger.js';
 import db from './db.js';
+import { logError } from './logger.js';
 
 export async function addSignal(signal) {
   const symbol = signal.stock || signal.symbol;
@@ -36,7 +37,7 @@ export async function addSignal(signal) {
           { upsert: true }
         );
       } catch (err) {
-        console.error('DB update failed', err.message);
+        logError('DB update failed', err);
       }
     }
   }
@@ -76,7 +77,7 @@ export async function addSignal(signal) {
       generatedAt: signal.generatedAt ? new Date(signal.generatedAt) : new Date(),
     });
   } catch (err) {
-    console.error('DB insert failed', err.message);
+    logError('DB insert failed', err);
   }
   return true;
 }
@@ -103,7 +104,7 @@ export async function checkExpiries(now = Date.now()) {
             { $set: { status: 'expired', updatedAt: new Date(now) } }
           );
         } catch (err) {
-          console.error('DB expiry update failed', err.message);
+          logError('DB expiry update failed', err);
         }
       }
     }
