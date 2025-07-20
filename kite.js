@@ -869,7 +869,7 @@ async function emitUnifiedSignal(signal, source, io) {
   io.emit("tradeSignal", signal);
   logTrade(signal);
   sendSignal(signal);
-  addSignal(signal);
+  await addSignal(signal);
   logSignalCreated(signal, {
     vix: marketContext.vix,
     regime: marketContext.regime,
