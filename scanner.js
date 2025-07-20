@@ -31,6 +31,7 @@ import { initAccountBalance, getAccountBalance } from "./account.js";
 import { buildSignal } from "./signalBuilder.js";
 import { getSector } from "./sectors.js";
 import { recordSectorSignal } from "./sectorSignals.js";
+import { logSignalRejected } from "./auditLogger.js";
 // 📊 Signal history tracking
 const signalHistory = {};
 let accountBalance = 0;
@@ -219,7 +220,7 @@ export async function analyzeCandles(
       liquidity,
     };
 
-    const riskOk = isSignalValid(preliminary, {
+    const riskCtx = {
       avgAtr: atrValue,
       indexTrend: isUptrend ? "up" : isDowntrend ? "down" : "sideways",
       indexVolatility: marketContext.vix,
@@ -253,8 +254,21 @@ export async function analyzeCandles(
       maxSignalAgeMinutes: 5,
       strategyFailWindowMs: 15 * 60 * 1000,
       minSLDistancePct: 0.001,
-    });
-    if (!riskOk) return null;
+    };
+    const riskOk = isSignalValid(preliminary, riskCtx);
+    if (!riskOk) {
+      try {
+        await logSignalRejected(
+          `${symbol}-${Date.now()}`,
+          "riskValidationFail",
+          riskCtx,
+          preliminary
+        );
+      } catch (e) {
+        logError("logSignalRejected", e);
+      }
+      return null;
+    }
 
     // Step 6: Position sizing after risk filter
     const baseRisk = Math.abs(base.entry - base.stopLoss);

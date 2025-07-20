@@ -2,6 +2,17 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 process.env.NODE_ENV = 'test';
 
+const auditMock = test.mock.module('../auditLogger.js', {
+  namedExports: {
+    logSignalRejected: () => {},
+    logSignalExpired: () => {},
+    logSignalMutation: () => {},
+    logSignalCreated: () => {},
+    logBacktestReference: () => {},
+    getLogs: () => ({})
+  }
+});
+
 const kiteMock = test.mock.module('../kite.js', {
   namedExports: {
     getHigherTimeframeData: async () => ({
@@ -106,5 +117,6 @@ test('analyzeCandles returns a signal for valid data', async () => {
   kiteMock.restore();
   featureMock.restore();
   utilMock.restore();
+  auditMock.restore();
   dbMock.restore();
 });
