@@ -2,16 +2,37 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 const auditMock = test.mock.module('../auditLogger.js', {
-  namedExports: { logSignalRejected: () => {} }
+  namedExports: {
+    logSignalRejected: () => {},
+    logSignalExpired: () => {},
+    logSignalMutation: () => {},
+    logSignalCreated: () => {},
+    logBacktestReference: () => {},
+    getLogs: () => ({}),
+  }
+});
+const kiteMock = test.mock.module('../kite.js', {
+  namedExports: {
+    getMA: () => null,
+    onOrderUpdate: () => {},
+    orderEvents: { on: () => {} }
+  }
 });
 const dbMock = test.mock.module('../db.js', {
-  defaultExport: {},
+  defaultExport: {
+    collection: () => ({
+      find: () => ({ toArray: async () => [] }),
+      deleteMany: async () => {},
+      insertMany: async () => {},
+    }),
+  },
   namedExports: { connectDB: async () => ({}) }
 });
 
 const { validateRR, getMinRRForStrategy } = await import('../riskValidator.js');
 
 auditMock.restore();
+kiteMock.restore();
 dbMock.restore();
 
 test('validateRR respects strategy thresholds', () => {

@@ -5,7 +5,7 @@ const auditMock = test.mock.module('../auditLogger.js', {
   namedExports: { logSignalExpired: () => {}, logSignalMutation: () => {} }
 });
 const dbMock = test.mock.module('../db.js', {
-  defaultExport: {},
+  defaultExport: { collection: () => ({ updateOne: async () => {} }) },
   namedExports: { connectDB: async () => ({}) }
 });
 
@@ -26,9 +26,9 @@ const signal = {
   signalId: 'sig1',
 };
 
-addSignal(signal);
+await addSignal(signal);
 
-checkExpiries(now + 2000);
+await checkExpiries(now + 2000);
 
 test('signal expires after expiry time', () => {
   const sigMap = activeSignals.get('TEST');

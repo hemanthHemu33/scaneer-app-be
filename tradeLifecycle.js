@@ -1,11 +1,12 @@
 // tradeLifecycle.js
 import { sendOrder, cancelOrder, getAllOrders } from './orderExecution.js';
-import { isSignalValid } from './riskEngine.js';
+import { isSignalValid, recordTradeExecution } from './riskEngine.js';
 import { calculatePositionSize } from './positionSizing.js';
 import {
   checkExposureLimits,
   preventReEntry,
   resolveSignalConflicts,
+  openPositions,
 } from './portfolioContext.js';
 
 /**
@@ -80,6 +81,12 @@ export async function executeSignal(signal, opts = {}) {
       ...(opts.market || {}),
       tradeValue,
       openPositionsCount: opts.openPositionsCount,
+      newTradeQty: qty,
+      preventOverlap: true,
+      openSymbols: Array.from(openPositions.keys()),
+      openPositionsMap: openPositions,
+      addToWatchlist: true,
+      blockWatchlist: true,
     })
   )
     return null;
@@ -89,6 +96,14 @@ export async function executeSignal(signal, opts = {}) {
       tradeValue,
       sector: signal.sector || 'GEN',
       totalCapital: opts.totalCapital || opts.capital || 0,
+      sectorCaps: opts.sectorCaps,
+      exposureCap: opts.exposureCap,
+      instrumentCap: opts.instrumentCap,
+      tradeCapPct: opts.tradeCapPct,
+      reservePct: opts.reservePct,
+      maxMarginPct: opts.maxMarginPct,
+      minTradeCapital: opts.minTradeCapital,
+      maxTradeCapital: opts.maxTradeCapital,
     }) &&
     preventReEntry(symbol) &&
     resolveSignalConflicts({
@@ -110,6 +125,7 @@ export async function executeSignal(signal, opts = {}) {
   if (!entryOrder) return null;
   const filled = await waitForOrderFill(entryOrder.order_id);
   if (!filled) return null;
+  recordTradeExecution({ symbol, sector: signal.sector });
 
   const exitType = signal.direction === 'Long' ? 'SELL' : 'BUY';
   const slOrder = await sendOrder('regular', {

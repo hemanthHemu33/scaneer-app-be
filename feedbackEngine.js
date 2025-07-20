@@ -1,4 +1,5 @@
 import db from './db.js';
+import { recordStrategyResult } from './confidence.js';
 
 // Track strategy weights and historical performance
 const weights = new Map();
@@ -47,6 +48,13 @@ export async function recordSignalOutcome(signal = {}, result = 0) {
   stat.trades += 1;
   if (result > 0) stat.wins += 1;
   stats.set(strategy, stat);
+
+  // keep short-term accuracy per symbol
+  recordStrategyResult(
+    signal.stock || signal.symbol || 'GEN',
+    strategy,
+    result > 0
+  );
 
   updateStrategyWeight(strategy, result > 0 ? 0.1 : -0.1);
 }

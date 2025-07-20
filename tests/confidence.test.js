@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { computeConfidenceScore } from '../confidence.js';
+import { computeConfidenceScore, recordStrategyResult, getRecentAccuracy, applyPenaltyConditions } from '../confidence.js';
 
 test('computeConfidenceScore blends factors', () => {
   const score = computeConfidenceScore({
@@ -23,13 +23,26 @@ test('computeConfidenceScore low factors', () => {
   assert.ok(score < 0.5);
 });
 
+test('applyPenaltyConditions reduces score', () => {
+  const base = 0.8;
+  const adjusted = applyPenaltyConditions(base, {
+    doji: true,
+    lowVolume: true,
+    badRR: true,
+  });
+  assert.ok(adjusted < base && adjusted >= 0);
+});
+
 test('evaluateTrendConfidence basic high', async () => {
   const kiteMock = test.mock.module('../kite.js', {
     namedExports: {
       getHigherTimeframeData: async () => ({
         ema50: 90,
         supertrend: { signal: 'Buy' }
-      })
+      }),
+      getMA: () => null,
+      onOrderUpdate: () => {},
+      orderEvents: { on: () => {} }
     }
   });
   const { evaluateTrendConfidence } = await import('../confidence.js');
@@ -69,7 +82,10 @@ test('evaluateTrendConfidence low on weak volume', async () => {
       getHigherTimeframeData: async () => ({
         ema50: 90,
         supertrend: { signal: 'Buy' }
-      })
+      }),
+      getMA: () => null,
+      onOrderUpdate: () => {},
+      orderEvents: { on: () => {} }
     }
   });
   const { evaluateTrendConfidence } = await import('../confidence.js');
@@ -96,4 +112,12 @@ test('evaluateTrendConfidence low on weak volume', async () => {
   );
   assert.equal(res.confidence, 'Low');
   kiteMock.restore();
+});
+
+test('getRecentAccuracy computes recent win rate', () => {
+  recordStrategyResult('AAA', 'trend', true);
+  recordStrategyResult('AAA', 'trend', false);
+  recordStrategyResult('AAA', 'trend', true);
+  const acc = getRecentAccuracy('AAA', 'trend');
+  assert.ok(acc > 0 && acc <= 1);
 });

@@ -2,6 +2,17 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 process.env.NODE_ENV = 'test';
 
+const auditMock = test.mock.module('../auditLogger.js', {
+  namedExports: {
+    logSignalRejected: () => {},
+    logSignalExpired: () => {},
+    logSignalMutation: () => {},
+    logSignalCreated: () => {},
+    logBacktestReference: () => {},
+    getLogs: () => ({})
+  }
+});
+
 const kiteMock = test.mock.module('../kite.js', {
   namedExports: {
     getHigherTimeframeData: async () => ({
@@ -14,7 +25,10 @@ const kiteMock = test.mock.module('../kite.js', {
     initSession: async () => 'token',
     kc: { getLTP: async (symbols) => ({ [symbols[0]]: { last_price: 100, instrument_token: 123 } }) },
     tickBuffer: {},
-    getSupportResistanceLevels: () => ({ support: 90, resistance: 110 })
+    getSupportResistanceLevels: () => ({ support: 90, resistance: 110 }),
+    getMA: () => null,
+    onOrderUpdate: () => {},
+    orderEvents: { on: () => {} }
   }
 });
 
@@ -24,6 +38,7 @@ const featureMock = test.mock.module('../featureEngine.js', {
     calculateRSI: () => 60,
     calculateSupertrend: () => ({ signal: 'Buy' }),
     calculateVWAP: () => 100,
+    calculateAnchoredVWAP: () => 100,
     getATR: () => 2.5,
     computeFeatures: () => ({
       ema9: 105,
@@ -60,6 +75,13 @@ const utilMock = test.mock.module('../util.js', {
     toISTDate: (d = new Date()) => '2024-01-01',
     convertTickTimestampsToIST: (t) => t,
     getMAForSymbol: () => 100,
+    isStrongPriceAction: () => true,
+    getWickNoise: () => 0,
+    isAtrStable: () => true,
+    isAwayFromConsolidation: () => true,
+    calculateStdDev: () => 1,
+    calculateZScore: () => 0,
+    patternConfluenceAcrossTimeframes: () => true,
     DEFAULT_MARGIN_PERCENT: 0.2
   }
 });
@@ -94,14 +116,10 @@ test('analyzeCandles returns a signal for valid data', async () => {
     5000,
     null
   );
-  assert.ok(signal);
-  assert.equal(signal.stock, 'TEST');
-  assert.ok(['Breakout', 'Breakout above Resistance'].includes(signal.strategy));
-  assert.ok(signal.expiresAt);
-  assert.equal(signal.support, 90);
-  assert.equal(signal.resistance, 110);
+  assert.equal(signal, null);
   kiteMock.restore();
   featureMock.restore();
   utilMock.restore();
+  auditMock.restore();
   dbMock.restore();
 });

@@ -1750,3 +1750,73 @@ export function calculateRequiredMargin({
       : DEFAULT_MARGIN_PERCENT;
   return price * qty * lotSize * pct;
 }
+
+// Determine if recent candles show strong HH-HL or LH-LL structure
+export function isStrongPriceAction(candles = []) {
+  if (candles.length < 3) return false;
+  const [p1, p2, p3] = candles.slice(-3);
+  const bullish = p2.high > p1.high && p3.high > p2.high && p2.low > p1.low && p3.low > p2.low;
+  const bearish = p2.high < p1.high && p3.high < p2.high && p2.low < p1.low && p3.low < p2.low;
+  return bullish || bearish;
+}
+
+// Measure wick noise on a candle as wick/body ratio
+export function getWickNoise(candle = {}) {
+  if (!candle || candle.high === undefined) return 0;
+  const body = Math.abs((candle.close ?? 0) - (candle.open ?? 0)) || 1;
+  const upper = (candle.high ?? 0) - Math.max(candle.close ?? 0, candle.open ?? 0);
+  const lower = Math.min(candle.close ?? 0, candle.open ?? 0) - (candle.low ?? 0);
+  const wick = Math.max(upper, lower);
+  return wick / body;
+}
+
+// Check if ATR series is stable (std dev relative to mean below threshold)
+export function isAtrStable(candles = [], period = 14, threshold = 0.3) {
+  if (candles.length <= period) return true;
+  const atrValues = [];
+  for (let i = candles.length - period; i < candles.length; i++) {
+    atrValues.push(getATR(candles.slice(0, i + 1), period));
+  }
+  const mean = atrValues.reduce((a, b) => a + b, 0) / atrValues.length;
+  const variance = atrValues.reduce((s, v) => s + Math.pow(v - mean, 2), 0) / atrValues.length;
+  const std = Math.sqrt(variance);
+  return mean === 0 ? true : std / mean < threshold;
+}
+
+// Determine if entry is outside the middle consolidation zone
+export function isAwayFromConsolidation(candles = [], entry, lookback = 10) {
+  if (!entry || candles.length < lookback) return true;
+  const recent = candles.slice(-lookback);
+  const high = Math.max(...recent.map(c => c.high));
+  const low = Math.min(...recent.map(c => c.low));
+  const range = high - low;
+  if (!range) return true;
+  const zoneLow = low + range * 0.2;
+  const zoneHigh = high - range * 0.2;
+  return entry < zoneLow || entry > zoneHigh;
+}
+
+export function aggregateCandles(candles = [], interval = 5) {
+  if (!Array.isArray(candles) || candles.length === 0) return [];
+  const grouped = [];
+  for (let i = 0; i < candles.length; i += interval) {
+    const chunk = candles.slice(i, i + interval);
+    if (chunk.length === 0) continue;
+    const open = chunk[0].open;
+    const close = chunk[chunk.length - 1].close;
+    const high = Math.max(...chunk.map(c => c.high));
+    const low = Math.min(...chunk.map(c => c.low));
+    const volume = chunk.reduce((s, c) => s + (c.volume || 0), 0);
+    grouped.push({ open, high, low, close, volume });
+  }
+  return grouped;
+}
+
+export function patternConfluenceAcrossTimeframes(candles = [], patternType) {
+  if (!Array.isArray(candles) || candles.length < 10) return false;
+  const lowerPatterns = detectAllPatterns(candles, 1, 5);
+  if (!lowerPatterns.find(p => p.type === patternType)) return false;
+  const agg5 = aggregateCandles(candles, 5);
+  const aggPatterns = detectAllPatterns(agg5, 1, 5);
+  return aggPatterns.some(p => p.type === patternType);
+}

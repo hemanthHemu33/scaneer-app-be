@@ -1,8 +1,21 @@
 // confidence.js
 import { getHigherTimeframeData } from './kite.js';
+import { patternConfluenceAcrossTimeframes } from './util.js';
+import { getSector } from './sectors.js';
+import { countSectorSignals } from './sectorSignals.js';
 
 // In-memory strategy statistics { symbol: { strategy: { wins, trades } } }
 export const strategyStats = {};
+// Track last 10 results per strategy for short-term accuracy
+export const recentStrategyResults = {};
+
+function _pushRecent(symbol, strategy, win) {
+  if (!recentStrategyResults[symbol]) recentStrategyResults[symbol] = {};
+  const arr = recentStrategyResults[symbol][strategy] || [];
+  arr.push(win ? 1 : 0);
+  if (arr.length > 10) arr.shift();
+  recentStrategyResults[symbol][strategy] = arr;
+}
 
 export function recordStrategyResult(symbol, strategy, win) {
   if (!strategyStats[symbol]) strategyStats[symbol] = {};
@@ -10,12 +23,20 @@ export function recordStrategyResult(symbol, strategy, win) {
   stat.trades += 1;
   if (win) stat.wins += 1;
   strategyStats[symbol][strategy] = stat;
+  _pushRecent(symbol, strategy, win);
 }
 
 export function getStrategyHitRate(symbol, strategy) {
   const stat = strategyStats[symbol]?.[strategy];
   if (!stat || stat.trades === 0) return 0.5;
   return stat.wins / stat.trades;
+}
+
+export function getRecentAccuracy(symbol, strategy) {
+  const arr = recentStrategyResults[symbol]?.[strategy];
+  if (!arr || arr.length === 0) return 0.5;
+  const wins = arr.reduce((a, b) => a + b, 0);
+  return wins / arr.length;
 }
 
 export function timeOfDayScore(date = new Date()) {
@@ -29,10 +50,31 @@ export function confirmationScore(count = 0) {
   return Math.min(count / 3, 1); // saturate at 3
 }
 
-export function signalQualityScore({ atr, rvol }) {
-  const atrScore = Math.min(atr / 2, 1); // ATR around 2 considered strong
-  const volumeScore = Math.min(rvol / 2, 1); // RVOL 2 or higher is strong
-  return (atrScore + volumeScore) / 2;
+export function signalQualityScore({
+  atr,
+  rvol,
+  strongPriceAction = false,
+  cleanBody = true,
+  rrRatio = 1,
+  atrStable = true,
+  awayFromConsolidation = true,
+} = {}) {
+  const atrScore = Math.min(atr / 2, 1);
+  const volumeScore = Math.min(rvol / 2, 1);
+  const priceActionScore = strongPriceAction ? 1 : 0.5;
+  const wickScore = cleanBody ? 1 : 0.5;
+  const rrScore = Math.min(rrRatio / 3, 1);
+  const stabilityScore = atrStable ? 1 : 0.5;
+  const consolidationScore = awayFromConsolidation ? 1 : 0.5;
+  return (
+    atrScore * 0.2 +
+    volumeScore * 0.2 +
+    priceActionScore * 0.2 +
+    wickScore * 0.1 +
+    rrScore * 0.2 +
+    stabilityScore * 0.05 +
+    consolidationScore * 0.05
+  );
 }
 
 export function computeConfidenceScore({
@@ -49,6 +91,109 @@ export function computeConfidenceScore({
   return Math.max(0, Math.min(score, 1));
 }
 
+export function applyPenaltyConditions(score = 1, conditions = {}) {
+  let penalty = 0;
+  if (conditions.doji) penalty += 0.1;
+  if (conditions.lowVolume) penalty += 0.1;
+  if (conditions.againstTrend) penalty += 0.1;
+  if (conditions.lateSession) penalty += 0.05;
+  if (conditions.signalOverload) penalty += 0.05;
+  if (conditions.backToBack) penalty += 0.05;
+  if (conditions.wickHeavy) penalty += 0.05;
+  if (conditions.badRR) penalty += 0.1;
+  if (conditions.eventRisk) penalty += 0.1;
+  if (conditions.positionConflict) penalty += 0.1;
+  const factor = Math.max(0, 1 - penalty);
+  return Math.max(0, score * factor);
+}
+
+export function evaluateCoreFactors(context = {}, pattern = {}) {
+  const {
+    features = {},
+    last = {},
+    rvol = 1,
+    higherTimeframe = {},
+    retested = false,
+  } = context;
+
+  const {
+    ema9 = 0,
+    ema21 = 0,
+    ema50 = 0,
+    ema200 = 0,
+    rsi = 50,
+    macd = {},
+    supertrend = {},
+    vwap,
+    pivot = {},
+    fibRetracements = {},
+  } = features;
+
+  const { ema50: hEMA50 = 0, supertrend: hSuper = {} } = higherTimeframe;
+
+  const direction = pattern.direction;
+  const price = last?.close ?? pattern.breakout ?? 0;
+
+  const scores = [];
+
+  const up = ema9 > ema21 && ema21 > ema50;
+  const down = ema9 < ema21 && ema21 < ema50;
+  scores.push((direction === 'Long' && up) || (direction === 'Short' && down) ? 1 : 0);
+
+  let confirm = 0;
+  if ((direction === 'Long' && rsi >= 50) || (direction === 'Short' && rsi <= 50)) confirm += 1;
+  if (macd && typeof macd.histogram === 'number') {
+    if ((direction === 'Long' && macd.histogram > 0) || (direction === 'Short' && macd.histogram < 0)) confirm += 1;
+  }
+  if ((direction === 'Long' && ema9 > ema21) || (direction === 'Short' && ema9 < ema21)) confirm += 1;
+  scores.push(confirm / 3);
+
+  const confluence = patternConfluenceAcrossTimeframes(context.candles || [], pattern.type);
+  scores.push(confluence ? 1 : 0.5);
+
+  if (typeof pattern.strength === 'number') scores.push(Math.min(pattern.strength / 3, 1));
+  else scores.push(0.5);
+
+  scores.push(Math.min((rvol || 1) / 2, 1));
+
+  if (pattern.type === 'Breakout') scores.push(retested ? 1 : 0);
+  else scores.push(0.5);
+
+  let keyLevel = 0;
+  if (vwap && price) {
+    if (Math.abs(price - vwap) / price < 0.005) keyLevel = 1;
+  }
+  if (!keyLevel && pivot?.pp && price) {
+    if (Math.abs(price - pivot.pp) / price < 0.005) keyLevel = 1;
+  }
+  if (!keyLevel && fibRetracements && price) {
+    for (const lvl of Object.values(fibRetracements)) {
+      if (Math.abs(price - lvl) / price < 0.01) {
+        keyLevel = 1;
+        break;
+      }
+    }
+  }
+  scores.push(keyLevel);
+
+  if (ema200 && vwap && Math.abs(vwap - ema200) / ema200 < 0.01 && Math.abs(price - vwap) / price < 0.005) {
+    scores.push(1);
+  } else {
+    scores.push(0.5);
+  }
+
+  const higherOk =
+    (direction === 'Long' && hSuper.signal === 'Buy' && price >= hEMA50) ||
+    (direction === 'Short' && hSuper.signal === 'Sell' && price <= hEMA50);
+  scores.push(higherOk ? 1 : 0.5);
+
+  const stOk = supertrend.signal === (direction === 'Long' ? 'Buy' : 'Sell');
+  scores.push(stOk ? 1 : 0);
+
+  const total = scores.reduce((a, b) => a + b, 0);
+  return { score: total / scores.length };
+}
+
 export async function evaluateTrendConfidence(context = {}, pattern = {}) {
   const {
     features = {},
@@ -63,6 +208,7 @@ export async function evaluateTrendConfidence(context = {}, pattern = {}) {
     symbol,
     quality = 0.5,
     history = {},
+    candles = [],
   } = context;
 
   const {
@@ -169,6 +315,8 @@ export async function evaluateTrendConfidence(context = {}, pattern = {}) {
       (s) => Date.now() - s.timestamp < 5 * 60 * 1000 && s.direction === pattern.direction
     ).length;
   }
+  const sector = getSector(symbol);
+  confirmations += countSectorSignals(sector, pattern.direction);
   const baseScore = confidence === 'High' ? 0.8 : confidence === 'Medium' ? 0.6 : 0.4;
   const hitRate = getStrategyHitRate(symbol, pattern.type);
   const dynamicScore = computeConfidenceScore({
@@ -178,8 +326,13 @@ export async function evaluateTrendConfidence(context = {}, pattern = {}) {
     date: new Date(),
   });
   const finalScore = (baseScore + dynamicScore) / 2;
+  const core = evaluateCoreFactors(
+    { features, last, rvol: features.rvol, higherTimeframe: higherTF, candles },
+    pattern
+  );
+  const combined = finalScore * 0.8 + core.score * 0.2;
   const finalConfidence =
-    finalScore >= 0.75 ? 'High' : finalScore >= 0.5 ? 'Medium' : 'Low';
+    combined >= 0.75 ? 'High' : combined >= 0.5 ? 'Medium' : 'Low';
 
-  return { confidence: finalConfidence, score: finalScore };
+  return { confidence: finalConfidence, score: combined };
 }

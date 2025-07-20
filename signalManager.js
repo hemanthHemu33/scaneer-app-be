@@ -1,8 +1,10 @@
 export const activeSignals = new Map(); // symbol -> Map<signalId, info>
 import { sendNotification } from './telegram.js';
 import { logSignalExpired, logSignalMutation } from './auditLogger.js';
+import db from './db.js';
+import { logError } from './logger.js';
 
-export function addSignal(signal) {
+export async function addSignal(signal) {
   const symbol = signal.stock || signal.symbol;
   const direction = signal.direction || (signal.side === 'buy' ? 'Long' : 'Short');
   const confidence = signal.confidence || signal.confidenceScore || 0;
@@ -28,6 +30,15 @@ export function addSignal(signal) {
         timestamp: new Date().toISOString(),
       });
       sendNotification && sendNotification(`Signal for ${symbol} cancelled due to conflict`);
+      try {
+        await db.collection('active_signals').updateOne(
+          { signalId: info.signal.signalId || info.signal.algoSignal?.signalId },
+          { $set: { status: 'cancelled', updatedAt: new Date() } },
+          { upsert: true }
+        );
+      } catch (err) {
+        logError('DB update failed', err);
+      }
     }
   }
 
@@ -38,10 +49,40 @@ export function addSignal(signal) {
     confidence,
     expiresAt,
   });
+
+  try {
+    await db.collection('active_signals').updateOne(
+      { signalId },
+      {
+        $set: {
+          signal,
+          symbol,
+          direction,
+          confidence,
+          expiresAt: new Date(expiresAt),
+          status: 'active',
+          updatedAt: new Date(),
+        },
+        $setOnInsert: { createdAt: new Date() },
+      },
+      { upsert: true }
+    );
+    await db.collection('signals').insertOne({
+      ...signal,
+      signalId,
+      symbol,
+      direction,
+      confidence,
+      expiresAt: new Date(expiresAt),
+      generatedAt: signal.generatedAt ? new Date(signal.generatedAt) : new Date(),
+    });
+  } catch (err) {
+    logError('DB insert failed', err);
+  }
   return true;
 }
 
-export function checkExpiries(now = Date.now()) {
+export async function checkExpiries(now = Date.now()) {
   for (const [symbol, sigMap] of activeSignals.entries()) {
     for (const [id, info] of sigMap.entries()) {
       if (info.status === 'active' && info.expiresAt && now > info.expiresAt) {
@@ -57,6 +98,14 @@ export function checkExpiries(now = Date.now()) {
             category: 'naturalExpiry',
           }
         );
+        try {
+          await db.collection('active_signals').updateOne(
+            { signalId: info.signal.signalId || info.signal.algoSignal?.signalId },
+            { $set: { status: 'expired', updatedAt: new Date(now) } }
+          );
+        } catch (err) {
+          logError('DB expiry update failed', err);
+        }
       }
     }
   }

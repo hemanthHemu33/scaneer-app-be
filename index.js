@@ -42,6 +42,7 @@ import {
 } from "./smartStrategySelector.js";
 import { selectTopSignal } from "./signalRanker.js";
 import { logTrade } from "./tradeLogger.js";
+import { logError } from "./logger.js";
 
 const app = express();
 const server = http.createServer(app);
@@ -94,7 +95,7 @@ app.post("/addStockSymbol", async (req, res) => {
     const updated = await db.collection("stock_symbols").findOne({});
     res.json({ status: "success", symbols: updated?.symbols || [] });
   } catch (err) {
-    console.error("❌ Error:", err.message);
+    logError("update symbols", err);
     res.status(500).json({ error: "Failed to update symbols" });
   }
 });
@@ -105,7 +106,7 @@ app.get("/stockSymbols", async (req, res) => {
     const stockSymbols = await db.collection("stock_symbols").findOne({});
     res.json(stockSymbols || { symbols: [] });
   } catch (err) {
-    console.error("❌ Error fetching stock symbols:", err);
+    logError("fetching stock symbols", err);
     res.status(500).json({ error: "Failed to fetch stock symbols" });
   }
 });
@@ -124,7 +125,7 @@ app.delete("/stockSymbols/:symbol", async (req, res) => {
       deletedSymbol: symbol.includes(":") ? symbol : `NSE:${symbol}`,
     });
   } catch (err) {
-    console.error("❌ Error deleting stock symbol:", err);
+    logError("delete stock symbol", err);
     res.status(500).json({ error: "Failed to delete stock symbol" });
   }
 });
@@ -149,7 +150,7 @@ app.delete("/reset", async (req, res) => {
     resetInMemoryData();
     res.json({ status: "success", message: "Collections reset successfully" });
   } catch (err) {
-    console.error("❌ Error resetting collections:", err);
+    logError("reset collections", err);
     res.status(500).json({ error: "Failed to reset collections" });
   }
 });
@@ -165,7 +166,7 @@ app.get("/signals", async (req, res) => {
     // res.json(signals);
     res.json({ status: "success", signals: signals });
   } catch (err) {
-    console.error("❌ Error fetching signals:", err);
+    logError("fetching signals", err);
     res.status(500).json({ error: "Failed to fetch signals" });
   }
 });
@@ -191,7 +192,7 @@ app.post("/fetch-intraday-data", async (req, res) => {
     await fetchHistoricalIntradayData(interval, days);
     res.json({ status: "success" });
   } catch (err) {
-    console.error("❌ Intraday fetch error:", err.message);
+    logError("intraday fetch", err);
     res.status(500).json({ error: "Failed to fetch intraday data" });
   }
 });

@@ -1,8 +1,31 @@
 // orderExecutor.js
 import dotenv from "dotenv";
 const logError = (ctx, err) => console.error(`[${ctx}]`, err?.message || err);
-import { kc, symbolTokenMap, historicalCache, initSession } from "./kite.js"; // reuse shared Kite instance and session handler
+import {
+  kc,
+  symbolTokenMap,
+  historicalCache,
+  initSession,
+  onOrderUpdate,
+} from "./kite.js"; // reuse shared Kite instance and session handler
 import { calculateDynamicStopLoss } from "./dynamicRiskModel.js";
+
+// --- Failed signal retry queue ---
+export const retryQueue = [];
+const RETRY_BASE_MS = 60000; // 1 minute
+
+export function queueFailedSignal(signal, opts = {}) {
+  retryQueue.push({
+    signal,
+    opts,
+    attempt: 0,
+    nextAttempt: Date.now() + RETRY_BASE_MS,
+  });
+}
+
+export function getRetryQueue() {
+  return retryQueue;
+}
 
 dotenv.config();
 
@@ -12,6 +35,44 @@ dotenv.config();
 export async function sendOrder(variety = "regular", order) {
   try {
     await initSession();
+
+    // If caller wants a bracket/GTT style order and provided SL/target
+    // parameters, convert to a two-leg GTT order. This helps lock in
+    // both risk and reward in a single request.
+    if (variety === "gtt" || (order.stopLoss && order.target)) {
+      const sl = order.stopLoss ?? order.sl;
+      const target = order.target ?? order.squareoff;
+      if (sl != null && target != null) {
+        const exitType = order.transaction_type === "BUY" ? "SELL" : "BUY";
+        const gttParams = {
+          trigger_type: kc.GTT_TYPE_OCO,
+          exchange: order.exchange,
+          tradingsymbol: order.tradingsymbol,
+          last_price: order.last_price ?? order.price,
+          trigger_values: [sl, target].sort((a, b) => a - b),
+          orders: [
+            {
+              transaction_type: exitType,
+              order_type: "SL",
+              product: order.product,
+              quantity: order.quantity,
+              price: sl,
+            },
+            {
+              transaction_type: exitType,
+              order_type: "LIMIT",
+              product: order.product,
+              quantity: order.quantity,
+              price: target,
+            },
+          ],
+        };
+        const response = await kc.placeGTT(gttParams);
+        console.log("✅ GTT Order placed:", response);
+        return response;
+      }
+    }
+
     const response = await kc.placeOrder({ variety, ...order });
     console.log("✅ Order placed:", response);
     return response;
@@ -312,6 +373,22 @@ export async function placeOrder(signal, maxRetries = 3) {
 // --- Execution facade ---
 export const openTrades = new Map();
 
+// Update openTrades based on real-time order events
+onOrderUpdate((update) => {
+  for (const [id, trade] of openTrades.entries()) {
+    if (id === update.order_id) {
+      trade.status = update.status;
+      if (update.status === "COMPLETE") openTrades.delete(id);
+    } else if (trade.slId === update.order_id) {
+      trade.status = "SL_FILLED";
+      openTrades.delete(id);
+    } else if (trade.targetId === update.order_id) {
+      trade.status = "TARGET_FILLED";
+      openTrades.delete(id);
+    }
+  }
+});
+
 /**
  * Send trading signal to execution layer.
  * In live mode uses placeOrder; in tests/sim mode just logs and tracks.
@@ -321,7 +398,10 @@ export const openTrades = new Map();
  * @returns {Promise<Object|null>}
  */
 export async function sendToExecution(signal, opts = {}) {
-  const simulate = opts.simulate ?? process.env.NODE_ENV === "test";
+  const {
+    simulate = process.env.NODE_ENV === "test",
+    retryOnFail = true,
+  } = opts;
   if (simulate) {
     const simId = `SIM-${Date.now()}`;
     openTrades.set(simId, { signal, status: "SIMULATED" });
@@ -335,6 +415,7 @@ export async function sendToExecution(signal, opts = {}) {
         signal.stock || signal.symbol
       }: required ${marginCheck.required}, available ${marginCheck.available}`
     );
+    if (retryOnFail) queueFailedSignal(signal, opts);
     return null;
   }
   const sizedSignal = { ...signal, qty: marginCheck.quantity };
@@ -346,5 +427,27 @@ export async function sendToExecution(signal, opts = {}) {
       ...orders,
     });
   }
+  if (!orders && retryOnFail) queueFailedSignal(signal, opts);
   return orders;
+}
+
+export async function processRetryQueue() {
+  const now = Date.now();
+  for (const item of [...retryQueue]) {
+    if (item.nextAttempt > now) continue;
+    const result = await sendToExecution(item.signal, {
+      ...item.opts,
+      retryOnFail: false,
+    });
+    if (result) {
+      retryQueue.splice(retryQueue.indexOf(item), 1);
+    } else {
+      item.attempt += 1;
+      item.nextAttempt = now + RETRY_BASE_MS * Math.pow(2, item.attempt);
+    }
+  }
+}
+
+if (process.env.NODE_ENV !== "test") {
+  setInterval(() => processRetryQueue().catch(() => {}), 60 * 1000);
 }

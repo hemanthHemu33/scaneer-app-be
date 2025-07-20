@@ -8,6 +8,7 @@ let client;
 let database;
 
 async function ensureIndexes(db) {
+  if (typeof db.collection !== 'function') return;
   await db.collection("historical_session_data").createIndex({ token: 1, date: 1 });
   await db.collection("signals").createIndex(
     { generatedAt: 1 },
@@ -16,6 +17,10 @@ async function ensureIndexes(db) {
   await db.collection("tick_data").createIndex(
     { timestamp: 1 },
     { expireAfterSeconds: 60 * 60 * 24 }
+  );
+  await db.collection("active_signals").createIndex(
+    { expiresAt: 1 },
+    { expireAfterSeconds: 0 }
   );
 }
 

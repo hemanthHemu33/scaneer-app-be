@@ -6,9 +6,19 @@ const dbMock = test.mock.module('../db.js', {
   defaultExport: {},
   namedExports: { connectDB: async () => ({}) }
 });
-const kiteMock = test.mock.module('../kite.js', { namedExports: { getMA: () => null } });
+const kiteMock = test.mock.module('../kite.js', {
+  namedExports: {
+    getMA: () => null,
+    onOrderUpdate: () => {},
+    orderEvents: { on: () => {} }
+  }
+});
 
-const { calculatePositionSize } = await import('../positionSizing.js');
+const {
+  calculatePositionSize,
+  kellyCriterionSize,
+  equalCapitalAllocation,
+} = await import('../positionSizing.js');
 const { atrStopLossDistance, calculateRequiredMargin } = await import('../util.js');
 
 kiteMock.restore();
@@ -58,5 +68,42 @@ test('min and max qty constraints applied', () => {
     maxQty: 50,
   });
   assert.equal(qty, 50);
+});
+
+test('marginBuffer reduces allowed quantity', () => {
+  const qty = calculatePositionSize({
+    capital: 5000,
+    risk: 1000,
+    slPoints: 10,
+    price: 100,
+    marginPercent: 0.5,
+    marginBuffer: 1.2,
+  });
+  assert.equal(qty, 83);
+});
+
+test('costBuffer scales risk amount', () => {
+  const qty = calculatePositionSize({
+    capital: 10000,
+    risk: 1000,
+    slPoints: 10,
+    costBuffer: 1.1,
+  });
+  assert.equal(qty, 90);
+});
+
+test('kellyCriterionSize computes fraction', () => {
+  const qty = kellyCriterionSize({
+    capital: 100000,
+    winRate: 0.6,
+    winLossRatio: 2,
+    slPoints: 10,
+  });
+  assert.equal(qty, 4000);
+});
+
+test('equalCapitalAllocation splits capital', () => {
+  const qty = equalCapitalAllocation({ capital: 100000, numPositions: 5, price: 100 });
+  assert.equal(qty, 200);
 });
 
