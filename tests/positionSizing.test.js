@@ -6,7 +6,13 @@ const dbMock = test.mock.module('../db.js', {
   defaultExport: {},
   namedExports: { connectDB: async () => ({}) }
 });
-const kiteMock = test.mock.module('../kite.js', { namedExports: { getMA: () => null } });
+const kiteMock = test.mock.module('../kite.js', {
+  namedExports: {
+    getMA: () => null,
+    onOrderUpdate: () => {},
+    orderEvents: { on: () => {} }
+  }
+});
 
 const {
   calculatePositionSize,

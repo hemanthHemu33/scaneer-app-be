@@ -39,7 +39,10 @@ test('evaluateTrendConfidence basic high', async () => {
       getHigherTimeframeData: async () => ({
         ema50: 90,
         supertrend: { signal: 'Buy' }
-      })
+      }),
+      getMA: () => null,
+      onOrderUpdate: () => {},
+      orderEvents: { on: () => {} }
     }
   });
   const { evaluateTrendConfidence } = await import('../confidence.js');
@@ -79,7 +82,10 @@ test('evaluateTrendConfidence low on weak volume', async () => {
       getHigherTimeframeData: async () => ({
         ema50: 90,
         supertrend: { signal: 'Buy' }
-      })
+      }),
+      getMA: () => null,
+      onOrderUpdate: () => {},
+      orderEvents: { on: () => {} }
     }
   });
   const { evaluateTrendConfidence } = await import('../confidence.js');
