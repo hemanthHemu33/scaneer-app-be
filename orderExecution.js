@@ -29,6 +29,44 @@ dotenv.config();
 export async function sendOrder(variety = "regular", order) {
   try {
     await initSession();
+
+    // If caller wants a bracket/GTT style order and provided SL/target
+    // parameters, convert to a two-leg GTT order. This helps lock in
+    // both risk and reward in a single request.
+    if (variety === "gtt" || (order.stopLoss && order.target)) {
+      const sl = order.stopLoss ?? order.sl;
+      const target = order.target ?? order.squareoff;
+      if (sl != null && target != null) {
+        const exitType = order.transaction_type === "BUY" ? "SELL" : "BUY";
+        const gttParams = {
+          trigger_type: kc.GTT_TYPE_OCO,
+          exchange: order.exchange,
+          tradingsymbol: order.tradingsymbol,
+          last_price: order.last_price ?? order.price,
+          trigger_values: [sl, target].sort((a, b) => a - b),
+          orders: [
+            {
+              transaction_type: exitType,
+              order_type: "SL",
+              product: order.product,
+              quantity: order.quantity,
+              price: sl,
+            },
+            {
+              transaction_type: exitType,
+              order_type: "LIMIT",
+              product: order.product,
+              quantity: order.quantity,
+              price: target,
+            },
+          ],
+        };
+        const response = await kc.placeGTT(gttParams);
+        console.log("✅ GTT Order placed:", response);
+        return response;
+      }
+    }
+
     const response = await kc.placeOrder({ variety, ...order });
     console.log("✅ Order placed:", response);
     return response;
