@@ -4,6 +4,23 @@ const logError = (ctx, err) => console.error(`[${ctx}]`, err?.message || err);
 import { kc, symbolTokenMap, historicalCache, initSession } from "./kite.js"; // reuse shared Kite instance and session handler
 import { calculateDynamicStopLoss } from "./dynamicRiskModel.js";
 
+// --- Failed signal retry queue ---
+export const retryQueue = [];
+const RETRY_BASE_MS = 60000; // 1 minute
+
+export function queueFailedSignal(signal, opts = {}) {
+  retryQueue.push({
+    signal,
+    opts,
+    attempt: 0,
+    nextAttempt: Date.now() + RETRY_BASE_MS,
+  });
+}
+
+export function getRetryQueue() {
+  return retryQueue;
+}
+
 dotenv.config();
 
 // kc instance and session handled in kite.js
@@ -321,7 +338,10 @@ export const openTrades = new Map();
  * @returns {Promise<Object|null>}
  */
 export async function sendToExecution(signal, opts = {}) {
-  const simulate = opts.simulate ?? process.env.NODE_ENV === "test";
+  const {
+    simulate = process.env.NODE_ENV === "test",
+    retryOnFail = true,
+  } = opts;
   if (simulate) {
     const simId = `SIM-${Date.now()}`;
     openTrades.set(simId, { signal, status: "SIMULATED" });
@@ -335,6 +355,7 @@ export async function sendToExecution(signal, opts = {}) {
         signal.stock || signal.symbol
       }: required ${marginCheck.required}, available ${marginCheck.available}`
     );
+    if (retryOnFail) queueFailedSignal(signal, opts);
     return null;
   }
   const sizedSignal = { ...signal, qty: marginCheck.quantity };
@@ -346,5 +367,27 @@ export async function sendToExecution(signal, opts = {}) {
       ...orders,
     });
   }
+  if (!orders && retryOnFail) queueFailedSignal(signal, opts);
   return orders;
+}
+
+export async function processRetryQueue() {
+  const now = Date.now();
+  for (const item of [...retryQueue]) {
+    if (item.nextAttempt > now) continue;
+    const result = await sendToExecution(item.signal, {
+      ...item.opts,
+      retryOnFail: false,
+    });
+    if (result) {
+      retryQueue.splice(retryQueue.indexOf(item), 1);
+    } else {
+      item.attempt += 1;
+      item.nextAttempt = now + RETRY_BASE_MS * Math.pow(2, item.attempt);
+    }
+  }
+}
+
+if (process.env.NODE_ENV !== "test") {
+  setInterval(() => processRetryQueue().catch(() => {}), 60 * 1000);
 }
