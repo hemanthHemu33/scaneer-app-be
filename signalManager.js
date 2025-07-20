@@ -66,6 +66,15 @@ export async function addSignal(signal) {
       },
       { upsert: true }
     );
+    await db.collection('signals').insertOne({
+      ...signal,
+      signalId,
+      symbol,
+      direction,
+      confidence,
+      expiresAt: new Date(expiresAt),
+      generatedAt: signal.generatedAt ? new Date(signal.generatedAt) : new Date(),
+    });
   } catch (err) {
     console.error('DB insert failed', err.message);
   }
