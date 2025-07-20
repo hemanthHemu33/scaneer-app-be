@@ -1,7 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-const kiteMock = test.mock.module('../kite.js', { namedExports: { getMA: () => null } });
+const kiteMock = test.mock.module('../kite.js', {
+  namedExports: {
+    getMA: () => null,
+    onOrderUpdate: () => {},
+    orderEvents: { on: () => {} }
+  }
+});
 const featureMock = test.mock.module('../featureEngine.js', {
   namedExports: {
     calculateEMA: () => 0,

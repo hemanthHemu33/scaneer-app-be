@@ -7,7 +7,9 @@ const kiteMock = test.mock.module('../kite.js', {
   namedExports: {
     removeStockSymbol: async (sym) => {
       called = sym;
-    }
+    },
+    onOrderUpdate: () => {},
+    orderEvents: { on: () => {} }
   }
 });
 

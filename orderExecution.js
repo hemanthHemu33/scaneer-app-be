@@ -1,7 +1,13 @@
 // orderExecutor.js
 import dotenv from "dotenv";
 const logError = (ctx, err) => console.error(`[${ctx}]`, err?.message || err);
-import { kc, symbolTokenMap, historicalCache, initSession } from "./kite.js"; // reuse shared Kite instance and session handler
+import {
+  kc,
+  symbolTokenMap,
+  historicalCache,
+  initSession,
+  onOrderUpdate,
+} from "./kite.js"; // reuse shared Kite instance and session handler
 import { calculateDynamicStopLoss } from "./dynamicRiskModel.js";
 
 // --- Failed signal retry queue ---
@@ -366,6 +372,22 @@ export async function placeOrder(signal, maxRetries = 3) {
 
 // --- Execution facade ---
 export const openTrades = new Map();
+
+// Update openTrades based on real-time order events
+onOrderUpdate((update) => {
+  for (const [id, trade] of openTrades.entries()) {
+    if (id === update.order_id) {
+      trade.status = update.status;
+      if (update.status === "COMPLETE") openTrades.delete(id);
+    } else if (trade.slId === update.order_id) {
+      trade.status = "SL_FILLED";
+      openTrades.delete(id);
+    } else if (trade.targetId === update.order_id) {
+      trade.status = "TARGET_FILLED";
+      openTrades.delete(id);
+    }
+  }
+});
 
 /**
  * Send trading signal to execution layer.

@@ -25,7 +25,10 @@ const kiteMock = test.mock.module('../kite.js', {
     initSession: async () => 'token',
     kc: { getLTP: async (symbols) => ({ [symbols[0]]: { last_price: 100, instrument_token: 123 } }) },
     tickBuffer: {},
-    getSupportResistanceLevels: () => ({ support: 90, resistance: 110 })
+    getSupportResistanceLevels: () => ({ support: 90, resistance: 110 }),
+    getMA: () => null,
+    onOrderUpdate: () => {},
+    orderEvents: { on: () => {} }
   }
 });
 

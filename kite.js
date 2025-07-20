@@ -1,5 +1,6 @@
 // kite.js
 import { KiteConnect, KiteTicker } from "kiteconnect";
+import { EventEmitter } from "events";
 import { calculateEMA, calculateSupertrend } from "./featureEngine.js";
 import fs from "fs";
 import path from "path";
@@ -27,6 +28,18 @@ const apiKey = process.env.KITE_API_KEY;
 const apiSecret = process.env.KITE_API_SECRET;
 const kc = new KiteConnect({ api_key: apiKey });
 const TOTAL_CAPITAL = Number(process.env.TOTAL_CAPITAL) || 100000;
+
+// Order update event emitter and storage
+export const orderEvents = new EventEmitter();
+const orderUpdateMap = new Map();
+
+export function onOrderUpdate(cb) {
+  orderEvents.on("update", cb);
+}
+
+export function getOrderUpdate(orderId) {
+  return orderUpdateMap.get(orderId);
+}
 
 const instruments = await db.collection("instruments").find({}).toArray();
 
@@ -372,6 +385,11 @@ async function startLiveFeed(io) {
       tickBuffer[tick.instrument_token].push(tick);
       storeTickAligned(tick); // NEW: Store tick for aligned candles
     }
+  });
+
+  ticker.on("order_update", (update) => {
+    orderUpdateMap.set(update.order_id, update);
+    orderEvents.emit("update", update);
   });
 
   ticker.on("error", (err) => {
@@ -1432,4 +1450,5 @@ export {
   historicalCache,
   resetInMemoryData,
   loadTickDataFromDB,
+  orderEvents,
 };

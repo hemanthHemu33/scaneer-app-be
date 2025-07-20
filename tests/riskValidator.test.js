@@ -11,7 +11,13 @@ const auditMock = test.mock.module('../auditLogger.js', {
     getLogs: () => ({}),
   }
 });
-const kiteMock = test.mock.module('../kite.js', { namedExports: { getMA: () => null } });
+const kiteMock = test.mock.module('../kite.js', {
+  namedExports: {
+    getMA: () => null,
+    onOrderUpdate: () => {},
+    orderEvents: { on: () => {} }
+  }
+});
 const dbMock = test.mock.module('../db.js', {
   defaultExport: {
     collection: () => ({
