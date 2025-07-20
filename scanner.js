@@ -41,12 +41,6 @@ initAccountBalance().then((bal) => {
 const riskPerTradePercentage = 0.01;
 
 // 🚦 Risk control state
-let riskState = {
-  dailyLoss: 0,
-  consecutiveLosses: 0,
-  lastResetDay: new Date().getDate(),
-};
-
 // ⚙️ Scanner mode toggle
 const MODE = "relaxed"; // Options: "strict" | "relaxed"
 const FILTERS = {

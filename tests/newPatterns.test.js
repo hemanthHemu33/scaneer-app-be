@@ -8,6 +8,7 @@ const featureMock = test.mock.module('../featureEngine.js', {
     calculateRSI: () => 50,
     calculateSupertrend: () => ({ signal: 'Sell' }),
     calculateVWAP: () => 0,
+    calculateAnchoredVWAP: () => 0,
     getATR: () => 1,
     computeFeatures: () => ({ ema9: 0, ema21: 0, ema200: 0, rsi: 50 })
   }
@@ -16,6 +17,13 @@ const utilMock = test.mock.module('../util.js', {
   namedExports: {
     confirmRetest: () => true,
     detectAllPatterns: () => [],
+    calculateStdDev: () => 1,
+    calculateZScore: () => 0,
+    isStrongPriceAction: () => true,
+    getWickNoise: () => 0,
+    isAtrStable: () => true,
+    isAwayFromConsolidation: () => true,
+    patternConfluenceAcrossTimeframes: () => true,
     DEFAULT_MARGIN_PERCENT: 0.2,
   }
 });

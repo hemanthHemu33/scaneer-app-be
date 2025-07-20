@@ -24,6 +24,7 @@ const featureMock = test.mock.module('../featureEngine.js', {
     calculateRSI: () => 60,
     calculateSupertrend: () => ({ signal: 'Buy' }),
     calculateVWAP: () => 100,
+    calculateAnchoredVWAP: () => 100,
     getATR: () => 2.5,
     computeFeatures: () => ({
       ema9: 105,
@@ -60,6 +61,13 @@ const utilMock = test.mock.module('../util.js', {
     toISTDate: (d = new Date()) => '2024-01-01',
     convertTickTimestampsToIST: (t) => t,
     getMAForSymbol: () => 100,
+    isStrongPriceAction: () => true,
+    getWickNoise: () => 0,
+    isAtrStable: () => true,
+    isAwayFromConsolidation: () => true,
+    calculateStdDev: () => 1,
+    calculateZScore: () => 0,
+    patternConfluenceAcrossTimeframes: () => true,
     DEFAULT_MARGIN_PERCENT: 0.2
   }
 });
