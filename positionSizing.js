@@ -44,6 +44,8 @@ export function calculatePositionSize({
   volatilityGuard,
   marketDepth,
   priceMovement,
+  minQty,
+  maxQty,
 }) {
   if (!capital || !slPoints || slPoints <= 0) return 0;
 
@@ -97,6 +99,9 @@ export function calculatePositionSize({
     const maxLots = Math.floor((capital * utilizationCap) / effectiveMarginPerLot);
     qty = Math.min(qty, maxLots * lotSize);
   }
+
+  if (typeof minQty === 'number' && qty < minQty) return 0;
+  if (typeof maxQty === 'number' && qty > maxQty) qty = maxQty;
 
   return qty > 0 ? qty : lotSize;
 }

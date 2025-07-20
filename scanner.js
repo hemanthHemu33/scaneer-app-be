@@ -121,6 +121,10 @@ export async function analyzeCandles(
       vwap,
       atr: atrValue = 1,
       rvol,
+      avgVolume,
+      emaSlope,
+      trendStrength,
+      volatilityClass,
     } = features;
     const last = validCandles.at(-1);
     const expiryMinutes = calculateExpiryMinutes({ atr: atrValue, rvol });
@@ -192,22 +196,29 @@ export async function analyzeCandles(
       indexTrend: isUptrend ? "up" : isDowntrend ? "down" : "sideways",
       timeSinceSignal: 0,
       volume: liquidity,
+      avgVolume,
       currentPrice: liveTick ? liveTick.last_price : last.close,
       marketRegime: marketContext.regime,
       minATR: FILTERS.atrThreshold,
       maxATR: FILTERS.maxATR,
       minRR: RISK_REWARD_RATIO,
+      minLiquidity: FILTERS.minLiquidity,
+      minVolumeRatio: 0.5,
     });
     if (!riskOk) return null;
 
     // Step 6: Position sizing after risk filter
-    const qty = calculatePositionSize({
+    const baseRisk = Math.abs(base.entry - base.stopLoss);
+    const riskReward = Math.abs((base.target2 ?? base.target1) - base.entry) / baseRisk;
+    let qty = calculatePositionSize({
       capital: accountBalance,
       risk: accountBalance * riskPerTradePercentage,
-      slPoints: Math.abs(base.entry - base.stopLoss),
+      slPoints: baseRisk,
       price: base.entry,
       volatility: atrValue,
     });
+    if (riskReward > 2) qty = Math.floor(qty * 1.1);
+    else if (riskReward < 1.2) qty = Math.floor(qty * 0.9);
 
     const tradeParams = {
       entry: base.entry,
@@ -238,6 +249,10 @@ export async function analyzeCandles(
       rvol,
       vwap,
       expiryMinutes,
+      riskReward,
+      trendStrength,
+      volatilityClass,
+      emaSlope,
       isUptrend,
       isDowntrend,
       strategyName: base.strategy,

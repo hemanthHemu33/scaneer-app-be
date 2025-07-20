@@ -1119,6 +1119,7 @@ function computeGapPercent(tokenStr) {
 function isSameDay(d1, d2) {
   const a = new Date(d1);
   const b = new Date(d2);
+  if (isNaN(a) || isNaN(b)) return false;
   return a.toISOString().slice(0, 10) === b.toISOString().slice(0, 10);
 }
 
