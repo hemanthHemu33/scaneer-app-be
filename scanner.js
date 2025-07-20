@@ -383,7 +383,16 @@ export async function rankAndExecute(signals = []) {
   const { selectTopSignal } = await import("./signalRanker.js");
   const top = selectTopSignal(signals);
   if (top) {
-    await sendToExecution(top);
+    accountBalance = await initAccountBalance();
+    if (accountBalance > 0) {
+      await sendToExecution(top);
+    } else {
+      console.log(
+        `[SKIP] Insufficient balance. Signal for ${
+          top.stock || top.symbol
+        } not executed`
+      );
+    }
   }
   return top;
 }
