@@ -121,6 +121,11 @@ export async function executeSignal(signal, opts = {}) {
     order_type: 'LIMIT',
     price: signal.entry,
     product: 'MIS',
+    meta: {
+      strategy: signal.pattern || signal.strategy,
+      signalId: signal.signalId || signal.algoSignal?.signalId,
+      confidence: signal.confidence ?? signal.confidenceScore,
+    },
   });
   if (!entryOrder) return null;
   const filled = await waitForOrderFill(entryOrder.order_id);
@@ -137,6 +142,11 @@ export async function executeSignal(signal, opts = {}) {
     price: signal.stopLoss,
     trigger_price: signal.stopLoss,
     product: 'MIS',
+    meta: {
+      strategy: signal.pattern || signal.strategy,
+      signalId: signal.signalId || signal.algoSignal?.signalId,
+      confidence: signal.confidence ?? signal.confidenceScore,
+    },
   });
   const targetOrder = await sendOrder('regular', {
     exchange: 'NSE',
@@ -146,6 +156,11 @@ export async function executeSignal(signal, opts = {}) {
     order_type: 'LIMIT',
     price: signal.target2 || signal.target,
     product: 'MIS',
+    meta: {
+      strategy: signal.pattern || signal.strategy,
+      signalId: signal.signalId || signal.algoSignal?.signalId,
+      confidence: signal.confidence ?? signal.confidenceScore,
+    },
   });
   if (!slOrder || !targetOrder) return null;
   await monitorBracketOrders(slOrder.order_id, targetOrder.order_id);
