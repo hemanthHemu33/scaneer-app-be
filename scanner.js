@@ -27,6 +27,7 @@ import {
 import { signalQualityScore, applyPenaltyConditions } from "./confidence.js";
 import { sendToExecution } from "./orderExecution.js";
 import { initAccountBalance, getAccountBalance } from "./account.js";
+import { calculateRequiredMargin } from "./util.js";
 import { buildSignal } from "./signalBuilder.js";
 import { getSector } from "./sectors.js";
 import { recordSectorSignal } from "./sectorSignals.js";
@@ -386,14 +387,19 @@ export async function rankAndExecute(signals = []) {
   const { selectTopSignal } = await import("./signalRanker.js");
   const top = selectTopSignal(signals);
   if (top) {
-    accountBalance = await initAccountBalance();
-    if (accountBalance > 0) {
+    await initAccountBalance();
+    accountBalance = getAccountBalance();
+    const requiredMargin = calculateRequiredMargin({
+      price: top.entry,
+      qty: top.qty,
+    });
+    if (accountBalance >= requiredMargin) {
       await sendToExecution(top);
     } else {
       console.log(
-        `[SKIP] Insufficient balance. Signal for ${
+        `[SKIP] Insufficient margin. Required ${requiredMargin}, available ${accountBalance} for ${
           top.stock || top.symbol
-        } not executed`
+        }`
       );
     }
   }
