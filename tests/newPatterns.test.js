@@ -31,6 +31,7 @@ const utilMock = test.mock.module('../util.js', {
     isAwayFromConsolidation: () => true,
     patternConfluenceAcrossTimeframes: () => true,
     DEFAULT_MARGIN_PERCENT: 0.2,
+    calculateRequiredMargin: () => 100,
   }
 });
 const dbMock = test.mock.module('../db.js', { defaultExport: {}, namedExports: { connectDB: async () => ({}) } });
