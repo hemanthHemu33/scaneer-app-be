@@ -16,7 +16,11 @@ import {
   preventReEntry,
   resolveSignalConflicts,
   notifyExposureEvents,
+  openPositions,
+  recordExit,
 } from "./portfolioContext.js";
+import { startExitMonitor } from "./exitManager.js";
+import { logTrade as recordTrade } from "./tradeLogger.js";
 dotenv.config();
 
 import db from "./db.js"; // 🧠 Import database module for future use
@@ -200,6 +204,12 @@ let riskState = {
   maxConsecutiveLosses: 3,
 };
 let gapPercent = {};
+let exitMonitorStarted = false;
+
+function handleExit(trade, reason) {
+  recordExit(trade.symbol);
+  recordTrade({ symbol: trade.symbol, reason, event: "exit" });
+}
 
 // 🔐 Initialize Kite session
 async function initSession() {
@@ -390,6 +400,13 @@ async function startLiveFeed(io) {
   ticker.on("order_update", (update) => {
     orderUpdateMap.set(update.order_id, update);
     orderEvents.emit("update", update);
+    if (!exitMonitorStarted && update.status === "COMPLETE") {
+      startExitMonitor(openPositions, {
+        exitTrade: handleExit,
+        logTradeExit: handleExit,
+      });
+      exitMonitorStarted = true;
+    }
   });
 
   ticker.on("error", (err) => {

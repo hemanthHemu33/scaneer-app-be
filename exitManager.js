@@ -81,12 +81,15 @@ export function shouldExit(signal, price, timeHeldMs) {
  * @param {number} [handlers.intervalMs]
  * @returns {NodeJS.Timeout}
  */
+let monitorHandle = null;
+
 export function startExitMonitor(
   activeTrades,
   { exitTrade, logTradeExit, intervalMs = 60 * 1000 } = {}
 ) {
   if (!activeTrades) return null;
-  return setInterval(() => {
+  if (monitorHandle) clearInterval(monitorHandle);
+  monitorHandle = setInterval(() => {
     const trades = activeTrades instanceof Map ? activeTrades.values() : activeTrades;
     for (const openTrade of trades) {
       const exitSignal = checkExitConditions(openTrade);
@@ -96,4 +99,12 @@ export function startExitMonitor(
       }
     }
   }, intervalMs);
+  return monitorHandle;
+}
+
+export function stopExitMonitor() {
+  if (monitorHandle) {
+    clearInterval(monitorHandle);
+    monitorHandle = null;
+  }
 }
