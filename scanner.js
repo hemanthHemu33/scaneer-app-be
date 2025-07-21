@@ -18,7 +18,6 @@ import { evaluateAllStrategies } from "./strategyEngine.js";
 import { evaluateStrategies } from "./strategies.js";
 import { RISK_REWARD_RATIO, calculatePositionSize } from "./positionSizing.js";
 import { isSignalValid, riskState } from "./riskEngine.js";
-import { startExitMonitor } from "./exitManager.js";
 import { openPositions, recordExit } from "./portfolioContext.js";
 import { logTrade } from "./tradeLogger.js";
 import {
@@ -380,17 +379,7 @@ export function getSignalHistory() {
   return signalHistory;
 }
 
-function handleExit(trade, reason) {
-  recordExit(trade.symbol);
-  logTrade({ symbol: trade.symbol, reason, event: "exit" });
-}
-
-if (process.env.NODE_ENV !== "test") {
-  startExitMonitor(openPositions, {
-    exitTrade: handleExit,
-    logTradeExit: handleExit,
-  });
-}
+// Exit monitoring now starts after order fills via kite.js
 
 // Rank signals and send top one to execution
 export async function rankAndExecute(signals = []) {
