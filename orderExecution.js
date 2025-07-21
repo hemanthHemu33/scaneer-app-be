@@ -10,6 +10,9 @@ import {
 } from "./kite.js"; // reuse shared Kite instance and session handler
 import { calculateDynamicStopLoss } from "./dynamicRiskModel.js";
 
+// Store order id -> metadata mapping for traceability
+export const orderMetadata = new Map();
+
 // --- Failed signal retry queue ---
 export const retryQueue = [];
 const RETRY_BASE_MS = 60000; // 1 minute
@@ -36,33 +39,45 @@ export async function sendOrder(variety = "regular", order) {
   try {
     await initSession();
 
+    // Extract optional metadata for traceability
+    const { meta, ...orderParams } = order || {};
+    if (meta) {
+      const { strategy, signalId, confidence } = meta;
+      const tagParts = [];
+      if (strategy) tagParts.push(strategy.substring(0, 4));
+      if (signalId) tagParts.push(signalId.slice(-4));
+      if (confidence !== undefined) tagParts.push(String(confidence));
+      const tag = tagParts.join("-").slice(0, 20);
+      orderParams.tag = orderParams.tag || tag;
+    }
+
     // If caller wants a bracket/GTT style order and provided SL/target
     // parameters, convert to a two-leg GTT order. This helps lock in
     // both risk and reward in a single request.
-    if (variety === "gtt" || (order.stopLoss && order.target)) {
-      const sl = order.stopLoss ?? order.sl;
-      const target = order.target ?? order.squareoff;
+    if (variety === "gtt" || (orderParams.stopLoss && orderParams.target)) {
+      const sl = orderParams.stopLoss ?? orderParams.sl;
+      const target = orderParams.target ?? orderParams.squareoff;
       if (sl != null && target != null) {
-        const exitType = order.transaction_type === "BUY" ? "SELL" : "BUY";
+        const exitType = orderParams.transaction_type === "BUY" ? "SELL" : "BUY";
         const gttParams = {
           trigger_type: kc.GTT_TYPE_OCO,
-          exchange: order.exchange,
-          tradingsymbol: order.tradingsymbol,
-          last_price: order.last_price ?? order.price,
+          exchange: orderParams.exchange,
+          tradingsymbol: orderParams.tradingsymbol,
+          last_price: orderParams.last_price ?? orderParams.price,
           trigger_values: [sl, target].sort((a, b) => a - b),
           orders: [
             {
               transaction_type: exitType,
               order_type: "SL",
-              product: order.product,
-              quantity: order.quantity,
+              product: orderParams.product,
+              quantity: orderParams.quantity,
               price: sl,
             },
             {
               transaction_type: exitType,
               order_type: "LIMIT",
-              product: order.product,
-              quantity: order.quantity,
+              product: orderParams.product,
+              quantity: orderParams.quantity,
               price: target,
             },
           ],
@@ -73,8 +88,12 @@ export async function sendOrder(variety = "regular", order) {
       }
     }
 
-    const response = await kc.placeOrder({ variety, ...order });
+    const response = await kc.placeOrder({ variety, ...orderParams });
     console.log("✅ Order placed:", response);
+    if (meta) {
+      if (response?.order_id) orderMetadata.set(response.order_id, meta);
+      if (response?.trigger_id) orderMetadata.set(response.trigger_id, meta);
+    }
     return response;
   } catch (err) {
     logError("Error placing order", err);
@@ -284,6 +303,12 @@ export async function placeOrder(signal, maxRetries = 3) {
   const qty = signal.qty || 1;
   const exitType = signal.direction === "Long" ? "SELL" : "BUY";
 
+  const meta = {
+    strategy: signal.pattern || signal.strategy,
+    signalId: signal.signalId || signal.algoSignal?.signalId,
+    confidence: signal.confidence ?? signal.confidenceScore,
+  };
+
   const entryParams = {
     exchange: "NSE",
     tradingsymbol: symbol,
@@ -292,6 +317,7 @@ export async function placeOrder(signal, maxRetries = 3) {
     order_type: "LIMIT",
     price: signal.entry,
     product: "MIS",
+    meta,
   };
 
   const marginInfo = await getAccountMargin();
@@ -345,6 +371,7 @@ export async function placeOrder(signal, maxRetries = 3) {
     price: stopLoss,
     trigger_price: stopLoss,
     product: "MIS",
+    meta,
   };
   const tgtParams = {
     exchange: "NSE",
@@ -354,6 +381,7 @@ export async function placeOrder(signal, maxRetries = 3) {
     order_type: "LIMIT",
     price: target,
     product: "MIS",
+    meta,
   };
 
   const slOrder = await sendOrder("regular", slParams);

@@ -1475,5 +1475,4 @@ export {
   historicalCache,
   resetInMemoryData,
   loadTickDataFromDB,
-  orderEvents,
 };
