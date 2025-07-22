@@ -9,3 +9,9 @@ export async function logTrade(trade) {
 export async function recordPnL(symbol, pnl) {
   await logTrade({ symbol, pnl });
 }
+
+export async function logOrderUpdate(update) {
+  if (!db?.collection) return;
+  const col = db.collection('order_updates');
+  await col.insertOne({ ...update, timestamp: new Date() });
+}
