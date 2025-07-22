@@ -380,7 +380,7 @@ export function getSignalHistory() {
   return signalHistory;
 }
 
-// Exit monitoring now starts after order fills via kite.js
+// Exit monitoring is triggered from kite.js once an order update reports COMPLETE
 
 // Rank signals and send top one to execution
 export async function rankAndExecute(signals = []) {

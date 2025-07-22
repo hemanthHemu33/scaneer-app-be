@@ -215,6 +215,7 @@ function handleOrderUpdate(update) {
   orderUpdateMap.set(update.order_id, update);
   orderEvents.emit("update", update);
   logOrderUpdate(update);
+  // Start monitoring exits only after the first order is actually filled
   if (!exitMonitorStarted && update.status === "COMPLETE") {
     startExitMonitor(openPositions, {
       exitTrade: handleExit,
