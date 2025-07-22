@@ -46,11 +46,9 @@ export async function sendOrder(variety = "regular", order, opts = {}) {
       const { meta, ...orderParams } = order || {};
       if (meta) {
         const { strategy, signalId, confidence } = meta;
-        const tagParts = [];
-        if (strategy) tagParts.push(strategy.substring(0, 4));
-        if (signalId) tagParts.push(signalId.slice(-4));
-        if (confidence !== undefined) tagParts.push(String(confidence));
-        const tag = tagParts.join("-").slice(0, 20);
+        const tag = [signalId, strategy, confidence]
+          .filter((v) => v !== undefined && v !== null)
+          .join('_');
         orderParams.tag = orderParams.tag || tag;
       }
 
