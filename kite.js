@@ -1440,6 +1440,13 @@ function resetInMemoryData() {
   historicalCache = {};
   historicalSessionData = {};
   warmupDone = false;
+  if (ticker) {
+    try {
+      ticker.disconnect();
+    } catch {}
+    ticker = null;
+  }
+  kc.setAccessToken("");
 }
 
 export {
