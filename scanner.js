@@ -323,15 +323,18 @@ export async function analyzeCandles(
       strategyConfidence: base.confidence,
       support,
       resistance,
-      finalScore: signalQualityScore({
-        atr: atrValue,
-        rvol,
-        strongPriceAction,
-        cleanBody: wickPct < 0.3,
-        rrRatio: riskReward,
-        atrStable,
-        awayFromConsolidation: consolidationOk,
-      }),
+      finalScore: signalQualityScore(
+        {
+          atr: atrValue,
+          rvol,
+          strongPriceAction,
+          cleanBody: wickPct < 0.3,
+          rrRatio: riskReward,
+          atrStable,
+          awayFromConsolidation: consolidationOk,
+        },
+        { symbol, strategy: base.strategy }
+      ),
       expiresAt,
       riskAmount: accountBalance * riskPerTradePercentage,
       accountBalance,
