@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { computeConfidenceScore, recordStrategyResult, getRecentAccuracy, applyPenaltyConditions } from '../confidence.js';
+import { computeConfidenceScore, recordStrategyResult, getRecentAccuracy, applyPenaltyConditions, signalQualityScore } from '../confidence.js';
 
 test('computeConfidenceScore blends factors', () => {
   const score = computeConfidenceScore({
@@ -120,4 +120,19 @@ test('getRecentAccuracy computes recent win rate', () => {
   recordStrategyResult('AAA', 'trend', true);
   const acc = getRecentAccuracy('AAA', 'trend');
   assert.ok(acc > 0 && acc <= 1);
+});
+
+test('signalQualityScore scales with history', () => {
+  const base = signalQualityScore(
+    { atr: 1, rvol: 1, strongPriceAction: false },
+    { symbol: 'BBB', strategy: 'trend' }
+  );
+  for (let i = 0; i < 5; i++) {
+    recordStrategyResult('BBB', 'trend', true);
+  }
+  const improved = signalQualityScore(
+    { atr: 1, rvol: 1, strongPriceAction: false },
+    { symbol: 'BBB', strategy: 'trend' }
+  );
+  assert.ok(improved > base);
 });
