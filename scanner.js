@@ -18,7 +18,11 @@ import { evaluateAllStrategies } from "./strategyEngine.js";
 import { evaluateStrategies } from "./strategies.js";
 import { RISK_REWARD_RATIO, calculatePositionSize } from "./positionSizing.js";
 import { isSignalValid, riskState } from "./riskEngine.js";
-import { openPositions, recordExit } from "./portfolioContext.js";
+import {
+  openPositions,
+  recordExit,
+  checkExposureLimits,
+} from "./portfolioContext.js";
 import { logTrade } from "./tradeLogger.js";
 import {
   marketContext,
@@ -40,6 +44,13 @@ initAccountBalance().then((bal) => {
   console.log(`[INIT] Account balance set to ${accountBalance}`);
 });
 const riskPerTradePercentage = 0.01;
+
+// Portfolio exposure controls
+const TOTAL_CAPITAL = Number(process.env.TOTAL_CAPITAL) || 100000;
+const MAX_OPEN_TRADES = Number(process.env.MAX_OPEN_TRADES) || 10;
+const SECTOR_CAPS = {
+  // default sector caps; override via env if needed
+};
 
 // 🚦 Risk control state
 // ⚙️ Scanner mode toggle
@@ -396,6 +407,23 @@ export async function rankAndExecute(signals = []) {
       price: top.entry,
       qty: top.qty,
     });
+    const tradeValue = top.entry * top.qty;
+    const sector = getSector(top.stock || top.symbol);
+    const exposureOk =
+      openPositions.size < MAX_OPEN_TRADES &&
+      checkExposureLimits({
+        symbol: top.stock || top.symbol,
+        tradeValue,
+        sector,
+        totalCapital: TOTAL_CAPITAL,
+        sectorCaps: SECTOR_CAPS,
+      });
+    if (!exposureOk) {
+      console.log(
+        `[PORTFOLIO] Exposure limits blocked trade for ${top.stock || top.symbol}`
+      );
+      return null;
+    }
     if (accountBalance >= requiredMargin) {
       await sendToExecution(top);
     } else {
