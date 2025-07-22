@@ -20,7 +20,7 @@ import {
   recordExit,
 } from "./portfolioContext.js";
 import { startExitMonitor } from "./exitManager.js";
-import { logTrade as recordTrade } from "./tradeLogger.js";
+import { logTrade as recordTrade, logOrderUpdate } from "./tradeLogger.js";
 dotenv.config();
 
 import db from "./db.js"; // 🧠 Import database module for future use
@@ -211,6 +211,19 @@ function handleExit(trade, reason) {
   recordTrade({ symbol: trade.symbol, reason, event: "exit" });
 }
 
+function handleOrderUpdate(update) {
+  orderUpdateMap.set(update.order_id, update);
+  orderEvents.emit("update", update);
+  logOrderUpdate(update);
+  if (!exitMonitorStarted && update.status === "COMPLETE") {
+    startExitMonitor(openPositions, {
+      exitTrade: handleExit,
+      logTradeExit: handleExit,
+    });
+    exitMonitorStarted = true;
+  }
+}
+
 // 🔐 Initialize Kite session
 async function initSession() {
   try {
@@ -397,17 +410,7 @@ async function startLiveFeed(io) {
     }
   });
 
-  ticker.on("order_update", (update) => {
-    orderUpdateMap.set(update.order_id, update);
-    orderEvents.emit("update", update);
-    if (!exitMonitorStarted && update.status === "COMPLETE") {
-      startExitMonitor(openPositions, {
-        exitTrade: handleExit,
-        logTradeExit: handleExit,
-      });
-      exitMonitorStarted = true;
-    }
-  });
+  ticker.on("order_update", handleOrderUpdate);
 
   ticker.on("error", (err) => {
     logError("WebSocket error", err);
