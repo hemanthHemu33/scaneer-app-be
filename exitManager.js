@@ -1,3 +1,5 @@
+import { logTrade } from './tradeLogger.js';
+
 let trailingPct = 0.5;
 
 export function setTrailingPercent(pct) {
@@ -107,4 +109,29 @@ export function stopExitMonitor() {
     clearInterval(monitorHandle);
     monitorHandle = null;
   }
+}
+
+/**
+ * Record the exit of a trade and log P&L.
+ * @param {Object} trade - { symbol, entryPrice, qty, side, lastPrice }
+ * @param {string} [reason] - exit reason
+ * @param {number} [price] - exit price
+ */
+export async function recordExit(trade, reason, price) {
+  if (!trade) return;
+  const exitPrice = typeof price === 'number' ? price : trade.lastPrice;
+  const qty = trade.qty || 1;
+  const factor = (trade.side || 'long').toLowerCase() === 'short' ? -1 : 1;
+  const pnl = (exitPrice - trade.entryPrice) * qty * factor;
+  await logTrade(
+    {
+      symbol: trade.symbol,
+      event: 'exit',
+      entryPrice: trade.entryPrice,
+      qty,
+      pnl,
+    },
+    reason,
+    exitPrice,
+  );
 }
