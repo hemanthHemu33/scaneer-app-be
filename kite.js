@@ -21,6 +21,7 @@ import {
 } from "./portfolioContext.js";
 import { startExitMonitor } from "./exitManager.js";
 import { logTrade as recordTrade, logOrderUpdate } from "./tradeLogger.js";
+import { getAccountBalance, initAccountBalance } from "./account.js";
 dotenv.config();
 
 import db from "./db.js"; // 🧠 Import database module for future use
@@ -31,7 +32,7 @@ const __dirname = path.dirname(__filename);
 const apiKey = process.env.KITE_API_KEY;
 const apiSecret = process.env.KITE_API_SECRET;
 const kc = new KiteConnect({ api_key: apiKey });
-const TOTAL_CAPITAL = Number(process.env.TOTAL_CAPITAL) || 100000;
+await initAccountBalance();
 
 // Order update event emitter and storage
 export const orderEvents = new EventEmitter();
@@ -893,7 +894,7 @@ async function emitUnifiedSignal(signal, source, io) {
       symbol,
       tradeValue,
       sector: signal.sector || "GEN",
-      totalCapital: TOTAL_CAPITAL,
+      totalCapital: getAccountBalance(),
     }) &&
     resolveSignalConflicts({
       symbol,
