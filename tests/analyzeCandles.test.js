@@ -82,7 +82,8 @@ const utilMock = test.mock.module('../util.js', {
     calculateStdDev: () => 1,
     calculateZScore: () => 0,
     patternConfluenceAcrossTimeframes: () => true,
-    DEFAULT_MARGIN_PERCENT: 0.2
+    DEFAULT_MARGIN_PERCENT: 0.2,
+    calculateRequiredMargin: () => 100
   }
 });
 

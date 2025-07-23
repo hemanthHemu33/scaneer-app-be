@@ -9,6 +9,16 @@ export const strategyStats = {};
 // Track last 10 results per strategy for short-term accuracy
 export const recentStrategyResults = {};
 
+// Dynamic weight factors per strategy
+export const qualityWeightFactors = {};
+
+function _updateQualityFactor(strategy, win) {
+  const cur = qualityWeightFactors[strategy] || 1;
+  const lr = 0.05;
+  const next = win ? cur + lr : cur - lr;
+  qualityWeightFactors[strategy] = Math.max(0.5, Math.min(next, 1.5));
+}
+
 function _pushRecent(symbol, strategy, win) {
   if (!recentStrategyResults[symbol]) recentStrategyResults[symbol] = {};
   const arr = recentStrategyResults[symbol][strategy] || [];
@@ -24,6 +34,7 @@ export function recordStrategyResult(symbol, strategy, win) {
   if (win) stat.wins += 1;
   strategyStats[symbol][strategy] = stat;
   _pushRecent(symbol, strategy, win);
+  _updateQualityFactor(strategy, win);
 }
 
 export function getStrategyHitRate(symbol, strategy) {
@@ -50,15 +61,20 @@ export function confirmationScore(count = 0) {
   return Math.min(count / 3, 1); // saturate at 3
 }
 
-export function signalQualityScore({
-  atr,
-  rvol,
-  strongPriceAction = false,
-  cleanBody = true,
-  rrRatio = 1,
-  atrStable = true,
-  awayFromConsolidation = true,
-} = {}) {
+export function signalQualityScore(
+  {
+    atr,
+    rvol,
+    strongPriceAction = false,
+    cleanBody = true,
+    rrRatio = 1,
+    atrStable = true,
+    awayFromConsolidation = true,
+  } = {},
+  { symbol = 'GEN', strategy = 'GEN' } = {}
+) {
+  const recent = getRecentAccuracy(symbol, strategy);
+  const factor = (qualityWeightFactors[strategy] || 1) * (1 + (recent - 0.5));
   const atrScore = Math.min(atr / 2, 1);
   const volumeScore = Math.min(rvol / 2, 1);
   const priceActionScore = strongPriceAction ? 1 : 0.5;
@@ -66,15 +82,15 @@ export function signalQualityScore({
   const rrScore = Math.min(rrRatio / 3, 1);
   const stabilityScore = atrStable ? 1 : 0.5;
   const consolidationScore = awayFromConsolidation ? 1 : 0.5;
-  return (
+  const base =
     atrScore * 0.2 +
     volumeScore * 0.2 +
     priceActionScore * 0.2 +
     wickScore * 0.1 +
     rrScore * 0.2 +
     stabilityScore * 0.05 +
-    consolidationScore * 0.05
-  );
+    consolidationScore * 0.05;
+  return Math.min(base * factor, 1);
 }
 
 export function computeConfidenceScore({

@@ -18,7 +18,11 @@ import { evaluateAllStrategies } from "./strategyEngine.js";
 import { evaluateStrategies } from "./strategies.js";
 import { RISK_REWARD_RATIO, calculatePositionSize } from "./positionSizing.js";
 import { isSignalValid, riskState } from "./riskEngine.js";
-import { openPositions, recordExit } from "./portfolioContext.js";
+import {
+  openPositions,
+  recordExit,
+  checkExposureLimits,
+} from "./portfolioContext.js";
 import { logTrade } from "./tradeLogger.js";
 import {
   marketContext,
@@ -27,6 +31,7 @@ import {
 import { signalQualityScore, applyPenaltyConditions } from "./confidence.js";
 import { sendToExecution } from "./orderExecution.js";
 import { initAccountBalance, getAccountBalance } from "./account.js";
+import { calculateRequiredMargin } from "./util.js";
 import { buildSignal } from "./signalBuilder.js";
 import { getSector } from "./sectors.js";
 import { recordSectorSignal } from "./sectorSignals.js";
@@ -40,9 +45,16 @@ initAccountBalance().then((bal) => {
 });
 const riskPerTradePercentage = 0.01;
 
+// Portfolio exposure controls
+const TOTAL_CAPITAL = Number(process.env.TOTAL_CAPITAL) || 100000;
+const MAX_OPEN_TRADES = Number(process.env.MAX_OPEN_TRADES) || 10;
+const SECTOR_CAPS = {
+  // default sector caps; override via env if needed
+};
+
 // 🚦 Risk control state
 // ⚙️ Scanner mode toggle
-const MODE = "relaxed"; // Options: "strict" | "relaxed"
+const MODE = "strict"; // Options: "strict" | "relaxed"
 const FILTERS = {
   atrThreshold: MODE === "strict" ? 2 : 0.4,
   minBuySellRatio: MODE === "strict" ? 0.8 : 0.6,
@@ -322,15 +334,18 @@ export async function analyzeCandles(
       strategyConfidence: base.confidence,
       support,
       resistance,
-      finalScore: signalQualityScore({
-        atr: atrValue,
-        rvol,
-        strongPriceAction,
-        cleanBody: wickPct < 0.3,
-        rrRatio: riskReward,
-        atrStable,
-        awayFromConsolidation: consolidationOk,
-      }),
+      finalScore: signalQualityScore(
+        {
+          atr: atrValue,
+          rvol,
+          strongPriceAction,
+          cleanBody: wickPct < 0.3,
+          rrRatio: riskReward,
+          atrStable,
+          awayFromConsolidation: consolidationOk,
+        },
+        { symbol, strategy: base.strategy }
+      ),
       expiresAt,
       riskAmount: accountBalance * riskPerTradePercentage,
       accountBalance,
@@ -379,21 +394,43 @@ export function getSignalHistory() {
   return signalHistory;
 }
 
-// Exit monitoring now starts after order fills via kite.js
+// Exit monitoring is triggered from kite.js once an order update reports COMPLETE
 
 // Rank signals and send top one to execution
 export async function rankAndExecute(signals = []) {
   const { selectTopSignal } = await import("./signalRanker.js");
   const top = selectTopSignal(signals);
   if (top) {
-    accountBalance = await initAccountBalance();
-    if (accountBalance > 0) {
+    await initAccountBalance();
+    accountBalance = getAccountBalance();
+    const requiredMargin = calculateRequiredMargin({
+      price: top.entry,
+      qty: top.qty,
+    });
+    const tradeValue = top.entry * top.qty;
+    const sector = getSector(top.stock || top.symbol);
+    const exposureOk =
+      openPositions.size < MAX_OPEN_TRADES &&
+      checkExposureLimits({
+        symbol: top.stock || top.symbol,
+        tradeValue,
+        sector,
+        totalCapital: TOTAL_CAPITAL,
+        sectorCaps: SECTOR_CAPS,
+      });
+    if (!exposureOk) {
+      console.log(
+        `[PORTFOLIO] Exposure limits blocked trade for ${top.stock || top.symbol}`
+      );
+      return null;
+    }
+    if (accountBalance >= requiredMargin) {
       await sendToExecution(top);
     } else {
       console.log(
-        `[SKIP] Insufficient balance. Signal for ${
+        `[SKIP] Insufficient margin. Required ${requiredMargin}, available ${accountBalance} for ${
           top.stock || top.symbol
-        } not executed`
+        }`
       );
     }
   }

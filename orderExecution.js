@@ -35,69 +35,80 @@ dotenv.config();
 // kc instance and session handled in kite.js
 
 // Place an order
-export async function sendOrder(variety = "regular", order) {
-  try {
-    await initSession();
+export async function sendOrder(variety = "regular", order, opts = {}) {
+  const { retries = 3, retryDelayMs = 1000 } = opts;
+  let attempt = 0;
+  while (attempt < retries) {
+    try {
+      await initSession();
 
-    // Extract optional metadata for traceability
-    const { meta, ...orderParams } = order || {};
-    if (meta) {
-      const { strategy, signalId, confidence } = meta;
-      const tagParts = [];
-      if (strategy) tagParts.push(strategy.substring(0, 4));
-      if (signalId) tagParts.push(signalId.slice(-4));
-      if (confidence !== undefined) tagParts.push(String(confidence));
-      const tag = tagParts.join("-").slice(0, 20);
-      orderParams.tag = orderParams.tag || tag;
-    }
-
-    // If caller wants a bracket/GTT style order and provided SL/target
-    // parameters, convert to a two-leg GTT order. This helps lock in
-    // both risk and reward in a single request.
-    if (variety === "gtt" || (orderParams.stopLoss && orderParams.target)) {
-      const sl = orderParams.stopLoss ?? orderParams.sl;
-      const target = orderParams.target ?? orderParams.squareoff;
-      if (sl != null && target != null) {
-        const exitType = orderParams.transaction_type === "BUY" ? "SELL" : "BUY";
-        const gttParams = {
-          trigger_type: kc.GTT_TYPE_OCO,
-          exchange: orderParams.exchange,
-          tradingsymbol: orderParams.tradingsymbol,
-          last_price: orderParams.last_price ?? orderParams.price,
-          trigger_values: [sl, target].sort((a, b) => a - b),
-          orders: [
-            {
-              transaction_type: exitType,
-              order_type: "SL",
-              product: orderParams.product,
-              quantity: orderParams.quantity,
-              price: sl,
-            },
-            {
-              transaction_type: exitType,
-              order_type: "LIMIT",
-              product: orderParams.product,
-              quantity: orderParams.quantity,
-              price: target,
-            },
-          ],
-        };
-        const response = await kc.placeGTT(gttParams);
-        console.log("✅ GTT Order placed:", response);
-        return response;
+      // Extract optional metadata for traceability
+      const { meta, ...orderParams } = order || {};
+      if (meta) {
+        const { strategy, signalId, confidence } = meta;
+        const tag = [signalId, strategy, confidence]
+          .filter((v) => v !== undefined && v !== null)
+          .join('_');
+        orderParams.tag = orderParams.tag || tag;
       }
-    }
 
-    const response = await kc.placeOrder({ variety, ...orderParams });
-    console.log("✅ Order placed:", response);
-    if (meta) {
-      if (response?.order_id) orderMetadata.set(response.order_id, meta);
-      if (response?.trigger_id) orderMetadata.set(response.trigger_id, meta);
+      // If caller wants a bracket/GTT style order and provided SL/target
+      // parameters, convert to a two-leg GTT order. This helps lock in
+      // both risk and reward in a single request.
+      if (variety === "gtt" || (orderParams.stopLoss && orderParams.target)) {
+        const sl = orderParams.stopLoss ?? orderParams.sl;
+        const target = orderParams.target ?? orderParams.squareoff;
+        if (sl != null && target != null) {
+          const exitType =
+            orderParams.transaction_type === "BUY" ? "SELL" : "BUY";
+          const gttParams = {
+            trigger_type: kc.GTT_TYPE_OCO,
+            exchange: orderParams.exchange,
+            tradingsymbol: orderParams.tradingsymbol,
+            last_price: orderParams.last_price ?? orderParams.price,
+            trigger_values: [sl, target].sort((a, b) => a - b),
+            orders: [
+              {
+                transaction_type: exitType,
+                order_type: "SL",
+                product: orderParams.product,
+                quantity: orderParams.quantity,
+                price: sl,
+              },
+              {
+                transaction_type: exitType,
+                order_type: "LIMIT",
+                product: orderParams.product,
+                quantity: orderParams.quantity,
+                price: target,
+              },
+            ],
+          };
+          const response = await kc.placeGTT(gttParams);
+          console.log("✅ GTT Order placed:", response);
+          if (meta) {
+            if (response?.order_id) orderMetadata.set(response.order_id, meta);
+            if (response?.trigger_id) orderMetadata.set(response.trigger_id, meta);
+          }
+          return response;
+        }
+      }
+
+      const response = await kc.placeOrder({ variety, ...orderParams });
+      console.log("✅ Order placed:", response);
+      if (meta) {
+        if (response?.order_id) orderMetadata.set(response.order_id, meta);
+        if (response?.trigger_id) orderMetadata.set(response.trigger_id, meta);
+      }
+      return response;
+    } catch (err) {
+      attempt += 1;
+      if (attempt >= retries) {
+        logError("Error placing order", err);
+        return null;
+      }
+      await new Promise((r) => setTimeout(r, retryDelayMs * Math.pow(2, attempt - 1)));
     }
-    return response;
-  } catch (err) {
-    logError("Error placing order", err);
-    return null;
   }
 }
 

@@ -20,7 +20,7 @@ import {
   recordExit,
 } from "./portfolioContext.js";
 import { startExitMonitor } from "./exitManager.js";
-import { logTrade as recordTrade } from "./tradeLogger.js";
+import { logTrade as recordTrade, logOrderUpdate } from "./tradeLogger.js";
 dotenv.config();
 
 import db from "./db.js"; // 🧠 Import database module for future use
@@ -207,6 +207,20 @@ let exitMonitorStarted = false;
 function handleExit(trade, reason) {
   recordExit(trade.symbol);
   recordTrade({ symbol: trade.symbol, reason, event: "exit" });
+}
+
+function handleOrderUpdate(update) {
+  orderUpdateMap.set(update.order_id, update);
+  orderEvents.emit("update", update);
+  logOrderUpdate(update);
+  // Start monitoring exits only after the first order is actually filled
+  if (!exitMonitorStarted && update.status === "COMPLETE") {
+    startExitMonitor(openPositions, {
+      exitTrade: handleExit,
+      logTradeExit: handleExit,
+    });
+    exitMonitorStarted = true;
+  }
 }
 
 // 🔐 Initialize Kite session
@@ -423,17 +437,7 @@ async function startLiveFeed(io) {
     }
   });
 
-  ticker.on("order_update", (update) => {
-    orderUpdateMap.set(update.order_id, update);
-    orderEvents.emit("update", update);
-    if (!exitMonitorStarted && update.status === "COMPLETE") {
-      startExitMonitor(openPositions, {
-        exitTrade: handleExit,
-        logTradeExit: handleExit,
-      });
-      exitMonitorStarted = true;
-    }
-  });
+  ticker.on("order_update", handleOrderUpdate);
 
   ticker.on("error", (err) => {
     logError("WebSocket error", err);
@@ -1465,6 +1469,13 @@ function resetInMemoryData() {
   historicalCache = {};
   historicalSessionData = {};
   warmupDone = false;
+  if (ticker) {
+    try {
+      ticker.disconnect();
+    } catch {}
+    ticker = null;
+  }
+  kc.setAccessToken("");
 }
 
 export {
