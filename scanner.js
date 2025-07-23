@@ -45,8 +45,7 @@ initAccountBalance().then((bal) => {
 });
 const riskPerTradePercentage = 0.01;
 
-// Portfolio exposure controls
-const TOTAL_CAPITAL = Number(process.env.TOTAL_CAPITAL) || 100000;
+// Portfolio exposure controls - use dynamic account balance as capital
 const MAX_OPEN_TRADES = Number(process.env.MAX_OPEN_TRADES) || 10;
 const SECTOR_CAPS = {
   // default sector caps; override via env if needed
@@ -415,7 +414,7 @@ export async function rankAndExecute(signals = []) {
         symbol: top.stock || top.symbol,
         tradeValue,
         sector,
-        totalCapital: TOTAL_CAPITAL,
+        totalCapital: accountBalance,
         sectorCaps: SECTOR_CAPS,
       });
     if (!exposureOk) {

@@ -47,7 +47,6 @@ import { logError } from "./logger.js";
 const app = express();
 const server = http.createServer(app);
 
-const TOTAL_CAPITAL = Number(process.env.TOTAL_CAPITAL) || 100000;
 
 const allowedOrigins = [
   "https://scanner-app-fe.onrender.com",
