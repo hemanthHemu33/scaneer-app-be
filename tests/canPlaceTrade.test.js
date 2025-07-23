@@ -14,8 +14,9 @@ const kiteMock = test.mock.module('../kite.js', {
 });
 
 const orderMod = await import('../orderExecution.js');
+const accountMod = await import('../account.js');
 
-const marginMock = test.mock.method(orderMod, 'getAccountMargin', async () => ({
+const marginMock = test.mock.method(accountMod, 'getAccountMargin', async () => ({
   equity: { available: { cash: 10000 } },
 }));
 

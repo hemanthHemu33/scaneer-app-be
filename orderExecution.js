@@ -8,6 +8,7 @@ import {
   initSession,
   onOrderUpdate,
 } from "./kite.js"; // reuse shared Kite instance and session handler
+import { getAccountMargin } from "./account.js";
 import { calculateDynamicStopLoss } from "./dynamicRiskModel.js";
 
 // Store order id -> metadata mapping for traceability
@@ -171,22 +172,6 @@ export async function getHoldings() {
   } catch (err) {
     logError("Error fetching holdings", err);
     return [];
-  }
-}
-
-// Get margin available across equity
-export async function getAccountMargin() {
-  try {
-    await initSession();
-    const response = await kc.getMargins("equity");
-    console.log("Access token:", kc.access_token);
-
-    // console the account margin details
-    console.log("Account Margin:", response);
-    return response;
-  } catch (err) {
-    logError("Error fetching account margin", err);
-    return null;
   }
 }
 
