@@ -7,6 +7,33 @@ export const openPositions = new Map(); // symbol -> position object
 const lastExitTime = new Map();
 
 /**
+ * Persist current open positions to MongoDB collection 'live_positions'.
+ * @param {Object} [cache=db] - Database instance
+ */
+export async function saveLivePositions(cache = db) {
+  if (!cache?.collection) return;
+  const col = cache.collection('live_positions');
+  await col.deleteMany({});
+  const docs = Array.from(openPositions.values()).map((p) => ({ ...p, updatedAt: new Date() }));
+  if (docs.length) await col.insertMany(docs);
+}
+
+/**
+ * Load open positions from MongoDB collection 'live_positions'.
+ * @param {Object} [cache=db] - Database instance
+ */
+export async function loadLivePositions(cache = db) {
+  if (!cache?.collection) return;
+  const col = cache.collection('live_positions');
+  const docs = await col.find({}).toArray();
+  openPositions.clear();
+  for (const p of docs) {
+    const { _id, ...rest } = p;
+    openPositions.set(rest.symbol, rest);
+  }
+}
+
+/**
  * Refresh open positions from broker API and store in DB cache.
  * @param {Object} broker - Broker API with getPositions()
  * @param {Object} [cache=db] - Database instance
@@ -35,6 +62,9 @@ export async function trackOpenPositions(broker, cache = db) {
     const col = cache.collection('open_positions');
     await col.deleteMany({});
     if (docs.length) await col.insertMany(docs);
+    const live = cache.collection('live_positions');
+    await live.deleteMany({});
+    if (docs.length) await live.insertMany(docs);
   }
 }
 
@@ -124,6 +154,10 @@ export function preventReEntry(symbol, windowMs = 15 * 60 * 1000) {
 export function recordExit(symbol) {
   lastExitTime.set(symbol, Date.now());
   openPositions.delete(symbol);
+  if (db?.collection) {
+    const col = db.collection('live_positions');
+    col.deleteOne({ symbol }).catch(() => {});
+  }
 }
 
 const strategyRank = {

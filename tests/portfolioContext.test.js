@@ -2,12 +2,20 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 process.env.NODE_ENV = 'test';
 
-let savedPositions = [];
+let savedPositions = {
+  open_positions: [],
+  live_positions: [],
+};
 const dbMock = test.mock.module('../db.js', {
   defaultExport: {
-    collection: () => ({
+    collection: (name) => ({
       deleteMany: async () => {},
-      insertMany: async (docs) => { savedPositions = docs; return {}; },
+      insertMany: async (docs) => {
+        savedPositions[name] = docs;
+        return {};
+      },
+      deleteOne: async () => {},
+      find: () => ({ toArray: async () => [] }),
     }),
   },
 });
@@ -37,7 +45,8 @@ await trackOpenPositions(broker, dbMock.defaultExport);
 test('trackOpenPositions loads positions', () => {
   assert.equal(openPositions.size, 1);
   assert.ok(openPositions.has('AAA'));
-  assert.equal(savedPositions.length, 1);
+  assert.equal(savedPositions.open_positions.length, 1);
+  assert.equal(savedPositions.live_positions.length, 1);
 });
 
 openPositions.clear();
