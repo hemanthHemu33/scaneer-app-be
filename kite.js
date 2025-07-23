@@ -17,9 +17,9 @@ import {
   resolveSignalConflicts,
   notifyExposureEvents,
   openPositions,
-  recordExit,
+  recordExit as markExit,
 } from "./portfolioContext.js";
-import { startExitMonitor } from "./exitManager.js";
+import { startExitMonitor, recordExit as logExit } from "./exitManager.js";
 import { logTrade as recordTrade, logOrderUpdate } from "./tradeLogger.js";
 import { getAccountBalance, initAccountBalance } from "./account.js";
 dotenv.config();
@@ -208,8 +208,8 @@ let gapPercent = {};
 let exitMonitorStarted = false;
 
 function handleExit(trade, reason) {
-  recordExit(trade.symbol);
-  recordTrade({ symbol: trade.symbol, reason, event: "exit" });
+  markExit(trade.symbol);
+  logExit(trade, reason, trade.lastPrice);
 }
 
 function handleOrderUpdate(update) {

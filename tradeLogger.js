@@ -1,9 +1,12 @@
 import db from './db.js';
 
-export async function logTrade(trade) {
+export async function logTrade(trade, exitReason = undefined, exitPrice = undefined) {
   if (!db?.collection) return;
   const col = db.collection('trade_logs');
-  await col.insertOne({ ...trade, timestamp: new Date() });
+  const logEntry = { ...trade, timestamp: new Date() };
+  if (exitReason) logEntry.exitReason = exitReason;
+  if (typeof exitPrice === 'number') logEntry.exitPrice = exitPrice;
+  await col.insertOne(logEntry);
 }
 
 export async function recordPnL(symbol, pnl) {
