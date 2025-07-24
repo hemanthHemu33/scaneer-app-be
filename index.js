@@ -43,6 +43,7 @@ import {
 import { selectTopSignal } from "./signalRanker.js";
 import { logTrade } from "./tradeLogger.js";
 import { logError } from "./logger.js";
+import "./auditEngine.js";
 
 const app = express();
 const server = http.createServer(app);
