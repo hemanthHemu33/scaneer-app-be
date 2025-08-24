@@ -47,7 +47,7 @@ import { logError } from "./logger.js";
 const app = express();
 const server = http.createServer(app);
 
-const TOTAL_CAPITAL = Number(process.env.TOTAL_CAPITAL) || 100000;
+// const TOTAL_CAPITAL = Number(process.env.TOTAL_CAPITAL) || 100000;
 
 const allowedOrigins = [
   "https://scanner-app-fe.onrender.com",
@@ -270,7 +270,9 @@ app.get("/kite-redirect", async (req, res) => {
       },
       { upsert: true }
     );
-
+    if (isMarketOpen()) {
+      startLiveFeed(io);
+    }
     return res.send("✅ Login successful, session created.");
   } catch (err) {
     console.error("❌ Failed to generate session:", err.message || err);

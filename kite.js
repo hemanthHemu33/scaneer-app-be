@@ -284,11 +284,39 @@ async function initSession() {
       return session;
     } catch (err) {
       console.error("❌ Access token is expired or invalid.", err.message);
+      // RESET DATA BASE
+      await resetDatabase();
       return null;
     }
   } catch (err) {
     console.error("❌ Failed to load session from DB", err.message || err);
     return null;
+  }
+}
+
+// RESET THE COMPLETE DATA BASE IF THE ACCESS TOKEN IS EXPIRED
+async function resetDatabase() {
+  // Logic to reset the database
+  try {
+    const collections = await db.collections();
+    for (const collection of collections) {
+      if (
+        collection.collectionName !== "instruments" &&
+        collection.collectionName !== "nifty50stocksymbols" &&
+        collection.collectionName !== "nifty100qualitystocksymbols"
+      ) {
+        await collection.deleteMany({});
+      }
+    }
+    // Recreate the stock_symbols collection with an empty array
+    await db.collection("stock_symbols").deleteMany({});
+    await db.collection("stock_symbols").insertOne({ symbols: [] });
+
+    resetInMemoryData();
+    res.json({ status: "success", message: "Collections reset successfully" });
+  } catch (err) {
+    logError("reset collections", err);
+    res.status(500).json({ error: "Failed to reset collections" });
   }
 }
 
@@ -1365,11 +1393,20 @@ async function ensureDataForSymbol(symbol) {
   }
 }
 
+// function updateInstrumentTokens(tokens) {
+//   if (ticker) {
+//     ticker.unsubscribe(instrumentTokens);
+//     ticker.subscribe(tokens);
+//     console.log("🔄 Updated tokens:", tokens);
+//   }
+//   instrumentTokens = tokens;
+// }
 function updateInstrumentTokens(tokens) {
   if (ticker) {
     ticker.unsubscribe(instrumentTokens);
     ticker.subscribe(tokens);
-    console.log("🔄 Updated tokens:", tokens);
+    ticker.setMode(ticker.modeFull, tokens); // ensure FULL for the new set
+    console.log("🔄 Updated tokens (FULL mode):", tokens);
   }
   instrumentTokens = tokens;
 }
