@@ -47,9 +47,7 @@ import "./auditEngine.js";
 
 const app = express();
 const server = http.createServer(app);
-const apiKey = process.env.KITE_API_KEY;
-const apiSecret = process.env.KITE_API_SECRET;
-const kc = new KiteConnect({ api_key: apiKey });
+
 // const TOTAL_CAPITAL = Number(process.env.TOTAL_CAPITAL) || 100000;
 
 const allowedOrigins = [
@@ -273,9 +271,9 @@ app.get("/kite-redirect", async (req, res) => {
       },
       { upsert: true }
     );
-    if (isMarketOpen()) {
-      startLiveFeed(io);
-    }
+    // if (isMarketOpen()) {
+    //   startLiveFeed(io);
+    // }
     return res.send("✅ Login successful, session created.");
   } catch (err) {
     console.error("❌ Failed to generate session:", err.message || err);
