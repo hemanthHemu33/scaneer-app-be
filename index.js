@@ -47,7 +47,9 @@ import "./auditEngine.js";
 
 const app = express();
 const server = http.createServer(app);
-
+const apiKey = process.env.KITE_API_KEY;
+const apiSecret = process.env.KITE_API_SECRET;
+const kc = new KiteConnect({ api_key: apiKey });
 // const TOTAL_CAPITAL = Number(process.env.TOTAL_CAPITAL) || 100000;
 
 const allowedOrigins = [
