@@ -1074,7 +1074,7 @@ export function classifyVolatility(atr, price) {
   return 'Medium';
 }
 
-export function computeFeatures(candles = []) {
+function _legacyComputeFeatures(candles = []) {
   if (!Array.isArray(candles) || candles.length === 0) return null;
 
   const valid = candles.filter(
@@ -1274,5 +1274,57 @@ export function computeFeatures(candles = []) {
     medianPrice,
     typicalPrice,
     weightedClose,
+  };
+}
+
+export function computeFeatures(candles = [], context = {}) {
+  if (!Array.isArray(candles) || candles.length === 0) return null;
+  const closes = candles.map((c) => c.close);
+  const highs = candles.map((c) => c.high);
+  const lows = candles.map((c) => c.low);
+  const vols = candles.map((c) => c.volume || 0);
+
+  const ema9 = calculateEMA(closes, 9);
+  const ema20 = calculateEMA(closes, 20);
+  const ema50 = calculateEMA(closes, 50);
+  const ema200 = calculateEMA(closes, 200);
+  const rsi14 = calculateRSI(closes, 14);
+  const macd = calculateMACD(closes);
+  const atr14 = getATR(candles, 14);
+  const sessionVWAP = calculateVWAP(candles);
+  const rollingVWAP10 =
+    candles.length >= 10 ? calculateVWAP(candles.slice(-10)) : sessionVWAP;
+  const avgVol20 =
+    vols.slice(-20).reduce((a, b) => a + b, 0) /
+    Math.max(1, Math.min(20, vols.length));
+  const rvol = avgVol20 ? vols.at(-1) / avgVol20 : 0;
+  const trend = {
+    emaStack: [ema9, ema20, ema50, ema200],
+    bullish: ema9 > ema20 && ema20 > ema50 && ema50 > ema200,
+    bearish: ema9 < ema20 && ema20 < ema50 && ema50 < ema200,
+  };
+  return {
+    closes,
+    highs,
+    lows,
+    vols,
+    ema9,
+    ema20,
+    ema50,
+    ema200,
+    rsi14,
+    macd,
+    atr: atr14,
+    sessionVWAP,
+    rollingVWAP10,
+    rvol,
+    trend,
+    rsSlope: context.rsSlope ?? null,
+    ttmSqueeze: context.ttmSqueeze ?? null,
+    breadth: context.breadth ?? null,
+    dailyRefs: context.dailyRefs ?? {},
+    hasOrderFlowDelta: !!context.hasOrderFlowDelta,
+    hasHeikinAshi: !!context.hasHeikinAshi,
+    hasCPRData: !!context.hasCPRData,
   };
 }
