@@ -70,17 +70,17 @@ function detectEmaCrossover(candles, _ctx = {}, config = DEFAULT_CONFIG) {
   if (candles.length < 50) return null;
   const closes = candles.map((c) => c.close);
   const volumes = candles.map((c) => c.volume || 0);
-  const ema21 = emaSeries(closes, 21);
-  const ema50 = emaSeries(closes, 50);
+  const emaSeries21 = emaSeries(closes, 21);
+  const emaSeries50 = emaSeries(closes, 50);
   const last = candles.at(-1);
   const avgVol =
     volumes.slice(-10).reduce((a, b) => a + b, 0) /
     Math.min(10, volumes.length);
 
   if (
-    ema21.at(-2) <= ema50.at(-2) &&
-    ema21.at(-1) > ema50.at(-1) &&
-    last.close > ema21.at(-1) &&
+    emaSeries21.at(-2) <= emaSeries50.at(-2) &&
+    emaSeries21.at(-1) > emaSeries50.at(-1) &&
+    last.close > emaSeries21.at(-1) &&
     last.volume > avgVol * config.volumeSpikeMultiplier
   ) {
     return { name: "EMA Crossover + Volume Spike", confidence: 0.8 };
@@ -149,9 +149,9 @@ function detectEmaRibbonCompression(
 ) {
   if (candles.length < 50) return null;
   const closes = candles.map((c) => c.close);
-  const ema5 = emaSeries(closes, 5).at(-1);
-  const ema20 = emaSeries(closes, 20).at(-1);
-  const ema50 = emaSeries(closes, 50).at(-1);
+  const ema5 = calculateEMA(closes, 5);
+  const ema20 = calculateEMA(closes, 20);
+  const ema50 = calculateEMA(closes, 50);
   const spread = Math.max(ema5, ema20, ema50) - Math.min(ema5, ema20, ema50);
   const price = closes.at(-1);
   if (
@@ -1564,6 +1564,47 @@ export const DETECTORS = [
   detectBearTrapAfterGapDown,
 ];
 
+function normalizeResult(raw, candles, features = {}, atr, context = {}) {
+  if (!raw || typeof raw !== "object") return null;
+  const closes = features.closes || candles.map(c => c.close);
+  const price = raw.entry ?? closes.at(-1);
+  const dir = raw.direction || "Long";
+  const usedAtr = atr || 0;
+  const entry = price;
+  const stopLoss =
+    raw.stopLoss !== undefined
+      ? raw.stopLoss
+      : dir === "Long"
+      ? entry - usedAtr
+      : entry + usedAtr;
+  const targets =
+    raw.targets ||
+    {
+      T1: dir === "Long" ? entry + usedAtr : entry - usedAtr,
+      T2: dir === "Long" ? entry + 2 * usedAtr : entry - 2 * usedAtr,
+    };
+  const confidence = raw.confidence ?? 0.5;
+  const score = raw.score ?? confidence;
+  const meta = {
+    atr: usedAtr,
+    rvol: context.rvol,
+    ...(raw.meta || {}),
+    ...(context.meta || {}),
+  };
+  return {
+    name: raw.name,
+    type: raw.type || "Event",
+    direction: dir,
+    entry,
+    stopLoss,
+    targets,
+    confidence,
+    score,
+    meta,
+    refs: raw.refs || {},
+  };
+}
+
 export function evaluateStrategies(
   candles,
   context = {},
@@ -1571,14 +1612,16 @@ export function evaluateStrategies(
 ) {
   if (!Array.isArray(candles) || candles.length < 5) return [];
   const cfg = options.config || DEFAULT_CONFIG;
-  let results = DETECTORS.map((fn) => fn(candles, context, cfg))
+  const features = computeFeatures(candles) || {};
+  const atr = features.atr14 || getATR(candles, 14) || 0;
+  let results = DETECTORS.map((fn) => fn(candles, { ...context, features }, cfg))
     .filter(Boolean)
-    .map((r) => ({ ...(STRATEGY_CATALOG[r.name] || {}), ...r }));
+    .map((r) => normalizeResult({ ...(STRATEGY_CATALOG[r.name] || {}), ...r }, candles, features, atr, context));
   if (options.filters) {
     results = applyFilters(results, context, options.filters);
   }
-  results.sort((a, b) => b.confidence - a.confidence);
-  return options.topN ? results.slice(0, options.topN) : results;
+  results.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+  return results;
 }
 
 function applyFilters(strategies, context, filters) {
