@@ -282,7 +282,8 @@ async function initSession() {
     try {
       await kc.getProfile(); // Throws if token is expired
       console.log("✅ Access token is valid and set.");
-      return session;
+      // Return only the access token string for downstream use
+      return session.access_token;
     } catch (err) {
       console.error("❌ Access token is expired or invalid.", err.message);
       // RESET DATA BASE
