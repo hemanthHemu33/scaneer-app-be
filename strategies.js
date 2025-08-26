@@ -20,9 +20,27 @@ import { confirmRetest, detectAllPatterns } from "./util.js";
 // Default configuration for strategy detectors. Frozen to prevent
 // accidental runtime mutation in production deployments.
 export const DEFAULT_CONFIG = Object.freeze({
+  gapPctMinLong: 1.5,
+  gapPctMinShort: 1.5,
+  maxGapPct: 10,
   volumeSpikeMultiplier: 1.5,
-  ribbonCompressionPct: 0.005,
+  rvolMin: 1,
+  ribbonCompressionATRx: 0.5,
+  rsiOB: 70,
+  rsiOS: 30,
   rsiExhaustion: 80,
+  vwapMode: "rolling",
+  vwapDeviationPct: 0.02,
+  insideBarNarrowPct: 0.3,
+  requireBreakoutRetest: "soft",
+  riskAtrMaxMultiple: 3,
+  slAtrMultiple: 1,
+  targetAtrMultiples: [1, 2],
+  noTradeOpenMins: 10,
+  noTradeCloseMins: 10,
+  regimeAtrZScoreBins: { low: -1, high: 1 },
+  maxSpreadPct: 0.5,
+  minAvgVolume: 100000,
 });
 
 function emaSeries(prices, length) {
@@ -65,6 +83,7 @@ function inIstRange(ts, start, end) {
 const PREOPEN_START = 9 * 60;
 const PREOPEN_END = 9 * 60 + 15;
 const MARKET_OPEN = PREOPEN_END;
+const MARKET_CLOSE = 15 * 60 + 30;
 
 function detectEmaCrossover(candles, _ctx = {}, config = DEFAULT_CONFIG) {
   if (candles.length < 50) return null;
@@ -154,8 +173,9 @@ function detectEmaRibbonCompression(
   const ema50 = calculateEMA(closes, 50);
   const spread = Math.max(ema5, ema20, ema50) - Math.min(ema5, ema20, ema50);
   const price = closes.at(-1);
+  const atr = getATR(candles, 14) || 0;
   if (
-    spread < price * config.ribbonCompressionPct &&
+    spread < atr * config.ribbonCompressionATRx &&
     price > Math.max(ema5, ema20, ema50)
   ) {
     return { name: "EMA Ribbon Compression", confidence: 0.65 };
@@ -163,13 +183,13 @@ function detectEmaRibbonCompression(
   return null;
 }
 
-function detectSupertrendRsi(candles) {
+function detectSupertrendRsi(candles, _ctx = {}, config = DEFAULT_CONFIG) {
   if (candles.length < 20) return null;
   const closes = candles.map((c) => c.close);
   const rsi = calculateRSI(closes, 14);
   const st = calculateSupertrend(candles, 10);
   const last = candles.at(-1);
-  if (last.close > st.level && rsi > 55) {
+  if (last.close > st.level && rsi > config.rsiOB) {
     return { name: "Supertrend + RSI Filter", confidence: 0.65 };
   }
   return null;
@@ -271,11 +291,14 @@ function detectBollingerBounce(candles) {
   return null;
 }
 
-function detectInsideBarBreakout(candles) {
+function detectInsideBarBreakout(candles, _ctx = {}, config = DEFAULT_CONFIG) {
   if (candles.length < 3) return null;
   const [pre, last] = [candles.at(-2), candles.at(-1)];
   if (last.high < pre.high && last.low > pre.low) return null;
-  if (pre.high - pre.low < (highest(candles, 5) - lowest(candles, 5)) * 0.3) {
+  if (
+    pre.high - pre.low <
+    (highest(candles, 5) - lowest(candles, 5)) * config.insideBarNarrowPct
+  ) {
     if (last.close > pre.high || last.close < pre.low) {
       return { name: "Inside Bar Range Breakout", confidence: 0.55 };
     }
@@ -296,13 +319,16 @@ function detectSupportResistancePingPong(candles) {
   return null;
 }
 
-function detectVWReversalZone(candles) {
+function detectVWReversalZone(candles, _ctx = {}, config = DEFAULT_CONFIG) {
   if (candles.length < 10) return null;
-  const vwap = calculateVWAP(candles.slice(-10));
+  const vwap =
+    config.vwapMode === "session"
+      ? calculateAnchoredVWAP(candles)
+      : calculateVWAP(candles.slice(-10));
   const last = candles.at(-1);
   const deviation = Math.abs(last.close - vwap) / vwap;
   if (
-    deviation > 0.02 &&
+    deviation > config.vwapDeviationPct &&
     last.high - last.low > (highest(candles, 5) - lowest(candles, 5)) * 0.5
   ) {
     return { name: "Volume-Weighted Reversal Zone (VW-RZ)", confidence: 0.6 };
@@ -324,7 +350,11 @@ function detectGapOpeningRangeBreakout(candles) {
   return null;
 }
 
-export function detectGapUpOrDown({ dailyHistory, sessionCandles }) {
+export function detectGapUpOrDown(
+  { dailyHistory, sessionCandles },
+  _ctx = {},
+  config = DEFAULT_CONFIG
+) {
   if (!Array.isArray(dailyHistory) || dailyHistory.length < 2) return null;
   if (!Array.isArray(sessionCandles) || !sessionCandles[0]) return null;
   const yesterdayClose = dailyHistory[dailyHistory.length - 2]?.close;
@@ -332,7 +362,8 @@ export function detectGapUpOrDown({ dailyHistory, sessionCandles }) {
   if (typeof yesterdayClose !== "number" || typeof todayOpen !== "number")
     return null;
   const gapPercent = ((todayOpen - yesterdayClose) / yesterdayClose) * 100;
-  if (gapPercent >= 1.5)
+  if (Math.abs(gapPercent) > config.maxGapPct) return null;
+  if (gapPercent >= config.gapPctMinLong)
     return {
       type: "Gap-Up Breakout",
       direction: "Long",
@@ -340,7 +371,7 @@ export function detectGapUpOrDown({ dailyHistory, sessionCandles }) {
       breakout: todayOpen,
       stopLoss: yesterdayClose,
     };
-  if (gapPercent <= -1.5)
+  if (gapPercent <= -config.gapPctMinShort)
     return {
       type: "Gap-Down Reversal",
       direction: "Short",
@@ -351,7 +382,10 @@ export function detectGapUpOrDown({ dailyHistory, sessionCandles }) {
   return null;
 }
 
-export function detectAndScorePattern(context = {}) {
+export function detectAndScorePattern(
+  context = {},
+  config = DEFAULT_CONFIG
+) {
   const { candles = [], features = computeFeatures(candles) } = context;
   if (!Array.isArray(candles) || candles.length < 5) return null;
 
@@ -380,16 +414,18 @@ export function detectAndScorePattern(context = {}) {
       best.direction === 'Long' ? last.low : last.high;
   }
 
-  if (
-    best.type === 'Breakout' &&
-    !confirmRetest(candles.slice(-2), best.breakout, best.direction)
-  ) {
-    return null;
+  if (best.type === 'Breakout') {
+    const retested = confirmRetest(
+      candles.slice(-2),
+      best.breakout,
+      best.direction
+    );
+    if (config.requireBreakoutRetest === 'hard' && !retested) return null;
   }
 
   if (
-    (best.direction === 'Long' && rsi > 75) ||
-    (best.direction === 'Short' && rsi < 25)
+    (best.direction === 'Long' && rsi > config.rsiExhaustion) ||
+    (best.direction === 'Short' && rsi < config.rsiOS)
   ) {
     return null;
   }
@@ -409,12 +445,20 @@ export function detectAndScorePattern(context = {}) {
   return best;
 }
 
-function detectVwapBounce(candles) {
+function detectVwapBounce(candles, _ctx = {}, config = DEFAULT_CONFIG) {
   if (candles.length < 10) return null;
-  const vwap = calculateVWAP(candles.slice(-10));
+  const vwap =
+    config.vwapMode === "session"
+      ? calculateAnchoredVWAP(candles)
+      : calculateVWAP(candles.slice(-10));
   const last = candles.at(-1);
   const prev = candles.at(-2);
-  if (prev.low <= vwap && last.close > prev.close && last.low > vwap) {
+  const deviation = Math.abs(prev.low - vwap) / vwap;
+  if (
+    deviation <= config.vwapDeviationPct &&
+    last.close > prev.close &&
+    last.low > vwap
+  ) {
     return { name: "VWAP Bounce", confidence: 0.55 };
   }
   return null;
@@ -1564,25 +1608,36 @@ export const DETECTORS = [
   detectBearTrapAfterGapDown,
 ];
 
-function normalizeResult(raw, candles, features = {}, atr, context = {}) {
+function normalizeResult(
+  raw,
+  candles,
+  features = {},
+  atr,
+  context = {},
+  config = DEFAULT_CONFIG
+) {
   if (!raw || typeof raw !== "object") return null;
   const closes = features.closes || candles.map(c => c.close);
   const price = raw.entry ?? closes.at(-1);
   const dir = raw.direction || "Long";
-  const usedAtr = atr || 0;
+  const usedAtr = Math.min(
+    atr || 0,
+    (context.avgAtr || atr || 0) * config.riskAtrMaxMultiple
+  );
   const entry = price;
   const stopLoss =
     raw.stopLoss !== undefined
       ? raw.stopLoss
       : dir === "Long"
-      ? entry - usedAtr
-      : entry + usedAtr;
+      ? entry - usedAtr * config.slAtrMultiple
+      : entry + usedAtr * config.slAtrMultiple;
   const targets =
     raw.targets ||
-    {
-      T1: dir === "Long" ? entry + usedAtr : entry - usedAtr,
-      T2: dir === "Long" ? entry + 2 * usedAtr : entry - 2 * usedAtr,
-    };
+    config.targetAtrMultiples.reduce((acc, m, i) => {
+      acc[`T${i + 1}`] =
+        dir === "Long" ? entry + usedAtr * m : entry - usedAtr * m;
+      return acc;
+    }, {});
   const confidence = raw.confidence ?? 0.5;
   const score = raw.score ?? confidence;
   const meta = {
@@ -1612,11 +1667,41 @@ export function evaluateStrategies(
 ) {
   if (!Array.isArray(candles) || candles.length < 5) return [];
   const cfg = options.config || DEFAULT_CONFIG;
+  if (context.rvol && context.rvol < cfg.rvolMin) return [];
+  if (context.spreadPct && context.spreadPct > cfg.maxSpreadPct) return [];
+  if (context.avgVolume && context.avgVolume < cfg.minAvgVolume) return [];
+  const lastTs = candles.at(-1)?.timestamp;
+  if (typeof lastTs === "number") {
+    const m = istMinutes(lastTs);
+    if (
+      m < MARKET_OPEN + cfg.noTradeOpenMins ||
+      m > MARKET_CLOSE - cfg.noTradeCloseMins
+    )
+      return [];
+  }
   const features = computeFeatures(candles) || {};
   const atr = features.atr14 || getATR(candles, 14) || 0;
+  if (typeof features.zScore === "number") {
+    const bins = cfg.regimeAtrZScoreBins || {};
+    context.regime =
+      features.zScore <= bins.low
+        ? "low"
+        : features.zScore >= bins.high
+        ? "high"
+        : "normal";
+  }
   let results = DETECTORS.map((fn) => fn(candles, { ...context, features }, cfg))
     .filter(Boolean)
-    .map((r) => normalizeResult({ ...(STRATEGY_CATALOG[r.name] || {}), ...r }, candles, features, atr, context));
+    .map((r) =>
+      normalizeResult(
+        { ...(STRATEGY_CATALOG[r.name] || {}), ...r },
+        candles,
+        features,
+        atr,
+        context,
+        cfg
+      )
+    );
   if (options.filters) {
     results = applyFilters(results, context, options.filters);
   }
