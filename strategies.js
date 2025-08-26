@@ -11,13 +11,19 @@ import {
 } from "./featureEngine.js";
 import { confirmRetest, detectAllPatterns } from "./util.js";
 
+// Indicator helpers imported above return only the latest scalar value.
+// Any indicator series needed by strategies should be generated locally
+// (e.g., via `emaSeries`) to keep call sites consistent and predictable.
+
 // Default thresholds used by strategy detectors. These can be overridden
 // via the optional `config` parameter in `evaluateStrategies`.
-export const DEFAULT_CONFIG = {
+// Default configuration for strategy detectors. Frozen to prevent
+// accidental runtime mutation in production deployments.
+export const DEFAULT_CONFIG = Object.freeze({
   volumeSpikeMultiplier: 1.5,
   ribbonCompressionPct: 0.005,
   rsiExhaustion: 80,
-};
+});
 
 function emaSeries(prices, length) {
   const k = 2 / (length + 1);
@@ -32,16 +38,33 @@ function emaSeries(prices, length) {
 }
 
 function avg(arr) {
-  return arr.reduce((a, b) => a + b, 0) / arr.length;
+  return arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
 }
 
 function highest(candles, count) {
-  return Math.max(...candles.slice(-count).map((c) => c.high));
+  if (!candles.length) return null;
+  const slice = candles.slice(-count);
+  return Math.max(...slice.map((c) => c.high));
 }
 
 function lowest(candles, count) {
-  return Math.min(...candles.slice(-count).map((c) => c.low));
+  if (!candles.length) return null;
+  const slice = candles.slice(-count);
+  return Math.min(...slice.map((c) => c.low));
 }
+
+const IST_OFFSET_MIN = 330; // IST is UTC+5:30
+function istMinutes(ts) {
+  const d = new Date(ts);
+  return (d.getUTCHours() * 60 + d.getUTCMinutes() + IST_OFFSET_MIN) % 1440;
+}
+function inIstRange(ts, start, end) {
+  const m = istMinutes(ts);
+  return m >= start && m < end;
+}
+const PREOPEN_START = 9 * 60;
+const PREOPEN_END = 9 * 60 + 15;
+const MARKET_OPEN = PREOPEN_END;
 
 function detectEmaCrossover(candles, _ctx = {}, config = DEFAULT_CONFIG) {
   if (candles.length < 50) return null;
@@ -107,7 +130,7 @@ function detectVduPocketPivot(candles) {
   const vols = candles.slice(-6).map((c) => c.volume || 0);
   const declining = vols
     .slice(1, -1)
-    .every((v, i, arr) => v <= arr[i] && v > 0);
+    .every((v, i) => v > 0 && v <= vols[i]);
   const avgDecline = vols.slice(0, -1).reduce((a, b) => a + b, 0) / 5;
   if (
     declining &&
@@ -288,10 +311,12 @@ function detectVWReversalZone(candles) {
 }
 
 function detectGapOpeningRangeBreakout(candles) {
-  if (candles.length < 20) return null;
-  const first = candles.at(-20);
-  const rangeHigh = Math.max(...candles.slice(-15).map((c) => c.high));
-  const rangeLow = Math.min(...candles.slice(-15).map((c) => c.low));
+  const opening = candles.filter((c) =>
+    typeof c.timestamp === 'number' && inIstRange(c.timestamp, MARKET_OPEN, MARKET_OPEN + 15)
+  );
+  if (!opening.length) return null;
+  const first = opening[0];
+  const rangeHigh = Math.max(...opening.map((c) => c.high));
   const last = candles.at(-1);
   if (first.open > first.close && last.close > rangeHigh) {
     return { name: "Gap Up + Opening Range Breakout", confidence: 0.6 };
@@ -408,10 +433,17 @@ function detectFlatBaseBreakout(candles) {
 }
 
 function detectPreMarketBreakout(candles) {
-  if (candles.length < 20) return null;
-  const rangeHigh = highest(candles.slice(-20, -15), 5);
+  const pre = candles.filter((c) =>
+    typeof c.timestamp === 'number' && inIstRange(c.timestamp, PREOPEN_START, PREOPEN_END)
+  );
+  if (!pre.length) return null;
+  const rangeHigh = Math.max(...pre.map((c) => c.high));
   const last = candles.at(-1);
-  if (last.close > rangeHigh) {
+  if (
+    typeof last.timestamp === 'number' &&
+    istMinutes(last.timestamp) >= MARKET_OPEN &&
+    last.close > rangeHigh
+  ) {
     return { name: "Pre-Market High/Low Breakout", confidence: 0.55 };
   }
   return null;
@@ -468,15 +500,14 @@ function detectEarningsGapReversal(candles) {
 }
 
 function detectCprBreakout(candles) {
-  if (candles.length < 4) return null;
-  const pivots = [
-    candles.at(-4).close,
-    candles.at(-3).close,
-    candles.at(-2).close,
-  ];
-  const avgPivot = avg(pivots);
+  if (candles.length < 2) return null;
+  const prev = candles.at(-2);
   const last = candles.at(-1);
-  if (last.close > avgPivot && last.close > highest(candles, 4)) {
+  const pp = (prev.high + prev.low + prev.close) / 3;
+  const bc = (prev.high + prev.low) / 2;
+  const tc = 2 * pp - bc;
+  const cprHigh = Math.max(bc, tc);
+  if (last.close > cprHigh && last.close > prev.high) {
     return { name: "CPR Breakout", confidence: 0.55 };
   }
   return null;
@@ -546,10 +577,18 @@ function detectCompressionBreakout(candles) {
 }
 
 function detectOpeningRangeFakeout(candles) {
-  if (candles.length < 15) return null;
-  const first15High = highest(candles.slice(0, 15), 15);
+  const opening = candles.filter((c) =>
+    typeof c.timestamp === 'number' && inIstRange(c.timestamp, MARKET_OPEN, MARKET_OPEN + 15)
+  );
+  if (!opening.length) return null;
+  const rangeHigh = Math.max(...opening.map((c) => c.high));
   const last = candles.at(-1);
-  if (last.high > first15High && last.close < first15High) {
+  if (
+    typeof last.timestamp === 'number' &&
+    istMinutes(last.timestamp) >= MARKET_OPEN + 15 &&
+    last.high > rangeHigh &&
+    last.close < rangeHigh
+  ) {
     return { name: "Intraday Opening Range Fakeout", confidence: 0.55 };
   }
   return null;
@@ -657,22 +696,22 @@ function detectBreakoutFailureReversal(candles) {
   return null;
 }
 
-function detectAdxDiStrength(candles) {
+function detectAtrRangeExpansion(candles) {
   if (candles.length < 15) return null;
   const atr = getATR(candles, 14);
   const diff = highest(candles, 1) - lowest(candles, 1);
   if (diff > atr && atr > 0) {
-    return { name: "ADX + DI Trend Strength Validator", confidence: 0.55 };
+    return { name: "ATR Range Expansion", confidence: 0.55 };
   }
   return null;
 }
 
-function detectHeikinAshiContinuation(candles) {
+function detectMarubozuContinuation(candles) {
   if (candles.length < 4) return null;
   const last3 = candles.slice(-3);
   const noLowerWick = last3.every((c) => c.open <= c.low && c.close >= c.open);
   if (noLowerWick && candles.at(-1).close > candles.at(-2).close) {
-    return { name: "Heikin Ashi Trend Continuation", confidence: 0.55 };
+    return { name: "Marubozu Trend Continuation", confidence: 0.55 };
   }
   return null;
 }
@@ -1302,7 +1341,7 @@ function detectEventVolatilityTrap(candles) {
   const last = candles.at(-1);
   const prev = candles.at(-2);
   if (
-    last.high - last.low > prev.high - prev.low * 1.5 &&
+    last.high - last.low > (prev.high - prev.low) * 1.5 &&
     last.close < prev.close
   ) {
     return { name: "Event Volatility Trap + Spike Fade", confidence: 0.55 };
@@ -1311,14 +1350,19 @@ function detectEventVolatilityTrap(candles) {
 }
 
 function detectOpeningRangeReversal(candles) {
-  if (candles.length < 30) return null;
-  const rangeHigh = highest(candles.slice(0, 30), 30);
-  const rangeLow = lowest(candles.slice(0, 30), 30);
+  const opening = candles.filter((c) =>
+    typeof c.timestamp === 'number' && inIstRange(c.timestamp, MARKET_OPEN, MARKET_OPEN + 30)
+  );
+  if (!opening.length) return null;
+  const rangeHigh = Math.max(...opening.map((c) => c.high));
+  const rangeLow = Math.min(...opening.map((c) => c.low));
   const last = candles.at(-1);
-  if (last.high > rangeHigh && last.close < rangeHigh) {
+  if (typeof last.timestamp !== 'number') return null;
+  const m = istMinutes(last.timestamp);
+  if (m >= MARKET_OPEN + 30 && last.high > rangeHigh && last.close < rangeHigh) {
     return { name: "Opening Range Reversal (ORR)", confidence: 0.55 };
   }
-  if (last.low < rangeLow && last.close > rangeLow) {
+  if (m >= MARKET_OPEN + 30 && last.low < rangeLow && last.close > rangeLow) {
     return { name: "Opening Range Reversal (ORR)", confidence: 0.55 };
   }
   return null;
@@ -1340,8 +1384,8 @@ function detectVpaTrapCandle(candles) {
   return null;
 }
 
-function detectDeltaDivergence(candles) {
-  if (candles.length < 3) return null;
+function detectDeltaDivergence(candles, ctx = {}) {
+  if (!ctx.hasOrderFlowDelta || candles.length < 3) return null;
   const last = candles.at(-1);
   const prevHigh = highest(candles.slice(-3, -1), 2);
   if (last.high > prevHigh && (last.delta || 0) < (candles.at(-2).delta || 0)) {
@@ -1457,8 +1501,8 @@ export const DETECTORS = [
   detectEmaSweepReversal,
   detectVolumeClusterBreakout,
   detectBreakoutFailureReversal,
-  detectAdxDiStrength,
-  detectHeikinAshiContinuation,
+  detectAtrRangeExpansion,
+  detectMarubozuContinuation,
   detectRsiRangeShift,
   detectGapFill,
   detectVcp,
@@ -1529,7 +1573,7 @@ export function evaluateStrategies(
   const cfg = options.config || DEFAULT_CONFIG;
   let results = DETECTORS.map((fn) => fn(candles, context, cfg))
     .filter(Boolean)
-    .map((r) => ({ ...STRATEGY_CATALOG[r.name], ...r }));
+    .map((r) => ({ ...(STRATEGY_CATALOG[r.name] || {}), ...r }));
   if (options.filters) {
     results = applyFilters(results, context, options.filters);
   }
@@ -1823,6 +1867,12 @@ export const momentumBreakoutStrategies = [
     rules: ["Gap up", "Bullish engulfing of prior candle"],
   },
   {
+    name: "Gap + Engulfing (Confluence)",
+    rules: [
+      "Gap open aligns with engulfing candle in same direction",
+    ],
+  },
+  {
     name: "Gap Up + Inside Bar Retest",
     rules: ["Gap up then inside bar retests prior high"],
   },
@@ -2094,18 +2144,18 @@ export const expertStrategies = [
     notes: "Useful for fading false breakouts in choppy markets",
   },
   {
-    name: "ADX + DI Trend Strength Validator",
+    name: "ATR Range Expansion",
     rules: [
-      "Use ADX above 25 with DI+ greater than DI‑ for trend confirmation",
-      "Combine with pullback or breakout entries",
+      "Current candle range exceeds previous ATR",
+      "Signals potential trend strength after volatility expansion",
     ],
     notes: "Adds strength filter to reduce noise",
   },
   {
-    name: "Heikin Ashi Trend Continuation",
+    name: "Marubozu Trend Continuation",
     rules: [
-      "Three or more Heikin Ashi green candles with no lower wick",
-      "Enter on break of the next green candle",
+      "Three or more bullish candles with no lower wick",
+      "Enter on break of the next candle high",
       "Optional confirmation with RSI > 60 or VWAP",
     ],
   },
@@ -2369,11 +2419,8 @@ function detectGapEngulfingConfluence(candles) {
     last.close > last.open && prev.close < prev.open && last.open <= prev.close && last.close >= prev.open;
   const engulfBear =
     last.close < last.open && prev.close > prev.open && last.open >= prev.close && last.close <= prev.open;
-  if (gap > 0.01 && engulfBull) {
-    return { name: 'Gap Up + Bullish Engulfing', confidence: 0.6 };
-  }
-  if (gap < -0.01 && engulfBear) {
-    return { name: 'Gap Down + Bearish Engulfing', confidence: 0.6 };
+  if ((gap > 0.01 && engulfBull) || (gap < -0.01 && engulfBear)) {
+    return { name: 'Gap + Engulfing (Confluence)', confidence: 0.6 };
   }
   return null;
 }
