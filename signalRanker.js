@@ -248,7 +248,10 @@ function scoreSignal(signal = {}) {
 export function rankSignals(signals = [], topN = 1) {
   if (!Array.isArray(signals) || signals.length === 0) return [];
   const ranked = signals
-    .map((s) => ({ ...s, score: scoreSignal(s) }))
+    .map((s) => ({
+      ...s,
+      score: typeof s.score === 'number' ? s.score : scoreSignal(s),
+    }))
     .sort((a, b) => b.score - a.score);
   return ranked.slice(0, topN);
 }

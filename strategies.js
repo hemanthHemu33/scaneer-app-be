@@ -1608,6 +1608,81 @@ export const DETECTORS = [
   detectBearTrapAfterGapDown,
 ];
 
+function computeTrendAlignment(direction, features = {}) {
+  const { ema9, ema21, ema50, ema200 } = features;
+  if ([ema9, ema21, ema50, ema200].every((n) => typeof n === "number")) {
+    const up = ema9 > ema21 && ema21 > ema50 && ema50 > ema200;
+    const down = ema9 < ema21 && ema21 < ema50 && ema50 < ema200;
+    if (direction === "Long") return up ? 1 : down ? 0 : 0.5;
+    if (direction === "Short") return down ? 1 : up ? 0 : 0.5;
+  }
+  return 0.5;
+}
+
+function mapRvolScore(rvol) {
+  return typeof rvol === "number" ? Math.min(Math.max(rvol, 0) / 2, 1) : 0.5;
+}
+
+function computeRiskQuality(entry, stopLoss, atr) {
+  if (!entry || !stopLoss || !atr) return 0.5;
+  const risk = Math.abs(entry - stopLoss);
+  const ratio = risk / atr;
+  return Math.max(0, Math.min(1 - Math.min(ratio, 2) / 2, 1));
+}
+
+function computeRegimeFit(type = "", regime) {
+  if (!regime) return 0.7;
+  const t = type.toLowerCase();
+  if (regime === "high") {
+    if (t.includes("breakout") || t.includes("momentum")) return 1;
+    if (t.includes("mean") || t.includes("reversion")) return 0.3;
+    return 0.6;
+  }
+  if (regime === "low") {
+    if (t.includes("mean") || t.includes("reversion")) return 1;
+    if (t.includes("breakout") || t.includes("momentum")) return 0.3;
+    return 0.6;
+  }
+  return 0.7;
+}
+
+function computeTimeOfDayScore(ts) {
+  if (typeof ts !== "number") return 0.8;
+  const m = istMinutes(ts);
+  if (m >= MARKET_OPEN + 15 && m <= MARKET_OPEN + 90) return 1;
+  if (m <= MARKET_CLOSE - 60 && m > MARKET_OPEN + 90) return 0.8;
+  return 0.6;
+}
+
+function computeDetectorScore(raw, candles, features, context, entry, stopLoss, atr, config) {
+  const patternQuality = raw.patternQuality ?? raw.meta?.patternQuality ?? 0.5;
+  const trendAlign = computeTrendAlignment(raw.direction || "Long", features);
+  const rvolScore = mapRvolScore(context.rvol ?? features.rvol);
+  const riskQuality = computeRiskQuality(entry, stopLoss, atr);
+  const regimeFit = computeRegimeFit(raw.type || raw.name, context.regime);
+  const todScore = computeTimeOfDayScore(candles.at(-1)?.timestamp);
+  const rsScore = typeof (context.rsScore ?? features.rsScore) === "number"
+    ? Math.max(0, Math.min(context.rsScore ?? features.rsScore, 1))
+    : 0.5;
+
+  let base =
+    patternQuality * 0.2 +
+    trendAlign * 0.15 +
+    rvolScore * 0.15 +
+    riskQuality * 0.15 +
+    regimeFit * 0.15 +
+    todScore * 0.1 +
+    rsScore * 0.1;
+
+  let penalty = 0;
+  if (context.spreadPct && context.spreadPct > config.maxSpreadPct) penalty += 0.1;
+  if (context.newsImpact || context.badNews) penalty += 0.2;
+  if (raw.meta?.missingRetest) penalty += 0.05;
+  const rsi = features.rsi14 ?? features.rsi;
+  if (typeof rsi === "number" && (rsi > config.rsiExhaustion || rsi < config.rsiOS)) penalty += 0.05;
+  return Math.max(0, Math.min(base - penalty, 1));
+}
+
 function normalizeResult(
   raw,
   candles,
@@ -1639,7 +1714,18 @@ function normalizeResult(
       return acc;
     }, {});
   const confidence = raw.confidence ?? 0.5;
-  const score = raw.score ?? confidence;
+  const score =
+    raw.score ??
+    computeDetectorScore(
+      raw,
+      candles,
+      features,
+      context,
+      entry,
+      stopLoss,
+      usedAtr,
+      config
+    );
   const meta = {
     atr: usedAtr,
     rvol: context.rvol,
@@ -1705,8 +1791,21 @@ export function evaluateStrategies(
   if (options.filters) {
     results = applyFilters(results, context, options.filters);
   }
-  results.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
-  return results;
+  const merged = {};
+  for (const r of results) {
+    const key = r.name;
+    if (merged[key]) {
+      merged[key].confidence = Math.max(merged[key].confidence, r.confidence);
+      merged[key].score = Math.max(merged[key].score, r.score);
+      merged[key].meta = { ...merged[key].meta, ...r.meta };
+      merged[key].refs = { ...merged[key].refs, ...r.refs };
+    } else {
+      merged[key] = { ...r };
+    }
+  }
+  const deduped = Object.values(merged);
+  deduped.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+  return deduped;
 }
 
 function applyFilters(strategies, context, filters) {
