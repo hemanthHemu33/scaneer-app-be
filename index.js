@@ -19,6 +19,7 @@ import {
   rebuildThreeMinCandlesFromOneMin,
   resetInMemoryData,
   preloadStockData,
+  kc,
 } from "./kite.js";
 import { sendSignal } from "./telegram.js";
 import {
@@ -43,6 +44,8 @@ import {
 import { selectTopSignal } from "./signalRanker.js";
 import { logTrade } from "./tradeLogger.js";
 import { logError } from "./logger.js";
+
+const apiSecret = process.env.KITE_API_SECRET;
 
 const app = express();
 const server = http.createServer(app);

@@ -286,7 +286,7 @@ async function initSession() {
     } catch (err) {
       console.error("❌ Access token is expired or invalid.", err.message);
       // RESET DATA BASE
-      await resetDatabase();
+      // await resetDatabase();
       return null;
     }
   } catch (err) {
