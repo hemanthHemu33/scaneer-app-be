@@ -38,6 +38,10 @@ export const DEFAULT_CONFIG = Object.freeze({
   targetAtrMultiples: [1, 2],
   noTradeOpenMins: 10,
   noTradeCloseMins: 10,
+  allowPreOpenEntries: false,
+  openRangeMins: 30,
+  eventRvolMultiplier: 1.5,
+  eventSlAtrMultiplier: 1.5,
   regimeAtrZScoreBins: { low: -1, high: 1 },
   maxSpreadPct: 0.5,
   minAvgVolume: 100000,
@@ -84,6 +88,17 @@ const PREOPEN_START = 9 * 60;
 const PREOPEN_END = 9 * 60 + 15;
 const MARKET_OPEN = PREOPEN_END;
 const MARKET_CLOSE = 15 * 60 + 30;
+
+function rangeBetween(candles, startMin, endMin) {
+  const window = candles.filter(
+    (c) => typeof c.timestamp === "number" && inIstRange(c.timestamp, startMin, endMin)
+  );
+  if (!window.length) return null;
+  return {
+    high: Math.max(...window.map((c) => c.high)),
+    low: Math.min(...window.map((c) => c.low)),
+  };
+}
 
 function detectEmaCrossover(candles, _ctx = {}, config = DEFAULT_CONFIG) {
   if (candles.length < 50) return null;
@@ -1729,6 +1744,8 @@ function normalizeResult(
   const meta = {
     atr: usedAtr,
     rvol: context.rvol,
+    preMarketRange: context.preMarketRange,
+    openRange: context.openRange,
     ...(raw.meta || {}),
     ...(context.meta || {}),
   };
@@ -1752,31 +1769,58 @@ export function evaluateStrategies(
   options = { topN: 1, filters: null, config: DEFAULT_CONFIG }
 ) {
   if (!Array.isArray(candles) || candles.length < 5) return [];
-  const cfg = options.config || DEFAULT_CONFIG;
-  if (context.rvol && context.rvol < cfg.rvolMin) return [];
+  let cfg = { ...(options.config || DEFAULT_CONFIG) };
+  if (context.isRestricted) return [];
+  const isEvent = context.isEventDay || context.isWeeklyExpiry;
+  if (context.rvol) {
+    if (
+      isEvent &&
+      context.rvol < cfg.rvolMin * (cfg.eventRvolMultiplier || 1)
+    )
+      return [];
+    if (!isEvent && context.rvol < cfg.rvolMin) return [];
+  }
   if (context.spreadPct && context.spreadPct > cfg.maxSpreadPct) return [];
   if (context.avgVolume && context.avgVolume < cfg.minAvgVolume) return [];
+  if (isEvent) {
+    cfg = {
+      ...cfg,
+      slAtrMultiple: cfg.slAtrMultiple * (cfg.eventSlAtrMultiplier || 1),
+    };
+  }
   const lastTs = candles.at(-1)?.timestamp;
   if (typeof lastTs === "number") {
     const m = istMinutes(lastTs);
-    if (
+    if (m < MARKET_OPEN) {
+      if (!cfg.allowPreOpenEntries) return [];
+    } else if (
       m < MARKET_OPEN + cfg.noTradeOpenMins ||
       m > MARKET_CLOSE - cfg.noTradeCloseMins
-    )
+    ) {
       return [];
+    }
   }
+  const preRange = rangeBetween(candles, PREOPEN_START, PREOPEN_END);
+  const openRange = rangeBetween(
+    candles,
+    MARKET_OPEN,
+    MARKET_OPEN + cfg.openRangeMins
+  );
+  const ctx = { ...context };
+  if (preRange) ctx.preMarketRange = preRange;
+  if (openRange) ctx.openRange = openRange;
   const features = computeFeatures(candles) || {};
   const atr = features.atr14 || getATR(candles, 14) || 0;
   if (typeof features.zScore === "number") {
     const bins = cfg.regimeAtrZScoreBins || {};
-    context.regime =
+    ctx.regime =
       features.zScore <= bins.low
         ? "low"
         : features.zScore >= bins.high
         ? "high"
         : "normal";
   }
-  let results = DETECTORS.map((fn) => fn(candles, { ...context, features }, cfg))
+  let results = DETECTORS.map((fn) => fn(candles, { ...ctx, features }, cfg))
     .filter(Boolean)
     .map((r) =>
       normalizeResult(
@@ -1784,12 +1828,12 @@ export function evaluateStrategies(
         candles,
         features,
         atr,
-        context,
+        ctx,
         cfg
       )
     );
   if (options.filters) {
-    results = applyFilters(results, context, options.filters);
+    results = applyFilters(results, ctx, options.filters);
   }
   const merged = {};
   for (const r of results) {
