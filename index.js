@@ -43,7 +43,6 @@ import {
 import { selectTopSignal } from "./signalRanker.js";
 import { logTrade } from "./tradeLogger.js";
 import { logError } from "./logger.js";
-import "./auditEngine.js";
 
 const app = express();
 const server = http.createServer(app);
@@ -271,9 +270,9 @@ app.get("/kite-redirect", async (req, res) => {
       },
       { upsert: true }
     );
-    // if (isMarketOpen()) {
-    //   startLiveFeed(io);
-    // }
+    if (isMarketOpen()) {
+      startLiveFeed(io);
+    }
     return res.send("✅ Login successful, session created.");
   } catch (err) {
     console.error("❌ Failed to generate session:", err.message || err);
