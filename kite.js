@@ -276,16 +276,17 @@ async function initSession() {
       return null;
     }
 
-    kc.setAccessToken(session.access_token);
+    const accessToken = String(session.access_token);
+    kc.setAccessToken(accessToken);
 
     // 🔍 Optional: Check if token is still valid by calling a protected endpoint
     try {
       await kc.getProfile(); // Throws if token is expired
       console.log("✅ Access token is valid and set.");
-      return session;
+      return accessToken;
     } catch (err) {
       console.error("❌ Access token is expired or invalid.", err.message);
-      // RESET DATA BASE
+      kc.setAccessToken("");
       // await resetDatabase();
       return null;
     }
