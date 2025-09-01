@@ -57,33 +57,21 @@ const allowedOrigins = [
   "http://localhost:5600",
 ];
 
-app.use(
-  cors({
-    origin: function (origin, callback) {
-      if (!origin || allowedOrigins.includes(origin)) {
-        callback(null, true);
-      } else {
-        callback(new Error("Not allowed by CORS"));
-      }
-    },
-    methods: ["GET", "POST", "DELETE"],
-    credentials: true,
-  })
-);
-
-const io = new Server(server, {
-  cors: {
-    origin: function (origin, callback) {
-      if (!origin || allowedOrigins.includes(origin)) {
-        callback(null, true);
-      } else {
-        callback(new Error("Not allowed by CORS"));
-      }
-    },
-    methods: ["GET", "POST", "DELETE"],
-    credentials: true,
+const corsOptions = {
+  origin: function (origin, callback) {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error("Not allowed by CORS"));
+    }
   },
-});
+  methods: ["GET", "POST", "DELETE"],
+  credentials: true,
+};
+
+app.use(cors(corsOptions));
+
+const io = new Server(server, { cors: corsOptions });
 
 app.use(express.json());
 
@@ -257,11 +245,9 @@ app.get("/kite-redirect", async (req, res) => {
   }
 
   try {
-    // ✅ Generate new session using the one-time request token
     const session = await kc.generateSession(requestToken, apiSecret);
     kc.setAccessToken(session.access_token);
 
-    // ✅ Save full session and request_token in DB
     await db.collection("tokens").updateOne(
       { type: "kite_session" },
       {
@@ -278,10 +264,8 @@ app.get("/kite-redirect", async (req, res) => {
     }
     return res.send("✅ Login successful, session created.");
   } catch (err) {
-    console.error("❌ Failed to generate session:", err.message || err);
-    return res
-      .status(500)
-      .send("❌ Login failed: " + (err.message || "Unknown error"));
+    logError("kite redirect", err);
+    return res.status(500).json({ error: "Login failed" });
   }
 });
 

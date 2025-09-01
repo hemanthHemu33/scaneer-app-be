@@ -68,6 +68,51 @@ export async function trackOpenPositions(broker, cache = db) {
   }
 }
 
+function calculateExposure(symbol, sector) {
+  let gross = 0;
+  let sectorExposure = 0;
+  for (const p of openPositions.values()) {
+    const value = p.entryPrice * p.qty;
+    gross += value;
+    if (p.sector === sector) sectorExposure += value;
+  }
+  const instValue = openPositions.has(symbol)
+    ? openPositions.get(symbol).entryPrice * openPositions.get(symbol).qty
+    : 0;
+  return { gross, sectorExposure, instValue };
+}
+
+function enforceExposureLimits({
+  tradeValue,
+  totalCapital,
+  exposureCap,
+  instrumentCap,
+  reservePct,
+  maxMarginPct,
+  sectorCaps,
+  sector,
+  instValue,
+  sectorExposure,
+  gross,
+}) {
+  const newGross = gross + tradeValue;
+  if (totalCapital) {
+    const allowedExposure = totalCapital * exposureCap;
+    const reserveLimit = totalCapital * (1 - reservePct);
+    const marginLimit = totalCapital * maxMarginPct;
+    if (newGross > allowedExposure) return false;
+    if (newGross > reserveLimit) return false;
+    if (newGross > marginLimit) return false;
+
+    const instLimit = instrumentCap * totalCapital;
+    if (instValue + tradeValue > instLimit) return false;
+
+    const secLimit = (sectorCaps[sector] ?? 0.25) * totalCapital;
+    if (sectorExposure + tradeValue > secLimit) return false;
+  }
+  return true;
+}
+
 /**
  * Check if new trade breaches exposure limits.
  * @param {Object} opts
@@ -102,36 +147,20 @@ export function checkExposureLimits({
     if (tradeValue > totalCapital * tradeCapPct) return false;
   }
 
-  let gross = 0;
-  let sectorExposure = 0;
-  for (const p of openPositions.values()) {
-    const value = p.entryPrice * p.qty;
-    gross += value;
-    if (p.sector === sector) sectorExposure += value;
-  }
-
-  const instValue = openPositions.has(symbol)
-    ? openPositions.get(symbol).entryPrice * openPositions.get(symbol).qty
-    : 0;
-
-  const newGross = gross + tradeValue;
-
-  if (totalCapital) {
-    const allowedExposure = totalCapital * exposureCap;
-    const reserveLimit = totalCapital * (1 - reservePct);
-    const marginLimit = totalCapital * maxMarginPct;
-    if (newGross > allowedExposure) return false;
-    if (newGross > reserveLimit) return false;
-    if (newGross > marginLimit) return false;
-
-    const instLimit = instrumentCap * totalCapital;
-    if (instValue + tradeValue > instLimit) return false;
-
-    const secLimit = (sectorCaps[sector] ?? 0.25) * totalCapital;
-    if (sectorExposure + tradeValue > secLimit) return false;
-  }
-
-  return true;
+  const { gross, sectorExposure, instValue } = calculateExposure(symbol, sector);
+  return enforceExposureLimits({
+    tradeValue,
+    totalCapital,
+    exposureCap,
+    instrumentCap,
+    reservePct,
+    maxMarginPct,
+    sectorCaps,
+    sector,
+    instValue,
+    sectorExposure,
+    gross,
+  });
 }
 
 /**

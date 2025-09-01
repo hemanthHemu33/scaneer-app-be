@@ -9,80 +9,77 @@ import {
   validateVolumeSpike,
   validateVolatilitySlippage,
   isSLInvalid,
-} from './riskValidator.js';
-import { calculateStdDev, calculateZScore } from './util.js';
-import { resolveSignalConflicts } from './portfolioContext.js';
+} from "./riskValidator.js";
+import { calculateStdDev, calculateZScore } from "./util.js";
+import { resolveSignalConflicts } from "./portfolioContext.js";
+import { riskDefaults } from "./riskConfig.js";
 
 function getWeekNumber(d = new Date()) {
   const oneJan = new Date(d.getFullYear(), 0, 1);
   return Math.floor((d - oneJan) / (7 * 24 * 60 * 60 * 1000));
 }
 
-const defaultState = {
-  // PnL tracking
-  dailyLoss: 0,
-  weeklyLoss: 0,
-  monthlyLoss: 0,
-  dailyRisk: 0,
-  // Limits
-  maxDailyLoss: 5000,
-  maxDailyLossPct: 0,
-  maxCumulativeLoss: 0,
-  maxWeeklyDrawdown: 0,
-  maxMonthlyDrawdown: 0,
-  maxLossPerTradePct: 0,
-  maxDailyRisk: 10000,
-  equity: 0,
-  equityPeak: 0,
-  equityDrawdownLimitPct: 0,
-  // Trade tracking
-  tradeCount: 0,
-  maxTradesPerDay: 20,
-  tradesPerInstrument: new Map(),
-  tradesPerSector: new Map(),
-  maxTradesPerInstrument: 3,
-  maxTradesPerSector: 10,
-  consecutiveLosses: 0,
-  maxLossStreak: 3,
-  lastTradeWasLoss: false,
-  lastTradeTime: 0,
-  systemPaused: false,
-  signalCount: 0,
-  maxSignalsPerDay: Infinity,
-  signalFloodThreshold: 0,
-  volatilityThrottleMs: 0,
-  lastResetDay: new Date().getDate(),
-  lastResetWeek: getWeekNumber(),
-  lastResetMonth: new Date().getMonth(),
-};
+class RiskState {
+  constructor(config = {}) {
+    this.config = config;
+    this.duplicateMap = new Map();
+    this.correlationMap = new Map();
+    this.watchList = new Set();
+    this.timeBuckets = new Map();
+    this.strategyFailMap = new Map();
+    this.reset();
+  }
 
-const riskState = {
-  ...defaultState,
-  tradesPerInstrument: new Map(),
-  tradesPerSector: new Map(),
-};
-const duplicateMap = new Map();
-const correlationMap = new Map();
-const watchList = new Set();
-const timeBuckets = new Map();
-const strategyFailMap = new Map();
+  reset() {
+    Object.assign(this, {
+      // PnL tracking
+      dailyLoss: 0,
+      weeklyLoss: 0,
+      monthlyLoss: 0,
+      dailyRisk: 0,
+      // Limits
+      maxDailyLoss: this.config.maxDailyLoss,
+      maxDailyLossPct: 0,
+      maxCumulativeLoss: 0,
+      maxWeeklyDrawdown: 0,
+      maxMonthlyDrawdown: 0,
+      maxLossPerTradePct: 0,
+      maxDailyRisk: this.config.maxDailyRisk,
+      equity: 0,
+      equityPeak: 0,
+      equityDrawdownLimitPct: 0,
+      // Trade tracking
+      tradeCount: 0,
+      maxTradesPerDay: this.config.maxTradesPerDay,
+      tradesPerInstrument: new Map(),
+      tradesPerSector: new Map(),
+      maxTradesPerInstrument: this.config.maxTradesPerInstrument,
+      maxTradesPerSector: this.config.maxTradesPerSector,
+      consecutiveLosses: 0,
+      maxLossStreak: this.config.maxLossStreak,
+      lastTradeWasLoss: false,
+      lastTradeTime: 0,
+      systemPaused: false,
+      signalCount: 0,
+      maxSignalsPerDay: this.config.maxSignalsPerDay,
+      signalFloodThreshold: this.config.signalFloodThreshold,
+      volatilityThrottleMs: this.config.volatilityThrottleMs,
+      lastResetDay: new Date().getDate(),
+      lastResetWeek: getWeekNumber(),
+      lastResetMonth: new Date().getMonth(),
+    });
+    this.duplicateMap.clear();
+    this.correlationMap.clear();
+    this.watchList.clear();
+    this.timeBuckets.clear();
+    this.strategyFailMap.clear();
+  }
+}
+
+export const riskState = new RiskState(riskDefaults);
 
 export function resetRiskState() {
-  Object.assign(riskState, defaultState, {
-    lastResetDay: new Date().getDate(),
-    lastResetWeek: getWeekNumber(),
-    lastResetMonth: new Date().getMonth(),
-  });
-  riskState.signalCount = 0;
-  riskState.systemPaused = false;
-  riskState.lastTradeTime = 0;
-  riskState.tradesPerInstrument = new Map();
-  riskState.tradesPerSector = new Map();
-  duplicateMap.clear();
-  correlationMap.clear();
-  watchList.clear();
-  timeBuckets.clear();
-  strategyFailMap.clear();
+  riskState.reset();
 }
 
 export function recordTradeResult({ pnl = 0, risk = 0, symbol, sector, strategy }) {
@@ -99,7 +96,7 @@ export function recordTradeResult({ pnl = 0, risk = 0, symbol, sector, strategy 
   else riskState.consecutiveLosses = 0;
   riskState.lastTradeTime = Date.now();
   if (pnl < 0 && symbol && strategy) {
-    strategyFailMap.set(`${symbol}-${strategy}`, Date.now());
+    riskState.strategyFailMap.set(`${symbol}-${strategy}`, Date.now());
   }
   if (
     riskState.dailyLoss >= riskState.maxDailyLoss ||
@@ -115,7 +112,7 @@ export function recordTradeExecution({ symbol, sector }) {
   if (symbol) {
     const c = riskState.tradesPerInstrument.get(symbol) || 0;
     riskState.tradesPerInstrument.set(symbol, c + 1);
-    watchList.add(symbol);
+    riskState.watchList.add(symbol);
   }
   const sec = sector || 'GEN';
   const sc = riskState.tradesPerSector.get(sec) || 0;
@@ -142,16 +139,16 @@ export function isSignalValid(signal, ctx = {}) {
   if (riskState.systemPaused) return false;
   const bucketMs = ctx.timeBucketMs || 60 * 1000;
   const bucket = Math.floor(now / bucketMs);
-  const count = timeBuckets.get(bucket) || 0;
+  const count = riskState.timeBuckets.get(bucket) || 0;
   if (
     typeof ctx.maxSimultaneousSignals === 'number' &&
     count >= ctx.maxSimultaneousSignals
   )
     return false;
-  timeBuckets.set(bucket, count + 1);
-  if (timeBuckets.size > 10) {
-    for (const [k] of timeBuckets) {
-      if (k < bucket - 10) timeBuckets.delete(k);
+  riskState.timeBuckets.set(bucket, count + 1);
+  if (riskState.timeBuckets.size > 10) {
+    for (const [k] of riskState.timeBuckets) {
+      if (k < bucket - 10) riskState.timeBuckets.delete(k);
     }
   }
   const maxSignals = ctx.maxSignalsPerDay ?? riskState.maxSignalsPerDay;
@@ -248,12 +245,12 @@ export function isSignalValid(signal, ctx = {}) {
     return false;
 
   const inst = signal.stock || signal.symbol;
-  if (ctx.blockWatchlist && watchList.has(inst)) return false;
+  if (ctx.blockWatchlist && riskState.watchList.has(inst)) return false;
   const stratKey = `${inst}-${signal.algoSignal?.strategy || signal.pattern}`;
   if (
     ctx.strategyFailWindowMs &&
-    strategyFailMap.has(stratKey) &&
-    now - strategyFailMap.get(stratKey) < ctx.strategyFailWindowMs
+    riskState.strategyFailMap.has(stratKey) &&
+    now - riskState.strategyFailMap.get(stratKey) < ctx.strategyFailWindowMs
   )
     return false;
   const instCount = riskState.tradesPerInstrument.get(inst) || 0;
@@ -505,8 +502,12 @@ export function isSignalValid(signal, ctx = {}) {
 
   const key = `${signal.stock || signal.symbol}-${signal.direction}-${signal.pattern || signal.algoSignal?.strategy}`;
   const dupWindow = ctx.duplicateWindowMs || 5 * 60 * 1000;
-  if (duplicateMap.has(key) && now - duplicateMap.get(key) < dupWindow) return false;
-  duplicateMap.set(key, now);
+  if (
+    riskState.duplicateMap.has(key) &&
+    now - riskState.duplicateMap.get(key) < dupWindow
+  )
+    return false;
+  riskState.duplicateMap.set(key, now);
 
   if (ctx.marketRegime) {
     if (ctx.marketRegime === 'bullish' && signal.direction === 'Short') return false;
@@ -516,13 +517,16 @@ export function isSignalValid(signal, ctx = {}) {
   const group = signal.correlationGroup || signal.sector;
   const corrWindow = ctx.correlationWindowMs || 5 * 60 * 1000;
   if (group) {
-    if (correlationMap.has(group) && now - correlationMap.get(group) < corrWindow)
+    if (
+      riskState.correlationMap.has(group) &&
+      now - riskState.correlationMap.get(group) < corrWindow
+    )
       return false;
-    correlationMap.set(group, now);
+    riskState.correlationMap.set(group, now);
   }
 
-  if (ctx.addToWatchlist) watchList.add(inst);
+  if (ctx.addToWatchlist) riskState.watchList.add(inst);
   return true;
 }
 
-export { riskState, watchList };
+export { riskState };

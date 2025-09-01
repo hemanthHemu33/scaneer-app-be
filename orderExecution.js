@@ -36,6 +36,43 @@ dotenv.config();
 // kc instance and session handled in kite.js
 
 // Place an order
+async function placeGTTOrder(orderParams, meta) {
+  const sl = orderParams.stopLoss ?? orderParams.sl;
+  const target = orderParams.target ?? orderParams.squareoff;
+  if (sl == null || target == null) return null;
+  const exitType = orderParams.transaction_type === "BUY" ? "SELL" : "BUY";
+  const gttParams = {
+    trigger_type: kc.GTT_TYPE_OCO,
+    exchange: orderParams.exchange,
+    tradingsymbol: orderParams.tradingsymbol,
+    last_price: orderParams.last_price ?? orderParams.price,
+    trigger_values: [sl, target].sort((a, b) => a - b),
+    orders: [
+      {
+        transaction_type: exitType,
+        order_type: "SL",
+        product: orderParams.product,
+        quantity: orderParams.quantity,
+        price: sl,
+      },
+      {
+        transaction_type: exitType,
+        order_type: "LIMIT",
+        product: orderParams.product,
+        quantity: orderParams.quantity,
+        price: target,
+      },
+    ],
+  };
+  const response = await kc.placeGTT(gttParams);
+  console.log("✅ GTT Order placed:", response);
+  if (meta) {
+    if (response?.order_id) orderMetadata.set(response.order_id, meta);
+    if (response?.trigger_id) orderMetadata.set(response.trigger_id, meta);
+  }
+  return response;
+}
+
 export async function sendOrder(variety = "regular", order, opts = {}) {
   const { retries = 3, retryDelayMs = 1000 } = opts;
   let attempt = 0;
@@ -57,42 +94,8 @@ export async function sendOrder(variety = "regular", order, opts = {}) {
       // parameters, convert to a two-leg GTT order. This helps lock in
       // both risk and reward in a single request.
       if (variety === "gtt" || (orderParams.stopLoss && orderParams.target)) {
-        const sl = orderParams.stopLoss ?? orderParams.sl;
-        const target = orderParams.target ?? orderParams.squareoff;
-        if (sl != null && target != null) {
-          const exitType =
-            orderParams.transaction_type === "BUY" ? "SELL" : "BUY";
-          const gttParams = {
-            trigger_type: kc.GTT_TYPE_OCO,
-            exchange: orderParams.exchange,
-            tradingsymbol: orderParams.tradingsymbol,
-            last_price: orderParams.last_price ?? orderParams.price,
-            trigger_values: [sl, target].sort((a, b) => a - b),
-            orders: [
-              {
-                transaction_type: exitType,
-                order_type: "SL",
-                product: orderParams.product,
-                quantity: orderParams.quantity,
-                price: sl,
-              },
-              {
-                transaction_type: exitType,
-                order_type: "LIMIT",
-                product: orderParams.product,
-                quantity: orderParams.quantity,
-                price: target,
-              },
-            ],
-          };
-          const response = await kc.placeGTT(gttParams);
-          console.log("✅ GTT Order placed:", response);
-          if (meta) {
-            if (response?.order_id) orderMetadata.set(response.order_id, meta);
-            if (response?.trigger_id) orderMetadata.set(response.trigger_id, meta);
-          }
-          return response;
-        }
+        const response = await placeGTTOrder(orderParams, meta);
+        if (response) return response;
       }
 
       const response = await kc.placeOrder({ variety, ...orderParams });
@@ -397,8 +400,7 @@ export async function placeOrder(signal, maxRetries = 3) {
 // --- Execution facade ---
 export const openTrades = new Map();
 
-// Update openTrades based on real-time order events
-onOrderUpdate((update) => {
+function updateOpenTrades(update) {
   for (const [id, trade] of openTrades.entries()) {
     if (id === update.order_id) {
       trade.status = update.status;
@@ -411,7 +413,8 @@ onOrderUpdate((update) => {
       openTrades.delete(id);
     }
   }
-});
+}
+onOrderUpdate(updateOpenTrades);
 
 /**
  * Send trading signal to execution layer.
