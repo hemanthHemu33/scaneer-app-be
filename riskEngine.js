@@ -82,7 +82,13 @@ export function resetRiskState() {
   riskState.reset();
 }
 
-export function recordTradeResult({ pnl = 0, risk = 0, symbol, sector, strategy }) {
+export function recordTradeResult({
+  pnl = 0,
+  risk = 0,
+  symbol,
+  sector,
+  strategy,
+}) {
   recordTradeExecution({ symbol, sector });
   const loss = pnl < 0 ? Math.abs(pnl) : 0;
   riskState.dailyLoss += loss;
@@ -90,7 +96,8 @@ export function recordTradeResult({ pnl = 0, risk = 0, symbol, sector, strategy 
   riskState.monthlyLoss += loss;
   riskState.dailyRisk += risk;
   riskState.equity += pnl;
-  if (riskState.equity > riskState.equityPeak) riskState.equityPeak = riskState.equity;
+  if (riskState.equity > riskState.equityPeak)
+    riskState.equityPeak = riskState.equity;
   riskState.lastTradeWasLoss = pnl < 0;
   if (pnl < 0) riskState.consecutiveLosses += 1;
   else riskState.consecutiveLosses = 0;
@@ -101,7 +108,8 @@ export function recordTradeResult({ pnl = 0, risk = 0, symbol, sector, strategy 
   if (
     riskState.dailyLoss >= riskState.maxDailyLoss ||
     (riskState.equityPeak > 0 &&
-      riskState.equity < riskState.equityPeak * (1 - riskState.equityDrawdownLimitPct))
+      riskState.equity <
+        riskState.equityPeak * (1 - riskState.equityDrawdownLimitPct))
   ) {
     riskState.systemPaused = true;
   }
@@ -114,7 +122,7 @@ export function recordTradeExecution({ symbol, sector }) {
     riskState.tradesPerInstrument.set(symbol, c + 1);
     riskState.watchList.add(symbol);
   }
-  const sec = sector || 'GEN';
+  const sec = sector || "GEN";
   const sc = riskState.tradesPerSector.get(sec) || 0;
   riskState.tradesPerSector.set(sec, sc + 1);
   riskState.lastTradeTime = Date.now();
@@ -141,7 +149,7 @@ export function isSignalValid(signal, ctx = {}) {
   const bucket = Math.floor(now / bucketMs);
   const count = riskState.timeBuckets.get(bucket) || 0;
   if (
-    typeof ctx.maxSimultaneousSignals === 'number' &&
+    typeof ctx.maxSimultaneousSignals === "number" &&
     count >= ctx.maxSimultaneousSignals
   )
     return false;
@@ -154,15 +162,16 @@ export function isSignalValid(signal, ctx = {}) {
   const maxSignals = ctx.maxSignalsPerDay ?? riskState.maxSignalsPerDay;
   if (riskState.signalCount > maxSignals) return false;
   if (
-    typeof ctx.highVolatilityThresh === 'number' &&
-    typeof ctx.volatility === 'number' &&
+    typeof ctx.highVolatilityThresh === "number" &&
+    typeof ctx.volatility === "number" &&
     ctx.volatility > ctx.highVolatilityThresh
   ) {
-    const interval = (ctx.throttleMs ?? riskState.volatilityThrottleMs) || 60000;
+    const interval =
+      (ctx.throttleMs ?? riskState.volatilityThrottleMs) || 60000;
     if (now - riskState.lastTradeTime < interval) return false;
   }
   if (
-    typeof ctx.signalFloodThreshold === 'number' &&
+    typeof ctx.signalFloodThreshold === "number" &&
     riskState.signalCount > ctx.signalFloodThreshold
   ) {
     const interval = ctx.signalFloodThrottleMs || 60000;
@@ -170,14 +179,14 @@ export function isSignalValid(signal, ctx = {}) {
   }
 
   if (
-    typeof ctx.indexVolatility === 'number' &&
-    typeof ctx.maxIndexVolatility === 'number' &&
+    typeof ctx.indexVolatility === "number" &&
+    typeof ctx.maxIndexVolatility === "number" &&
     ctx.indexVolatility > ctx.maxIndexVolatility
   )
     return false;
   if (
-    typeof ctx.vwapParticipation === 'number' &&
-    typeof ctx.minVwapParticipation === 'number' &&
+    typeof ctx.vwapParticipation === "number" &&
+    typeof ctx.minVwapParticipation === "number" &&
     ctx.vwapParticipation < ctx.minVwapParticipation
   )
     return false;
@@ -185,7 +194,8 @@ export function isSignalValid(signal, ctx = {}) {
   if (
     ctx.maxSignalAgeMinutes &&
     signal.generatedAt &&
-    now - new Date(signal.generatedAt).getTime() > ctx.maxSignalAgeMinutes * 60 * 1000
+    now - new Date(signal.generatedAt).getTime() >
+      ctx.maxSignalAgeMinutes * 60 * 1000
   )
     return false;
 
@@ -220,15 +230,15 @@ export function isSignalValid(signal, ctx = {}) {
   if (riskState.consecutiveLosses >= maxStreak) return false;
   if (ctx.cooloffAfterLoss && riskState.lastTradeWasLoss) return false;
   if (
-    typeof ctx.maxOpenPositions === 'number' &&
-    typeof ctx.openPositionsCount === 'number' &&
+    typeof ctx.maxOpenPositions === "number" &&
+    typeof ctx.openPositionsCount === "number" &&
     ctx.openPositionsCount >= ctx.maxOpenPositions
   )
     return false;
   if (ctx.preventOverlap && Array.isArray(ctx.openSymbols)) {
     if (ctx.openSymbols.includes(signal.stock || signal.symbol)) return false;
   }
-  const dir = signal.direction === 'Long' ? 'long' : 'short';
+  const dir = signal.direction === "Long" ? "long" : "short";
   if (ctx.openPositionsMap instanceof Map) {
     const existing = ctx.openPositionsMap.get(signal.stock || signal.symbol);
     if (existing && existing.side && existing.side.toLowerCase() !== dir)
@@ -254,29 +264,30 @@ export function isSignalValid(signal, ctx = {}) {
   )
     return false;
   const instCount = riskState.tradesPerInstrument.get(inst) || 0;
-  const maxPerInst = ctx.maxTradesPerInstrument ?? riskState.maxTradesPerInstrument;
+  const maxPerInst =
+    ctx.maxTradesPerInstrument ?? riskState.maxTradesPerInstrument;
   if (instCount >= maxPerInst) return false;
 
-  const sec = signal.sector || 'GEN';
+  const sec = signal.sector || "GEN";
   const secCount = riskState.tradesPerSector.get(sec) || 0;
   const maxPerSec = ctx.maxTradesPerSector ?? riskState.maxTradesPerSector;
   if (secCount >= maxPerSec) return false;
 
   if (
-    typeof ctx.minTradeValue === 'number' &&
-    typeof ctx.tradeValue === 'number' &&
+    typeof ctx.minTradeValue === "number" &&
+    typeof ctx.tradeValue === "number" &&
     ctx.tradeValue < ctx.minTradeValue
   )
     return false;
   if (
-    typeof ctx.maxTradeValue === 'number' &&
-    typeof ctx.tradeValue === 'number' &&
+    typeof ctx.maxTradeValue === "number" &&
+    typeof ctx.tradeValue === "number" &&
     ctx.tradeValue > ctx.maxTradeValue
   )
     return false;
   if (
-    typeof ctx.volatilityFilter === 'number' &&
-    typeof signal.atr === 'number' &&
+    typeof ctx.volatilityFilter === "number" &&
+    typeof signal.atr === "number" &&
     signal.atr > ctx.volatilityFilter
   )
     return false;
@@ -284,10 +295,14 @@ export function isSignalValid(signal, ctx = {}) {
 
   const conf = signal.confidence ?? signal.confidenceScore ?? 0;
   const aiOverride =
-    typeof ctx.aiOverrideThreshold === 'number' &&
-    typeof ctx.mlConfidence === 'number' &&
+    typeof ctx.aiOverrideThreshold === "number" &&
+    typeof ctx.mlConfidence === "number" &&
     ctx.mlConfidence >= ctx.aiOverrideThreshold;
-  if (typeof ctx.minConfidence === 'number' && conf < ctx.minConfidence && !aiOverride)
+  if (
+    typeof ctx.minConfidence === "number" &&
+    conf < ctx.minConfidence &&
+    !aiOverride
+  )
     return false;
   if (ctx.entryStdDev === undefined && Array.isArray(ctx.prices)) {
     ctx.entryStdDev = calculateStdDev(
@@ -302,49 +317,50 @@ export function isSignalValid(signal, ctx = {}) {
     );
   }
   if (
-    typeof ctx.minMlConfidence === 'number' &&
-    typeof ctx.mlConfidence === 'number' &&
+    typeof ctx.minMlConfidence === "number" &&
+    typeof ctx.mlConfidence === "number" &&
     ctx.mlConfidence < ctx.minMlConfidence
   )
     return false;
   if (
-    typeof ctx.minBacktestWinRate === 'number' &&
-    typeof ctx.backtestWinRate === 'number' &&
+    typeof ctx.minBacktestWinRate === "number" &&
+    typeof ctx.backtestWinRate === "number" &&
     ctx.backtestWinRate < ctx.minBacktestWinRate
   )
     return false;
   if (
-    typeof ctx.minRecentAccuracy === 'number' &&
-    typeof ctx.recentAccuracy === 'number' &&
+    typeof ctx.minRecentAccuracy === "number" &&
+    typeof ctx.recentAccuracy === "number" &&
     ctx.recentAccuracy < ctx.minRecentAccuracy
   )
     return false;
   if (
-    typeof ctx.maxEntryStdDev === 'number' &&
-    typeof ctx.entryStdDev === 'number' &&
+    typeof ctx.maxEntryStdDev === "number" &&
+    typeof ctx.entryStdDev === "number" &&
     ctx.entryStdDev > ctx.maxEntryStdDev
   )
     return false;
   if (
-    typeof ctx.minZScoreAbs === 'number' &&
-    typeof ctx.zScore === 'number' &&
+    typeof ctx.minZScoreAbs === "number" &&
+    typeof ctx.zScore === "number" &&
     Math.abs(ctx.zScore) < ctx.minZScoreAbs
   )
     return false;
   if (
-    typeof ctx.maxRiskScore === 'number' &&
-    typeof signal.riskScore === 'number' &&
+    typeof ctx.maxRiskScore === "number" &&
+    typeof signal.riskScore === "number" &&
     signal.riskScore > ctx.maxRiskScore
   )
     return false;
 
   const upper = signal.upperCircuit ?? ctx.upperCircuit;
   const lower = signal.lowerCircuit ?? ctx.lowerCircuit;
-  if (typeof upper === 'number' && signal.entry >= upper * 0.99) return false;
-  if (typeof lower === 'number' && signal.entry <= lower * 1.01) return false;
+  if (typeof upper === "number" && signal.entry >= upper * 0.99) return false;
+  if (typeof lower === "number" && signal.entry <= lower * 1.01) return false;
   if (signal.inGapZone || ctx.inGapZone) return false;
 
-  if (signal.expiresAt && now > new Date(signal.expiresAt).getTime()) return false;
+  if (signal.expiresAt && now > new Date(signal.expiresAt).getTime())
+    return false;
 
   const rr = validateRR({
     strategy: signal.algoSignal?.strategy || signal.pattern,
@@ -364,7 +380,11 @@ export function isSignalValid(signal, ctx = {}) {
     return false;
 
   if (
-    !validateATRStopLoss({ entry: signal.entry, stopLoss: signal.stopLoss, atr: signal.atr })
+    !validateATRStopLoss({
+      entry: signal.entry,
+      stopLoss: signal.stopLoss,
+      atr: signal.atr,
+    })
   )
     return false;
 
@@ -398,38 +418,42 @@ export function isSignalValid(signal, ctx = {}) {
     return false;
   if (
     ctx.requireMomentum &&
-    typeof ctx.rsi === 'number' &&
-    ((signal.direction === 'Long' && ctx.rsi < (ctx.minRsi ?? 55)) ||
-      (signal.direction === 'Short' && ctx.rsi > (ctx.maxRsi ?? 45)))
+    typeof ctx.rsi === "number" &&
+    ((signal.direction === "Long" && ctx.rsi < (ctx.minRsi ?? 55)) ||
+      (signal.direction === "Short" && ctx.rsi > (ctx.maxRsi ?? 45)))
   )
     return false;
-  if (ctx.requireMomentum && typeof ctx.adx === 'number' && ctx.adx < (ctx.minAdx ?? 20))
+  if (
+    ctx.requireMomentum &&
+    typeof ctx.adx === "number" &&
+    ctx.adx < (ctx.minAdx ?? 20)
+  )
     return false;
   if (
-    typeof ctx.minRvol === 'number' &&
-    typeof (signal.rvol ?? ctx.rvol) === 'number' &&
+    typeof ctx.minRvol === "number" &&
+    typeof (signal.rvol ?? ctx.rvol) === "number" &&
     (signal.rvol ?? ctx.rvol) < ctx.minRvol
   )
     return false;
 
   if (
-    typeof ctx.minLiquidity === 'number' &&
-    typeof (signal.liquidity ?? ctx.volume) === 'number' &&
+    typeof ctx.minLiquidity === "number" &&
+    typeof (signal.liquidity ?? ctx.volume) === "number" &&
     (signal.liquidity ?? ctx.volume) < ctx.minLiquidity
   )
     return false;
 
   if (
-    typeof ctx.minVolume === 'number' &&
-    typeof (signal.liquidity ?? ctx.volume) === 'number' &&
+    typeof ctx.minVolume === "number" &&
+    typeof (signal.liquidity ?? ctx.volume) === "number" &&
     (signal.liquidity ?? ctx.volume) < ctx.minVolume
   )
     return false;
 
   if (
-    typeof ctx.minVolumeRatio === 'number' &&
-    typeof ctx.avgVolume === 'number' &&
-    typeof (signal.liquidity ?? ctx.volume) === 'number' &&
+    typeof ctx.minVolumeRatio === "number" &&
+    typeof ctx.avgVolume === "number" &&
+    typeof (signal.liquidity ?? ctx.volume) === "number" &&
     (signal.liquidity ?? ctx.volume) < ctx.avgVolume * ctx.minVolumeRatio
   )
     return false;
@@ -453,12 +477,13 @@ export function isSignalValid(signal, ctx = {}) {
   )
     return false;
 
-  if (typeof ctx.minATR === 'number' && signal.atr < ctx.minATR) return false;
-  if (typeof ctx.maxATR === 'number' && signal.atr > ctx.maxATR) return false;
+  if (typeof ctx.minATR === "number" && signal.atr < ctx.minATR) return false;
+  if (typeof ctx.maxATR === "number" && signal.atr > ctx.maxATR) return false;
 
   if (
-    typeof ctx.minSLDistancePct === 'number' &&
-    Math.abs(signal.entry - signal.stopLoss) / signal.entry < ctx.minSLDistancePct
+    typeof ctx.minSLDistancePct === "number" &&
+    Math.abs(signal.entry - signal.stopLoss) / signal.entry <
+      ctx.minSLDistancePct
   )
     return false;
 
@@ -467,7 +492,7 @@ export function isSignalValid(signal, ctx = {}) {
   const maxPerTrade = ctx.maxLossPerTradePct ?? riskState.maxLossPerTradePct;
   if (maxPerTrade > 0 && lossPct > maxPerTrade) return false;
   if (
-    typeof signal.spread === 'number' &&
+    typeof signal.spread === "number" &&
     slDist > 0 &&
     signal.spread / slDist > (ctx.maxSpreadSLRatio ?? 0.3)
   )
@@ -477,7 +502,7 @@ export function isSignalValid(signal, ctx = {}) {
     atr: signal.atr,
     avgAtr: ctx.avgAtr,
     indexTrend: ctx.indexTrend,
-    signalDirection: signal.direction === 'Long' ? 'up' : 'down',
+    signalDirection: signal.direction === "Long" ? "up" : "down",
     timeSinceSignal: ctx.timeSinceSignal ?? 0,
     volume: signal.liquidity ?? ctx.volume,
     spread: signal.spread,
@@ -500,7 +525,9 @@ export function isSignalValid(signal, ctx = {}) {
   });
   if (!timingOk) return false;
 
-  const key = `${signal.stock || signal.symbol}-${signal.direction}-${signal.pattern || signal.algoSignal?.strategy}`;
+  const key = `${signal.stock || signal.symbol}-${signal.direction}-${
+    signal.pattern || signal.algoSignal?.strategy
+  }`;
   const dupWindow = ctx.duplicateWindowMs || 5 * 60 * 1000;
   if (
     riskState.duplicateMap.has(key) &&
@@ -510,8 +537,10 @@ export function isSignalValid(signal, ctx = {}) {
   riskState.duplicateMap.set(key, now);
 
   if (ctx.marketRegime) {
-    if (ctx.marketRegime === 'bullish' && signal.direction === 'Short') return false;
-    if (ctx.marketRegime === 'bearish' && signal.direction === 'Long') return false;
+    if (ctx.marketRegime === "bullish" && signal.direction === "Short")
+      return false;
+    if (ctx.marketRegime === "bearish" && signal.direction === "Long")
+      return false;
   }
 
   const group = signal.correlationGroup || signal.sector;
@@ -529,4 +558,4 @@ export function isSignalValid(signal, ctx = {}) {
   return true;
 }
 
-export { riskState };
+// export { riskState };
