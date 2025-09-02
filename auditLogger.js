@@ -93,6 +93,9 @@ export async function logSignalRejected(
     ['validationDetails']
   );
   try {
+    await db.createCollection('rejected_signals');
+  } catch {}
+  try {
     await db.collection('rejected_signals').insertOne({
       signalId,
       reasonCode,
@@ -100,8 +103,9 @@ export async function logSignalRejected(
       signal: signalData,
       timestamp: new Date(),
     });
-  } catch {}
-  sendCriticalAlerts('rejection', { signalId, reasonCode });
+  } catch (e) {
+    console.error('Failed to store rejected signal', e.message);
+  }
 }
 
 export async function logBacktestReference(params, results) {

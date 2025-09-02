@@ -10,7 +10,7 @@ import { ObjectId } from "mongodb";
 import { sendSignal } from "./telegram.js";
 import { fetchAIData } from "./openAI.js";
 import { addSignal } from "./signalManager.js";
-import { logSignalCreated } from "./auditLogger.js";
+import { logSignalCreated, logSignalRejected } from "./auditLogger.js";
 import {
   checkExposureLimits,
   preventReEntry,
@@ -956,7 +956,12 @@ async function emitUnifiedSignal(signal, source, io) {
       strategy: signal.pattern,
     });
   if (!allowed) {
-    notifyExposureEvents(`Signal for ${symbol} rejected by portfolio rules`);
+    await logSignalRejected(
+      signal.signalId || signal.algoSignal?.signalId || `${symbol}-${Date.now()}`,
+      "portfolioRules",
+      { message: `Signal for ${symbol} rejected by portfolio rules` },
+      signal
+    );
     return;
   }
   console.log(`🚀 Emitting ${source} Signal:`, signal);
