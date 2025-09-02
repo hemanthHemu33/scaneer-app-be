@@ -35,8 +35,12 @@ dotenv.config();
 
 // kc instance and session handled in kite.js
 
-// Place an order
-async function placeGTTOrder(orderParams, meta) {
+// Place a bracket-style GTT order with both stop loss and target legs.
+// Internal helper used by sendOrder when the caller provides stop-loss
+// and target values. Uses an OCO trigger so that either leg exits the
+// position. Not exported to avoid clashing with the generic GTT helper
+// defined later in this module.
+async function placeBracketGTTOrder(orderParams, meta) {
   const sl = orderParams.stopLoss ?? orderParams.sl;
   const target = orderParams.target ?? orderParams.squareoff;
   if (sl == null || target == null) return null;
@@ -94,7 +98,7 @@ export async function sendOrder(variety = "regular", order, opts = {}) {
       // parameters, convert to a two-leg GTT order. This helps lock in
       // both risk and reward in a single request.
       if (variety === "gtt" || (orderParams.stopLoss && orderParams.target)) {
-        const response = await placeGTTOrder(orderParams, meta);
+        const response = await placeBracketGTTOrder(orderParams, meta);
         if (response) return response;
       }
 
