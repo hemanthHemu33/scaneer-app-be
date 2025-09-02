@@ -257,7 +257,7 @@ export async function analyzeCandles(
       minRR: RISK_REWARD_RATIO,
       minLiquidity: FILTERS.minLiquidity,
       minVolumeRatio: 0.5,
-      minVwapParticipation: 0.98,
+      minVwapParticipation: 0.9,
       maxIndexVolatility: 20,
       blockWatchlist: true,
       addToWatchlist: false,
