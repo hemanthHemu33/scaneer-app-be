@@ -64,36 +64,28 @@ let historicalSessionData = {};
 let candleHistory = {}; // 🧠 Store per-token candle history for EMA, RSI, etc.
 let historicalCache = {};
 
-let stockSymbols = [
-  // "NSE:JSWENERGY",
-];
-
-// Load stock symbols from database if available
-const stockSymbolsData = await db.collection("stock_symbols").findOne({});
-if (stockSymbolsData && stockSymbolsData.symbols) {
-  stockSymbols = stockSymbolsData.symbols;
-  console.log("✅ Loaded stock symbols from database:", stockSymbols);
+// Fetch stock symbols from database
+async function getStockSymbols() {
+  const doc = await db.collection("stock_symbols").findOne({});
+  return doc?.symbols || [];
 }
 
 // SET THE STOCKS SYMBOLS
 async function setStockSymbol(symbol) {
-  if (!stockSymbols.includes(symbol)) {
-    stockSymbols.push(symbol);
-    console.log(`🔍 Stock symbol added to memory: ${symbol}`);
-  }
+  const withPrefix = symbol.includes(":") ? symbol : `NSE:${symbol}`;
 
   await db
     .collection("stock_symbols")
-    .updateOne({}, { $addToSet: { symbols: symbol } }, { upsert: true });
-  console.log(`✅ Stock symbol "${symbol}" saved to database`);
+    .updateOne({}, { $addToSet: { symbols: withPrefix } }, { upsert: true });
+  console.log(`✅ Stock symbol "${withPrefix}" saved to database`);
 
   // Subscribe to ticker immediately
-  subscribeSymbol(symbol).catch((err) =>
+  subscribeSymbol(withPrefix).catch((err) =>
     console.error("❌ subscribeSymbol failed:", err.message)
   );
 
   // Kick off data fetch asynchronously if needed
-  ensureDataForSymbol(symbol).catch((err) =>
+  ensureDataForSymbol(withPrefix).catch((err) =>
     console.error("❌ ensureDataForSymbol failed:", err.message)
   );
 }
@@ -102,9 +94,6 @@ async function setStockSymbol(symbol) {
 async function removeStockSymbol(symbol) {
   const withPrefix = symbol.includes(":") ? symbol : `NSE:${symbol}`;
   const cleaned = withPrefix.split(":")[1];
-
-  // In-memory list update
-  stockSymbols = stockSymbols.filter((s) => s !== withPrefix);
 
   const token = symbolTokenMap[withPrefix];
   if (token) {
@@ -180,13 +169,21 @@ async function removeStockSymbol(symbol) {
 const tokenSymbolMap = {}; // token: symbol
 const symbolTokenMap = {}; // symbol: token
 
-for (const inst of instruments) {
-  const key = `${inst.exchange}:${inst.tradingsymbol}`;
-  if (stockSymbols.includes(key)) {
-    tokenSymbolMap[inst.instrument_token] = key;
-    symbolTokenMap[key] = inst.instrument_token;
+async function refreshSymbolMaps() {
+  const symbols = await getStockSymbols();
+  Object.keys(tokenSymbolMap).forEach((k) => delete tokenSymbolMap[k]);
+  Object.keys(symbolTokenMap).forEach((k) => delete symbolTokenMap[k]);
+  for (const inst of instruments) {
+    const key = `${inst.exchange}:${inst.tradingsymbol}`;
+    if (symbols.includes(key)) {
+      tokenSymbolMap[inst.instrument_token] = key;
+      symbolTokenMap[key] = inst.instrument_token;
+    }
   }
+  return symbols;
 }
+
+await refreshSymbolMaps();
 
 let instrumentTokens = [];
 let tickIntervalMs = 10000;
@@ -448,7 +445,8 @@ async function startLiveFeed(io) {
     console.warn("⚠️ Could not preload session data:", err.message);
   }
 
-  instrumentTokens = await getTokensForSymbols(stockSymbols);
+  const symbols = await refreshSymbolMaps();
+  instrumentTokens = await getTokensForSymbols(symbols);
   if (!instrumentTokens.length) return logError("No instrument tokens found");
 
   ticker = new KiteTicker({ api_key: apiKey, access_token: accessToken });
@@ -816,6 +814,7 @@ async function fetchFallbackOneMinuteCandles() {
   const to = new Date();
   const from = new Date(to.getTime() - 5 * 60 * 1000);
 
+  const stockSymbols = await getStockSymbols();
   for (const symbol of stockSymbols) {
     try {
       const ltp = await kc.getLTP([symbol]);
@@ -989,7 +988,7 @@ async function emitUnifiedSignal(signal, source, io) {
 async function fetchHistoricalIntradayData(
   interval = "minute",
   daysBack = 3,
-  symbols = stockSymbols
+  symbols
 ) {
   const accessToken = await initSession();
   if (!accessToken) {
@@ -1000,10 +999,11 @@ async function fetchHistoricalIntradayData(
   const today = new Date();
   const tradingDates = getPastTradingDates(today, daysBack);
   const historicalData = {};
+  const symbolsToUse = symbols || (await getStockSymbols());
 
   for (const dateStr of tradingDates) {
     console.log(`📆 Fetching ${interval} data for: ${dateStr}`);
-    for (const symbol of symbols) {
+    for (const symbol of symbolsToUse) {
       try {
         // 1) Lookup instrument token
         const ltp = await kc.getLTP([symbol]);
@@ -1106,7 +1106,7 @@ function getPastTradingDates(refDate, count) {
 fetchHistoricalData();
 // Session & Historical Data
 
-async function fetchHistoricalData(symbols = stockSymbols) {
+async function fetchHistoricalData(symbols) {
   const accessToken = await initSession();
 
   if (!isMarketOpen()) {
@@ -1119,7 +1119,8 @@ async function fetchHistoricalData(symbols = stockSymbols) {
   const startStr = startDate.toISOString().split("T")[0];
   const endStr = new Date().toISOString().split("T")[0];
   const historicalData = {};
-  for (const symbol of symbols) {
+  const symbolList = symbols || (await getStockSymbols());
+  for (const symbol of symbolList) {
     try {
       const ltp = await kc.getLTP([symbol]);
       const token = ltp[symbol]?.instrument_token;
@@ -1241,6 +1242,7 @@ async function fetchSessionData() {
 
   console.log(`⏳ Session Fetch Range: FROM ${fromDate} TO ${toDate}`);
 
+  const stockSymbols = await getStockSymbols();
   for (const symbol of stockSymbols) {
     try {
       const ltp = await kc.getLTP([symbol]);
@@ -1503,7 +1505,6 @@ export async function rebuildThreeMinCandlesFromOneMin(token) {
 }
 
 function resetInMemoryData() {
-  stockSymbols = [];
   Object.keys(tokenSymbolMap).forEach((k) => delete tokenSymbolMap[k]);
   Object.keys(symbolTokenMap).forEach((k) => delete symbolTokenMap[k]);
   instrumentTokens = [];
@@ -1537,6 +1538,7 @@ export {
   warmupCandleHistory,
   preloadStockData,
   isMarketOpen,
+  getStockSymbols,
   setStockSymbol,
   subscribeSymbol,
   ensureDataForSymbol,
