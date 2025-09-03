@@ -557,5 +557,3 @@ export function isSignalValid(signal, ctx = {}) {
   if (ctx.addToWatchlist) riskState.watchList.add(inst);
   return true;
 }
-
-// export { riskState };
