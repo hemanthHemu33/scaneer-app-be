@@ -59,7 +59,6 @@ const sessionData = {};
 for (const doc of sessionDocs) {
   sessionData[doc.token] = doc.candles || doc.data || [];
 }
-let historicalSessionData = {};
 
 let candleHistory = {}; // 🧠 Store per-token candle history for EMA, RSI, etc.
 let historicalCache = {};
@@ -104,7 +103,6 @@ async function removeStockSymbol(symbol) {
     delete candleHistory[token];
     delete alignedTickStorage[token];
     delete historicalCache[token];
-    delete historicalSessionData[token];
     delete sessionData[token];
     if (ticker) ticker.unsubscribe([token]);
     updateInstrumentTokens(instrumentTokens);
@@ -370,9 +368,37 @@ async function warmupCandleHistory() {
     await fetchHistoricalIntradayData("minute", 3);
   }
   await ensureHistoricalData();
-  await loadHistoricalSessionData();
   warmupDone = true;
   console.log("✅ Warmup candle history completed");
+}
+
+// Load historical intraday session candles from MongoDB into in-memory candleHistory
+async function loadHistoricalSessionCandles(tokens) {
+  const query = tokens && tokens.length ? { token: { $in: tokens.map(Number) } } : {};
+  const docs = await db
+    .collection("historical_session_data")
+    .find(query)
+    .toArray();
+
+  for (const doc of docs) {
+    const tokenStr = String(doc.token);
+    if (!candleHistory[tokenStr]) candleHistory[tokenStr] = [];
+    candleHistory[tokenStr].push(
+      ...(doc.candles || doc.data || []).map((c) => ({
+        open: c.open,
+        high: c.high,
+        low: c.low,
+        close: c.close,
+        volume: c.volume,
+        timestamp: new Date(c.date),
+      }))
+    );
+    candleHistory[tokenStr] = candleHistory[tokenStr].slice(-60);
+  }
+
+  if (docs.length) {
+    console.log("✅ Preloaded historical intraday data into candle history");
+  }
 }
 
 async function preloadStockData() {
@@ -397,24 +423,7 @@ async function startLiveFeed(io) {
 
   // 🧠 Load historical intraday data then today's session data into candle history
   try {
-    if (historicalSessionData) {
-      for (const token in historicalSessionData) {
-        const tokenStr = token;
-        if (!candleHistory[tokenStr]) candleHistory[tokenStr] = [];
-        candleHistory[tokenStr].push(
-          ...historicalSessionData[token].map((c) => ({
-            open: c.open,
-            high: c.high,
-            low: c.low,
-            close: c.close,
-            volume: c.volume,
-            timestamp: new Date(c.date),
-          }))
-        );
-        candleHistory[tokenStr] = candleHistory[tokenStr].slice(-60);
-      }
-      console.log("✅ Preloaded historical intraday data into candle history");
-    }
+    await loadHistoricalSessionCandles();
 
     for (const token in sessionData) {
       const tokenStr = token;
@@ -1166,19 +1175,6 @@ async function loadHistoricalCache() {
 }
 fetchHistoricalData().then(() => loadHistoricalCache());
 
-async function loadHistoricalSessionData() {
-  const docs = await db
-    .collection("historical_session_data")
-    .find({})
-    .toArray();
-  historicalSessionData = {};
-  for (const doc of docs) {
-    const tokenStr = String(doc.token);
-    historicalSessionData[tokenStr] = doc.candles || doc.data || [];
-  }
-  console.log("✅ historical_session_data loaded into memory");
-}
-
 function computeGapPercent(tokenStr) {
   const daily = historicalCache[tokenStr] || [];
   const todayCandle = (candleHistory[tokenStr] || []).find((c) =>
@@ -1396,7 +1392,7 @@ async function ensureDataForSymbol(symbol) {
     }
 
     await loadHistoricalCache();
-    await loadHistoricalSessionData();
+    await loadHistoricalSessionCandles([token]);
   } catch (err) {
     console.error(`❌ Error ensuring data for ${symbol}:`, err.message);
   }
@@ -1512,7 +1508,6 @@ function resetInMemoryData() {
   candleHistory = {};
   alignedTickStorage = {};
   historicalCache = {};
-  historicalSessionData = {};
   warmupDone = false;
   if (ticker) {
     try {
