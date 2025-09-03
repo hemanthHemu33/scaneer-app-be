@@ -138,8 +138,8 @@ export function calculateMA(prices, length) {
 // function reuses the last computed EMA value for that key to avoid
 // recalculating from the start of the array on every tick.
 
-export function getMAForSymbol(symbol, period) {
-  return getMA(symbol, period);
+export async function getMAForSymbol(symbol, period) {
+  return await getMA(symbol, period);
 }
 
 export function toISTISOString(date = new Date()) {

@@ -1,7 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+process.env.NODE_ENV = 'test';
 
-import { computeConfidenceScore, recordStrategyResult, getRecentAccuracy, applyPenaltyConditions, signalQualityScore } from '../confidence.js';
+const {
+  computeConfidenceScore,
+  recordStrategyResult,
+  getRecentAccuracy,
+  applyPenaltyConditions,
+  signalQualityScore,
+} = await import('../confidence.js');
 
 test('computeConfidenceScore blends factors', () => {
   const score = computeConfidenceScore({
