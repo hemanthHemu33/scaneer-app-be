@@ -10,8 +10,9 @@ const kiteMock = test.mock.module('../kite.js', {
     onOrderUpdate: (cb) => emitter.on('update', cb),
     kc: {},
     symbolTokenMap: {},
-    historicalCache: {},
-    initSession: async () => {}
+    getHistoricalData: async () => [],
+    initSession: async () => {},
+    getMA: () => null
   }
 });
 

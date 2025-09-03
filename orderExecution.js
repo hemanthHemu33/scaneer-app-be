@@ -4,9 +4,9 @@ const logError = (ctx, err) => console.error(`[${ctx}]`, err?.message || err);
 import {
   kc,
   symbolTokenMap,
-  historicalCache,
   initSession,
   onOrderUpdate,
+  getHistoricalData,
 } from "./kite.js"; // reuse shared Kite instance and session handler
 import { getAccountMargin } from "./account.js";
 import { calculateDynamicStopLoss } from "./dynamicRiskModel.js";
@@ -189,7 +189,7 @@ export async function getMarginForStock(order) {
     const response = await kc.orderMargins(order);
 
     const token = symbolTokenMap[order.tradingsymbol];
-    const hist = historicalCache[token] || [];
+    const hist = await getHistoricalData(token);
     const avgRange =
       hist.length > 1
         ? hist.slice(-20).reduce((a, b) => a + (b.high - b.low), 0) /

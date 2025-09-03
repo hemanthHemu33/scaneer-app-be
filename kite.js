@@ -53,7 +53,6 @@ const instruments = await db.collection("instruments").find({}).toArray();
 // const sessionDataPath = path.join(__dirname, "session_data.json");
 
 const tokensData = await db.collection("tokens").findOne({});
-const historicalData = await db.collection("historical_data").findOne({});
 const sessionDocs = await db.collection("session_data").find({}).toArray();
 const sessionData = {};
 for (const doc of sessionDocs) {
@@ -61,7 +60,6 @@ for (const doc of sessionDocs) {
 }
 
 let candleHistory = {}; // 🧠 Store per-token candle history for EMA, RSI, etc.
-let historicalCache = {};
 
 // Fetch stock symbols from database
 async function getStockSymbols() {
@@ -102,7 +100,6 @@ async function removeStockSymbol(symbol) {
     delete tickBuffer[token];
     delete candleHistory[token];
     delete alignedTickStorage[token];
-    delete historicalCache[token];
     delete sessionData[token];
     if (ticker) ticker.unsubscribe([token]);
     updateInstrumentTokens(instrumentTokens);
@@ -352,9 +349,6 @@ async function ensureHistoricalData() {
     .countDocuments();
   if (historicalCount === 0) {
     await fetchHistoricalData();
-    await loadHistoricalCache();
-  } else if (!Object.keys(historicalCache).length) {
-    await loadHistoricalCache();
   }
 }
 
@@ -447,7 +441,7 @@ async function startLiveFeed(io) {
       console.log(
         `🔍 History loaded for ${token}: ${candleHistory[token].length} candles`
       );
-      computeGapPercent(token);
+      await computeGapPercent(token);
     }
     console.log("✅ Candle history initialized");
   } catch (err) {
@@ -608,7 +602,7 @@ export async function processAlignedCandles(io) {
             continue;
           }
 
-          const avgVol = getAverageVolume(tokenStr, 20) || 1000;
+          const avgVol = (await getAverageVolume(tokenStr, 20)) || 1000;
 
           let candleScore = 0;
           if (ticks.length >= 5) candleScore++;
@@ -736,7 +730,7 @@ async function processBuffer(io) {
       continue;
     }
 
-    const avgVol = getAverageVolume(tokenStr, 20) || 1000;
+    const avgVol = (await getAverageVolume(tokenStr, 20)) || 1000;
 
     const newCandle = {
       open,
@@ -1163,20 +1157,22 @@ async function fetchHistoricalData(symbols) {
     .updateOne({}, { $set: historicalData }, { upsert: true });
   console.log("✅ historical_data.json written successfully");
 }
-async function loadHistoricalCache() {
+fetchHistoricalData();
+
+async function getHistoricalData(tokenStr) {
   try {
-    const data = await db.collection("historical_data").findOne({});
-    historicalCache = data || {};
-    console.log("✅ historical_data.json loaded into cache");
+    const doc = await db
+      .collection("historical_data")
+      .findOne({}, { projection: { [tokenStr]: 1, _id: 0 } });
+    return doc?.[tokenStr] || [];
   } catch (err) {
-    console.warn("⚠️ Could not load historical data:", err.message);
-    historicalCache = {};
+    console.error(`❌ Error fetching historical data for ${tokenStr}:`, err.message);
+    return [];
   }
 }
-fetchHistoricalData().then(() => loadHistoricalCache());
 
-function computeGapPercent(tokenStr) {
-  const daily = historicalCache[tokenStr] || [];
+async function computeGapPercent(tokenStr) {
+  const daily = await getHistoricalData(tokenStr);
   const todayCandle = (candleHistory[tokenStr] || []).find((c) =>
     isSameDay(c.timestamp, new Date())
   );
@@ -1300,7 +1296,7 @@ async function fetchSessionData() {
         }))
       );
       candleHistory[tokenStr] = candleHistory[tokenStr].slice(-60);
-      computeGapPercent(tokenStr);
+      await computeGapPercent(tokenStr);
     }
     console.log("✅ Session data written to database.");
   } else {
@@ -1328,16 +1324,15 @@ setInterval(() => {
 // Periodically check if the warmup task should run
 setInterval(warmupCandleHistory, 60 * 1000);
 
-function getMA(token, period) {
-  // const data = JSON.parse(fs.readFileSync(historicalDataPath, "utf-8"))[token];
-  const data = historicalCache[token];
+async function getMA(token, period) {
+  const data = await getHistoricalData(token);
   return data?.length >= period
     ? data.slice(-period).reduce((a, b) => a + b.close, 0) / period
     : null;
 }
 
-function getATR(token, period = 14) {
-  const data = historicalCache[token];
+async function getATR(token, period = 14) {
+  const data = await getHistoricalData(token);
   if (!data || data.length < period) return null;
   return (
     data.slice(-period).reduce((acc, cur, i, arr) => {
@@ -1356,9 +1351,8 @@ function getATR(token, period = 14) {
   );
 }
 
-function getAverageVolume(token, period) {
-  // const data = JSON.parse(fs.readFileSync(historicalDataPath, "utf-8"))[token];
-  const data = historicalCache[token];
+async function getAverageVolume(token, period) {
+  const data = await getHistoricalData(token);
   return data?.length >= period
     ? data.slice(-period).reduce((a, b) => a + b.volume, 0) / period
     : "NA";
@@ -1384,14 +1378,13 @@ async function ensureDataForSymbol(symbol) {
     const token = ltp[symbol]?.instrument_token;
     if (!token) return;
 
-    const doc = await db.collection("historical_data").findOne({});
-    if (!doc || !doc[String(token)]) {
+    const existing = await getHistoricalData(String(token));
+    if (!existing.length) {
       console.log(`📥 Fetching historical data for ${symbol}`);
       await fetchHistoricalData([symbol]);
       await fetchHistoricalIntradayData("minute", 3, [symbol]);
     }
 
-    await loadHistoricalCache();
     await loadHistoricalSessionCandles([token]);
   } catch (err) {
     console.error(`❌ Error ensuring data for ${symbol}:`, err.message);
@@ -1507,7 +1500,6 @@ function resetInMemoryData() {
   tickBuffer = {};
   candleHistory = {};
   alignedTickStorage = {};
-  historicalCache = {};
   warmupDone = false;
   if (ticker) {
     try {
@@ -1541,7 +1533,7 @@ export {
   initSession,
   kc,
   symbolTokenMap,
-  historicalCache,
+  getHistoricalData,
   resetInMemoryData,
   loadTickDataFromDB,
 };

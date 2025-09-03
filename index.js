@@ -9,7 +9,6 @@ import {
   startLiveFeed,
   updateInstrumentTokens,
   setTickInterval,
-  getAverageVolume,
   isMarketOpen,
   setStockSymbol,
   removeStockSymbol,

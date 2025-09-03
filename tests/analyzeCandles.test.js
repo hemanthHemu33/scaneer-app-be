@@ -20,7 +20,7 @@ const kiteMock = test.mock.module('../kite.js', {
       supertrend: { signal: 'Buy' }
     }),
     candleHistory: {},
-    historicalCache: {},
+    getHistoricalData: async () => [],
     symbolTokenMap: {},
     initSession: async () => 'token',
     kc: { getLTP: async (symbols) => ({ [symbols[0]]: { last_price: 100, instrument_token: 123 } }) },
