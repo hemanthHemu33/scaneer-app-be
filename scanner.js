@@ -53,7 +53,7 @@ const SECTOR_CAPS = {
 
 // 🚦 Risk control state
 // ⚙️ Scanner mode toggle
-const MODE = "strict"; // Options: "strict" | "relaxed"
+const MODE = "relaxed"; // Options: "strict" | "relaxed"
 const FILTERS = {
   atrThreshold: MODE === "strict" ? 2 : 0.4,
   minBuySellRatio: MODE === "strict" ? 0.8 : 0.6,
@@ -257,7 +257,7 @@ export async function analyzeCandles(
       minRR: RISK_REWARD_RATIO,
       minLiquidity: FILTERS.minLiquidity,
       minVolumeRatio: 0.5,
-      minVwapParticipation: 0.98,
+      minVwapParticipation: 0.9,
       maxIndexVolatility: 20,
       blockWatchlist: true,
       addToWatchlist: false,
