@@ -24,6 +24,10 @@ async function ensureIndexes(db) {
     { expiresAt: 1 },
     { expireAfterSeconds: 0 }
   );
+  // Ensure aligned tick storage exists for minute-level tick aggregation
+  await db
+    .collection("aligned_ticks")
+    .createIndex({ token: 1, minute: 1 }, { unique: true });
 }
 
 export const connectDB = async (attempt = 0) => {
