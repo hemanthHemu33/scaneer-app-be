@@ -12,7 +12,7 @@ import {
   isAwayFromConsolidation,
 } from "./util.js";
 
-import { getSupportResistanceLevels, historicalCache } from "./kite.js";
+import { getSupportResistanceLevels, getHistoricalData } from "./kite.js";
 import { candleHistory, symbolTokenMap } from "./dataEngine.js";
 import { evaluateAllStrategies } from "./strategyEngine.js";
 import { evaluateStrategies } from "./strategies.js";
@@ -119,7 +119,7 @@ export async function analyzeCandles(
     if (!features) return null;
 
     const token = symbolTokenMap[symbol];
-    const dailyHistory = historicalCache[token] || [];
+    const dailyHistory = await getHistoricalData(token);
     const sessionData = candleHistory[token] || validCandles;
 
     const context = {
@@ -302,11 +302,13 @@ export async function analyzeCandles(
       qty,
     };
 
+    const ma20Val = await getMAForSymbol(String(token), 20);
+    const ma50Val = await getMAForSymbol(String(token), 50);
     const contextForBuild = {
       symbol,
       instrumentToken: token,
-      ma20Val: getMAForSymbol(String(token), 20),
-      ma50Val: getMAForSymbol(String(token), 50),
+      ma20Val,
+      ma50Val,
       ema9,
       ema21,
       ema50,

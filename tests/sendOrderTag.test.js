@@ -6,7 +6,7 @@ const kiteMock = test.mock.module('../kite.js', {
   namedExports: {
     kc: { placeOrder: async (params) => params },
     symbolTokenMap: {},
-    historicalCache: {},
+    getHistoricalData: async () => [],
     initSession: async () => {},
     onOrderUpdate: () => {},
     getMA: () => {},
