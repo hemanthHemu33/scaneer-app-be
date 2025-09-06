@@ -25,6 +25,7 @@ import { getAccountBalance, initAccountBalance } from "./account.js";
 dotenv.config();
 
 import db from "./db.js"; // 🧠 Import database module for future use
+import initHistoricalStore from "./data/historicalStore.js";
 import {
   candleHistory,
   ensureCandleHistory,
@@ -32,6 +33,8 @@ import {
   pushCandles,
   clearCandleHistory,
 } from "./candleCache.js";
+
+const historicalStore = initHistoricalStore();
 
 // Collection name for aligned ticks stored in MongoDB
 const ALIGNED_COLLECTION = "aligned_ticks";
@@ -1157,10 +1160,7 @@ fetchHistoricalData();
 
 async function getHistoricalData(tokenStr) {
   try {
-    const doc = await db
-      .collection("historical_data")
-      .findOne({}, { projection: { [tokenStr]: 1, _id: 0 } });
-    return doc?.[tokenStr] || [];
+    return await historicalStore.getDailyCandles(tokenStr);
   } catch (err) {
     console.error(`❌ Error fetching historical data for ${tokenStr}:`, err.message);
     return [];
@@ -1169,8 +1169,9 @@ async function getHistoricalData(tokenStr) {
 
 async function computeGapPercent(tokenStr) {
   const daily = await getHistoricalData(tokenStr);
-  const todayCandle = (candleHistory[tokenStr] || []).find((c) =>
-    isSameDay(c.timestamp, new Date())
+  const intraday = await historicalStore.getIntradayCandles(tokenStr);
+  const todayCandle = intraday.find((c) =>
+    isSameDay(c.date || c.timestamp, new Date())
   );
   if (!todayCandle || !daily.length) return;
   const yesterdayClose = daily[daily.length - 1]?.close;
@@ -1347,17 +1348,9 @@ async function getATR(token, period = 14) {
 }
 
 async function getAverageVolume(token, period) {
-  const cached = candleHistory[String(token)] || [];
-  if (cached.length >= period) {
-    return (
-      cached
-        .slice(-period)
-        .reduce((sum, c) => sum + (c.volume || 0), 0) / period
-    );
-  }
   const data = await getHistoricalData(token);
   return data?.length >= period
-    ? data.slice(-period).reduce((a, b) => a + b.volume, 0) / period
+    ? data.slice(-period).reduce((a, b) => a + (b.volume || 0), 0) / period
     : "NA";
 }
 
@@ -1527,6 +1520,7 @@ export {
   getMA,
   getATR,
   getAverageVolume,
+  historicalStore,
   tickBuffer,
   candleHistory,
   warmupCandleHistory,
