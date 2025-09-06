@@ -51,8 +51,6 @@ export function getOrderUpdate(orderId) {
   return orderUpdateMap.get(orderId);
 }
 
-const instruments = await db.collection("instruments").find({}).toArray();
-
 // const tokensPath = path.join(__dirname, "tokens.json");
 // const historicalDataPath = path.join(__dirname, "historical_data.json");
 // const sessionDataPath = path.join(__dirname, "session_data.json");
@@ -97,11 +95,9 @@ async function removeStockSymbol(symbol) {
   const withPrefix = symbol.includes(":") ? symbol : `NSE:${symbol}`;
   const cleaned = withPrefix.split(":")[1];
 
-  const token = symbolTokenMap[withPrefix];
+  const token = await getTokenForSymbol(withPrefix);
   if (token) {
     instrumentTokens = instrumentTokens.filter((t) => t !== token);
-    delete symbolTokenMap[withPrefix];
-    delete tokenSymbolMap[token];
     delete tickBuffer[token];
     delete candleHistory[token];
     // Remove any aligned tick data for this token from DB
@@ -167,24 +163,25 @@ async function removeStockSymbol(symbol) {
   }
 }
 
-const tokenSymbolMap = {}; // token: symbol
-const symbolTokenMap = {}; // symbol: token
-
-async function refreshSymbolMaps() {
-  const symbols = await getStockSymbols();
-  Object.keys(tokenSymbolMap).forEach((k) => delete tokenSymbolMap[k]);
-  Object.keys(symbolTokenMap).forEach((k) => delete symbolTokenMap[k]);
-  for (const inst of instruments) {
-    const key = `${inst.exchange}:${inst.tradingsymbol}`;
-    if (symbols.includes(key)) {
-      tokenSymbolMap[inst.instrument_token] = key;
-      symbolTokenMap[key] = inst.instrument_token;
-    }
-  }
-  return symbols;
+// Mapping helpers – fetch fresh data from DB on demand
+async function getTokenForSymbol(symbol) {
+  const withPrefix = symbol.includes(":") ? symbol : `NSE:${symbol}`;
+  const [exchange, tradingsymbol] = withPrefix.split(":");
+  const inst = await db
+    .collection("instruments")
+    .findOne({ exchange, tradingsymbol });
+  return inst?.instrument_token || null;
 }
 
-await refreshSymbolMaps();
+async function getSymbolForToken(token) {
+  const inst = await db
+    .collection("instruments")
+    .findOne({ instrument_token: Number(token) });
+  if (!inst) return null;
+  const symbol = `${inst.exchange}:${inst.tradingsymbol}`;
+  const symbols = await getStockSymbols();
+  return symbols.includes(symbol) ? symbol : null;
+}
 
 let instrumentTokens = [];
 let tickIntervalMs = 10000;
@@ -454,7 +451,7 @@ async function startLiveFeed(io) {
     console.warn("⚠️ Could not preload session data:", err.message);
   }
 
-  const symbols = await refreshSymbolMaps();
+  const symbols = await getStockSymbols();
   instrumentTokens = await getTokensForSymbols(symbols);
   if (!instrumentTokens.length) return logError("No instrument tokens found");
 
@@ -615,7 +612,7 @@ export async function processAlignedCandles(io) {
 
           const tokenStr = String(token);
           await ensureCandleHistory(tokenStr);
-          const symbol = tokenSymbolMap[tokenStr];
+          const symbol = await getSymbolForToken(tokenStr);
           if (!symbol) {
             logError(`❌ Missing symbol for token ${token}`);
             await db
@@ -744,9 +741,9 @@ async function processBuffer(io) {
 
     const tokenStr = String(token);
     await ensureCandleHistory(tokenStr);
-    const symbol = tokenSymbolMap[tokenStr];
+    const symbol = await getSymbolForToken(tokenStr);
     if (!symbol) {
-      logError(`❌ Missing symbol for token ${token} in tokenSymbolMap`);
+      logError(`❌ Missing symbol for token ${token}`);
       continue;
     }
 
@@ -814,11 +811,12 @@ function checkMarketVolatility(tokenStr, threshold = 5) {
   return atr <= threshold;
 }
 
-function checkRisk(signal) {
+async function checkRisk(signal) {
   if (riskState.dailyLoss >= riskState.maxDailyLoss) return false;
   if (riskState.consecutiveLosses >= riskState.maxConsecutiveLosses)
     return false;
-  const tokenStr = symbolTokenMap[signal.stock] || signal.instrument_token;
+  const tokenStr =
+    (await getTokenForSymbol(signal.stock)) || signal.instrument_token;
   if (tokenStr && !checkMarketVolatility(String(tokenStr))) return false;
   return true;
 }
@@ -961,7 +959,7 @@ async function emitUnifiedSignal(signal, source, io) {
     return;
   }
   lastSignalMap[key] = now;
-  if (!checkRisk(signal)) return;
+  if (!(await checkRisk(signal))) return;
   const symbol = signal.stock || signal.symbol;
   const tradeValue = signal.entry * (signal.qty || 1);
   const allowed =
@@ -1286,7 +1284,6 @@ async function fetchSessionData() {
         close: c.close,
         volume: c.volume,
       }));
-      tokenSymbolMap[token] = symbol;
 
       console.log(`📥 Fetched ${candles.length} session candles for ${symbol}`);
     } catch (err) {
@@ -1385,8 +1382,6 @@ async function subscribeSymbol(symbol) {
     return;
   }
   const token = tokens[0];
-  tokenSymbolMap[token] = symbol;
-  symbolTokenMap[symbol] = token;
   if (!instrumentTokens.includes(token)) {
     updateInstrumentTokens([...instrumentTokens, token]);
   }
@@ -1473,8 +1468,8 @@ export async function getHigherTimeframeData(symbol, timeframe = "15minute") {
   }
 }
 
-export function getSupportResistanceLevels(symbol) {
-  const token = symbolTokenMap[symbol];
+export async function getSupportResistanceLevels(symbol) {
+  const token = await getTokenForSymbol(symbol);
   const candles = (candleHistory[token] || []).filter(
     (c) =>
       c &&
@@ -1521,8 +1516,6 @@ export async function rebuildThreeMinCandlesFromOneMin(token) {
 }
 
 async function resetInMemoryData() {
-  Object.keys(tokenSymbolMap).forEach((k) => delete tokenSymbolMap[k]);
-  Object.keys(symbolTokenMap).forEach((k) => delete symbolTokenMap[k]);
   instrumentTokens = [];
   tickBuffer = {};
   candleHistory = {};
@@ -1560,7 +1553,8 @@ export {
   removeStockSymbol,
   initSession,
   kc,
-  symbolTokenMap,
+  getTokenForSymbol,
+  getSymbolForToken,
   getHistoricalData,
   resetInMemoryData,
   loadTickDataFromDB,

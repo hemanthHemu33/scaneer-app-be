@@ -10,6 +10,18 @@ const {
   signalQualityScore,
 } = await import('../confidence.js');
 
+const kiteMock = test.mock.module('../kite.js', {
+  namedExports: {
+    getHigherTimeframeData: async () => ({
+      ema50: 90,
+      supertrend: { signal: 'Buy' }
+    }),
+    getMA: () => null,
+    onOrderUpdate: () => {},
+    orderEvents: { on: () => {} }
+  }
+});
+
 test('computeConfidenceScore blends factors', () => {
   const score = computeConfidenceScore({
     hitRate: 0.8,
@@ -40,18 +52,7 @@ test('applyPenaltyConditions reduces score', () => {
   assert.ok(adjusted < base && adjusted >= 0);
 });
 
-test('evaluateTrendConfidence basic high', async () => {
-  const kiteMock = test.mock.module('../kite.js', {
-    namedExports: {
-      getHigherTimeframeData: async () => ({
-        ema50: 90,
-        supertrend: { signal: 'Buy' }
-      }),
-      getMA: () => null,
-      onOrderUpdate: () => {},
-      orderEvents: { on: () => {} }
-    }
-  });
+test('evaluateTrendConfidence basic high', { concurrency: false }, async () => {
   const { evaluateTrendConfidence } = await import('../confidence.js');
   const res = await evaluateTrendConfidence(
     {
@@ -68,7 +69,7 @@ test('evaluateTrendConfidence basic high', async () => {
       },
       liquidity: 200,
       spread: 0.5,
-      depth: { buy: [{ price: 101 }], sell: [{ price: 101.2 }] },
+      depth: { buy: [{ price: 102 }], sell: [{ price: 102.2 }] },
       totalBuy: 1000,
       totalSell: 800,
       last: { close: 102 },
@@ -80,21 +81,9 @@ test('evaluateTrendConfidence basic high', async () => {
     { direction: 'Long', type: 'Breakout' }
   );
   assert.equal(res.confidence, 'High');
-  kiteMock.restore();
 });
 
-test('evaluateTrendConfidence low on weak volume', async () => {
-  const kiteMock = test.mock.module('../kite.js', {
-    namedExports: {
-      getHigherTimeframeData: async () => ({
-        ema50: 90,
-        supertrend: { signal: 'Buy' }
-      }),
-      getMA: () => null,
-      onOrderUpdate: () => {},
-      orderEvents: { on: () => {} }
-    }
-  });
+test('evaluateTrendConfidence low on weak volume', { concurrency: false }, async () => {
   const { evaluateTrendConfidence } = await import('../confidence.js');
   const res = await evaluateTrendConfidence(
     {
@@ -118,7 +107,6 @@ test('evaluateTrendConfidence low on weak volume', async () => {
     { direction: 'Long', type: 'Breakout' }
   );
   assert.equal(res.confidence, 'Low');
-  kiteMock.restore();
 });
 
 test('getRecentAccuracy computes recent win rate', () => {
