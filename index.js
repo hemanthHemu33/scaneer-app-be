@@ -137,7 +137,7 @@ app.delete("/reset", async (req, res) => {
     await db.collection("stock_symbols").deleteMany({});
     await db.collection("stock_symbols").insertOne({ symbols: [] });
 
-    resetInMemoryData();
+    await resetInMemoryData();
     res.json({ status: "success", message: "Collections reset successfully" });
   } catch (err) {
     logError("reset collections", err);

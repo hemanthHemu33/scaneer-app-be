@@ -26,6 +26,11 @@ dotenv.config();
 
 import db from "./db.js"; // 🧠 Import database module for future use
 
+// Collection name for aligned ticks stored in MongoDB
+const ALIGNED_COLLECTION = "aligned_ticks";
+// Ensure the collection exists. Mongo will create it automatically if missing.
+await db.createCollection(ALIGNED_COLLECTION).catch(() => {});
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -99,7 +104,8 @@ async function removeStockSymbol(symbol) {
     delete tokenSymbolMap[token];
     delete tickBuffer[token];
     delete candleHistory[token];
-    delete alignedTickStorage[token];
+    // Remove any aligned tick data for this token from DB
+    await db.collection(ALIGNED_COLLECTION).deleteMany({ token: Number(token) });
     delete sessionData[token];
     if (ticker) ticker.unsubscribe([token]);
     updateInstrumentTokens(instrumentTokens);
@@ -306,7 +312,7 @@ async function resetDatabase() {
     await db.collection("stock_symbols").deleteMany({});
     await db.collection("stock_symbols").insertOne({ symbols: [] });
 
-    resetInMemoryData();
+    await resetInMemoryData();
     res.json({ status: "success", message: "Collections reset successfully" });
   } catch (err) {
     logError("reset collections", err);
@@ -492,8 +498,7 @@ async function startLiveFeed(io) {
   // previous reload of historical data removed to avoid duplication
 }
 
-// 🕒 Aligned tick storage
-let alignedTickStorage = {};
+// 🕒 Aligned tick storage (data persisted in MongoDB)
 async function ensureCandleHistory(tokenStr) {
   if (candleHistory[tokenStr] && candleHistory[tokenStr].length) return;
   const doc = await db
@@ -510,16 +515,23 @@ async function ensureCandleHistory(tokenStr) {
   }));
   candleHistory[tokenStr] = candleHistory[tokenStr].slice(-60);
 }
-function storeTickAligned(tick) {
+async function storeTickAligned(tick) {
   const token = tick.instrument_token;
   const ts = new Date(tick.timestamp || Date.now());
   const minuteKey = new Date(Math.floor(ts.getTime() / 60000) * 60000)
     .toISOString()
     .slice(0, 16); // "YYYY-MM-DDTHH:mm"
-  if (!alignedTickStorage[token]) alignedTickStorage[token] = {};
-  if (!alignedTickStorage[token][minuteKey])
-    alignedTickStorage[token][minuteKey] = [];
-  alignedTickStorage[token][minuteKey].push(tick);
+  try {
+    await db
+      .collection(ALIGNED_COLLECTION)
+      .updateOne(
+        { token, minute: minuteKey },
+        { $push: { ticks: tick } },
+        { upsert: true }
+      );
+  } catch (err) {
+    logError("storeTickAligned", err);
+  }
 }
 
 const BATCH_LIMIT = 100;
@@ -539,26 +551,32 @@ export async function processAlignedCandles(io) {
   let processedCount = 0;
 
   try {
-    const tokenList = Object.keys(alignedTickStorage);
+    const tokenList = await db
+      .collection(ALIGNED_COLLECTION)
+      .distinct("token");
 
     for (const token of tokenList) {
-      const tokenMinutes = Object.keys(alignedTickStorage[token])
-        .sort()
-        .reverse(); // latest minutes first
+      const docs = await db
+        .collection(ALIGNED_COLLECTION)
+        .find({ token })
+        .sort({ minute: -1 })
+        .toArray();
 
-      for (const minute of tokenMinutes) {
+      for (const doc of docs) {
         if (processedCount >= BATCH_LIMIT) break;
+        const minute = doc.minute;
+        const ticks = doc.ticks || [];
 
         try {
-          const ticks = alignedTickStorage[token][minute];
-
           if (
             !Array.isArray(ticks) ||
             ticks.length === 0 ||
             ticks.some((t) => typeof t?.last_price !== "number")
           ) {
             console.warn(`⚠️ Corrupt ticks for token ${token} at ${minute}`);
-            delete alignedTickStorage[token][minute];
+            await db
+              .collection(ALIGNED_COLLECTION)
+              .deleteOne({ token, minute });
             continue;
           }
 
@@ -570,7 +588,9 @@ export async function processAlignedCandles(io) {
             console.warn(
               `⚠️ Insufficient valid prices for ${token} at ${minute}`
             );
-            delete alignedTickStorage[token][minute];
+            await db
+              .collection(ALIGNED_COLLECTION)
+              .deleteOne({ token, minute });
             continue;
           }
 
@@ -598,7 +618,9 @@ export async function processAlignedCandles(io) {
           const symbol = tokenSymbolMap[tokenStr];
           if (!symbol) {
             logError(`❌ Missing symbol for token ${token}`);
-            delete alignedTickStorage[token][minute];
+            await db
+              .collection(ALIGNED_COLLECTION)
+              .deleteOne({ token, minute });
             continue;
           }
 
@@ -611,7 +633,9 @@ export async function processAlignedCandles(io) {
 
           if (candleScore < 2) {
             console.log(`⚠️ Low-quality candle skipped for ${symbol}`);
-            delete alignedTickStorage[token][minute];
+            await db
+              .collection(ALIGNED_COLLECTION)
+              .deleteOne({ token, minute });
             continue;
           }
 
@@ -641,33 +665,29 @@ export async function processAlignedCandles(io) {
           );
 
           if (signal) {
-            // Step 9: final checks and emit
             await emitUnifiedSignal(signal, "Aligned", io);
           }
         } catch (err) {
           logError(`⚠️ Error processing token ${token} at ${minute}`, err);
         }
 
-        // ✅ Always clean up
-        delete alignedTickStorage[token][minute];
+        await db
+          .collection(ALIGNED_COLLECTION)
+          .deleteOne({ token, minute });
         processedCount++;
       }
 
-      // If the inner loop breaks early, exit outer loop too
       if (processedCount >= BATCH_LIMIT) break;
     }
   } catch (globalErr) {
     logError("❌ processAlignedCandles global error", globalErr);
   } finally {
     processingInProgress = false;
-
-    // ✅ Schedule next batch if there’s more to process
-    if (
-      Object.keys(alignedTickStorage).some(
-        (token) => Object.keys(alignedTickStorage[token]).length > 0
-      )
-    ) {
-      setTimeout(() => processAlignedCandles(io), 0); // re-queue next batch
+    const remaining = await db
+      .collection(ALIGNED_COLLECTION)
+      .countDocuments();
+    if (remaining > 0) {
+      setTimeout(() => processAlignedCandles(io), 0);
     }
   }
 }
@@ -1473,7 +1493,14 @@ export function getSupportResistanceLevels(symbol) {
 }
 
 export async function rebuildThreeMinCandlesFromOneMin(token) {
-  const minutes = alignedTickStorage[token] || {};
+  const docs = await db
+    .collection(ALIGNED_COLLECTION)
+    .find({ token: Number(token) })
+    .toArray();
+  const minutes = {};
+  for (const doc of docs) {
+    minutes[doc.minute] = doc.ticks || [];
+  }
   const entries = Object.keys(minutes).sort();
   const result = [];
   for (let i = 0; i < entries.length; i += 3) {
@@ -1493,13 +1520,14 @@ export async function rebuildThreeMinCandlesFromOneMin(token) {
   return result;
 }
 
-function resetInMemoryData() {
+async function resetInMemoryData() {
   Object.keys(tokenSymbolMap).forEach((k) => delete tokenSymbolMap[k]);
   Object.keys(symbolTokenMap).forEach((k) => delete symbolTokenMap[k]);
   instrumentTokens = [];
   tickBuffer = {};
   candleHistory = {};
-  alignedTickStorage = {};
+  // Clear aligned tick data stored in MongoDB
+  await db.collection(ALIGNED_COLLECTION).deleteMany({});
   warmupDone = false;
   if (ticker) {
     try {
