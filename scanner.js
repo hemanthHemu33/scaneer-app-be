@@ -12,8 +12,12 @@ import {
   isAwayFromConsolidation,
 } from "./util.js";
 
-import { getSupportResistanceLevels, getHistoricalData } from "./kite.js";
-import { candleHistory, symbolTokenMap } from "./dataEngine.js";
+import {
+  getSupportResistanceLevels,
+  getHistoricalData,
+  getTokenForSymbol,
+} from "./kite.js";
+import { candleHistory } from "./dataEngine.js";
 import { evaluateAllStrategies } from "./strategyEngine.js";
 import { evaluateStrategies } from "./strategies.js";
 import { RISK_REWARD_RATIO, calculatePositionSize } from "./positionSizing.js";
@@ -118,7 +122,7 @@ export async function analyzeCandles(
     const features = computeFeatures(validCandles);
     if (!features) return null;
 
-    const token = symbolTokenMap[symbol];
+    const token = await getTokenForSymbol(symbol);
     const dailyHistory = await getHistoricalData(token);
     const sessionData = candleHistory[token] || validCandles;
 
@@ -182,7 +186,7 @@ export async function analyzeCandles(
       return null;
     }
 
-    const { support, resistance } = getSupportResistanceLevels(symbol);
+    const { support, resistance } = await getSupportResistanceLevels(symbol);
 
     const stratResults = evaluateAllStrategies({
       ...context,

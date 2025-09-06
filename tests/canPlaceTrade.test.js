@@ -7,7 +7,7 @@ const kiteMock = test.mock.module('../kite.js', {
     onOrderUpdate: () => {},
     orderEvents: { on: () => {} },
     kc: {},
-    symbolTokenMap: {},
+    getTokenForSymbol: async () => 123,
     getHistoricalData: async () => [],
     initSession: async () => {},
     getMA: () => null

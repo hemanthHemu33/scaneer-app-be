@@ -3,7 +3,7 @@ import dotenv from "dotenv";
 const logError = (ctx, err) => console.error(`[${ctx}]`, err?.message || err);
 import {
   kc,
-  symbolTokenMap,
+  getTokenForSymbol,
   initSession,
   onOrderUpdate,
   getHistoricalData,
@@ -188,7 +188,7 @@ export async function getMarginForStock(order) {
     await initSession();
     const response = await kc.orderMargins(order);
 
-    const token = symbolTokenMap[order.tradingsymbol];
+    const token = await getTokenForSymbol(order.tradingsymbol);
     const hist = await getHistoricalData(token);
     const avgRange =
       hist.length > 1
