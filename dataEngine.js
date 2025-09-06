@@ -1,4 +1,5 @@
-import { kc, initSession, tickBuffer, candleHistory, getTokenForSymbol } from './kite.js';
+import { kc, initSession, tickBuffer, getTokenForSymbol } from './kite.js';
+import { candleHistory } from './candleCache.js';
 import db from './db.js';
 import { logError } from './logger.js';
 
