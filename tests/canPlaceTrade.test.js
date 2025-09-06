@@ -6,7 +6,9 @@ const kiteMock = test.mock.module('../kite.js', {
   namedExports: {
     onOrderUpdate: () => {},
     orderEvents: { on: () => {} },
-    kc: {},
+    kc: {
+      orderMargins: async (order) => ({ required: order.quantity * 5000 }),
+    },
     getTokenForSymbol: async () => 123,
     getHistoricalData: async () => [],
     initSession: async () => {},
@@ -14,21 +16,18 @@ const kiteMock = test.mock.module('../kite.js', {
   }
 });
 
+const accountMock = test.mock.module('../account.js', {
+  namedExports: {
+    getAccountMargin: async () => ({ equity: { available: { cash: 10000 } } }),
+  },
+});
+
 const orderMod = await import('../orderExecution.js');
-const accountMod = await import('../account.js');
 
-const marginMock = test.mock.method(accountMod, 'getAccountMargin', async () => ({
-  equity: { available: { cash: 10000 } },
-}));
-
-const getMarginMock = test.mock.method(orderMod, 'getMarginForStock', async (
-  order,
-) => ({ required: order.quantity * 5000 }));
+accountMock.restore();
 
 const res = await orderMod.canPlaceTrade({ symbol: 'AAA', direction: 'Long' });
 
-getMarginMock.mock.restore();
-marginMock.mock.restore();
 kiteMock.restore();
 
 test('canPlaceTrade computes quantity using margin', () => {
