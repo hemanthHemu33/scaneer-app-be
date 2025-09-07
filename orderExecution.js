@@ -10,16 +10,17 @@ import {
 } from "./kite.js"; // reuse shared Kite instance and session handler
 import { getAccountMargin } from "./account.js";
 import { calculateDynamicStopLoss } from "./dynamicRiskModel.js";
+import db from "./db.js";
 
 // Store order id -> metadata mapping for traceability
 export const orderMetadata = new Map();
 
 // --- Failed signal retry queue ---
-export const retryQueue = [];
+const RETRY_COLLECTION = "retry_queue";
 const RETRY_BASE_MS = 60000; // 1 minute
 
-export function queueFailedSignal(signal, opts = {}) {
-  retryQueue.push({
+export async function queueFailedSignal(signal, opts = {}) {
+  await db.collection(RETRY_COLLECTION).insertOne({
     signal,
     opts,
     attempt: 0,
@@ -27,8 +28,25 @@ export function queueFailedSignal(signal, opts = {}) {
   });
 }
 
-export function getRetryQueue() {
-  return retryQueue;
+export async function getRetryQueue() {
+  return db.collection(RETRY_COLLECTION).find().toArray();
+}
+
+// --- Open trades tracking ---
+const OPEN_TRADES_COLLECTION = "open_trades";
+
+export async function addOpenTrade(id, trade) {
+  await db
+    .collection(OPEN_TRADES_COLLECTION)
+    .updateOne({ _id: id }, { $set: { ...trade, _id: id } }, { upsert: true });
+}
+
+export async function getOpenTrade(id) {
+  return db.collection(OPEN_TRADES_COLLECTION).findOne({ _id: id });
+}
+
+export async function removeOpenTrade(id) {
+  await db.collection(OPEN_TRADES_COLLECTION).deleteOne({ _id: id });
 }
 
 dotenv.config();
@@ -402,23 +420,32 @@ export async function placeOrder(signal, maxRetries = 3) {
 }
 
 // --- Execution facade ---
-export const openTrades = new Map();
-
-function updateOpenTrades(update) {
-  for (const [id, trade] of openTrades.entries()) {
-    if (id === update.order_id) {
-      trade.status = update.status;
-      if (update.status === "COMPLETE") openTrades.delete(id);
-    } else if (trade.slId === update.order_id) {
-      trade.status = "SL_FILLED";
-      openTrades.delete(id);
-    } else if (trade.targetId === update.order_id) {
-      trade.status = "TARGET_FILLED";
-      openTrades.delete(id);
+async function updateOpenTrades(update) {
+  const col = db.collection(OPEN_TRADES_COLLECTION);
+  const trade = await col.findOne({
+    $or: [
+      { _id: update.order_id },
+      { slId: update.order_id },
+      { targetId: update.order_id },
+    ],
+  });
+  if (!trade) return;
+  if (trade._id === update.order_id) {
+    trade.status = update.status;
+    if (update.status === "COMPLETE") {
+      await removeOpenTrade(trade._id);
+    } else {
+      await addOpenTrade(trade._id, trade);
     }
+  } else if (trade.slId === update.order_id) {
+    trade.status = "SL_FILLED";
+    await removeOpenTrade(trade._id);
+  } else if (trade.targetId === update.order_id) {
+    trade.status = "TARGET_FILLED";
+    await removeOpenTrade(trade._id);
   }
 }
-onOrderUpdate(updateOpenTrades);
+onOrderUpdate((u) => updateOpenTrades(u).catch((e) => logError("updateOpenTrades", e)));
 
 /**
  * Send trading signal to execution layer.
@@ -435,7 +462,7 @@ export async function sendToExecution(signal, opts = {}) {
   } = opts;
   if (simulate) {
     const simId = `SIM-${Date.now()}`;
-    openTrades.set(simId, { signal, status: "SIMULATED" });
+    await addOpenTrade(simId, { signal, status: "SIMULATED" });
     console.log(`[SIM] Executing signal for ${signal.stock || signal.symbol}`);
     return { entryId: simId, slId: simId, targetId: simId };
   }
@@ -446,35 +473,44 @@ export async function sendToExecution(signal, opts = {}) {
         signal.stock || signal.symbol
       }: required ${marginCheck.required}, available ${marginCheck.available}`
     );
-    if (retryOnFail) queueFailedSignal(signal, opts);
+    if (retryOnFail) await queueFailedSignal(signal, opts);
     return null;
   }
   const sizedSignal = { ...signal, qty: marginCheck.quantity };
   const orders = await placeOrder(sizedSignal);
   if (orders) {
-    openTrades.set(orders.entryId, {
+    await addOpenTrade(orders.entryId, {
       signal: sizedSignal,
       status: "OPEN",
       ...orders,
     });
   }
-  if (!orders && retryOnFail) queueFailedSignal(signal, opts);
+  if (!orders && retryOnFail) await queueFailedSignal(signal, opts);
   return orders;
 }
 
 export async function processRetryQueue() {
   const now = Date.now();
-  for (const item of [...retryQueue]) {
-    if (item.nextAttempt > now) continue;
+  const items = await db
+    .collection(RETRY_COLLECTION)
+    .find({ nextAttempt: { $lte: now } })
+    .toArray();
+  for (const item of items) {
     const result = await sendToExecution(item.signal, {
       ...item.opts,
       retryOnFail: false,
     });
     if (result) {
-      retryQueue.splice(retryQueue.indexOf(item), 1);
+      await db.collection(RETRY_COLLECTION).deleteOne({ _id: item._id });
     } else {
-      item.attempt += 1;
-      item.nextAttempt = now + RETRY_BASE_MS * Math.pow(2, item.attempt);
+      const attempt = (item.attempt ?? 0) + 1;
+      const nextAttempt = now + RETRY_BASE_MS * Math.pow(2, attempt);
+      await db
+        .collection(RETRY_COLLECTION)
+        .updateOne(
+          { _id: item._id },
+          { $set: { attempt, nextAttempt } }
+        );
     }
   }
 }
