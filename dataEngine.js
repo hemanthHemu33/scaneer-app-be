@@ -1,4 +1,4 @@
-import { kc, initSession, tickBuffer, candleHistory, symbolTokenMap } from './kite.js';
+import { kc, initSession, tickBuffer, candleHistory, getTokenForSymbol } from './kite.js';
 import db from './db.js';
 import { logError } from './logger.js';
 
@@ -18,16 +18,7 @@ export async function getLTP(symbol) {
 }
 
 export async function getInstrumentToken(symbol) {
-  if (symbolTokenMap[symbol]) {
-    return symbolTokenMap[symbol];
-  }
-  await initSession();
-  const data = await kc.getLTP([symbol]);
-  const token = data?.[symbol]?.instrument_token;
-  if (token) {
-    symbolTokenMap[symbol] = token;
-  }
-  return token;
+  return await getTokenForSymbol(symbol);
 }
 
 export async function getFundamentals(symbol) {
@@ -48,4 +39,4 @@ export async function getNews(symbol) {
   }
 }
 
-export { candleHistory, symbolTokenMap, tickBuffer };
+export { candleHistory, tickBuffer };

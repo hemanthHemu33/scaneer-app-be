@@ -5,7 +5,7 @@ process.env.NODE_ENV = 'test';
 const kiteMock = test.mock.module('../kite.js', {
   namedExports: {
     kc: { placeOrder: async (params) => params },
-    symbolTokenMap: {},
+    getTokenForSymbol: async () => 123,
     getHistoricalData: async () => [],
     initSession: async () => {},
     onOrderUpdate: () => {},
