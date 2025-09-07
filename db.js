@@ -24,6 +24,9 @@ async function ensureIndexes(db) {
     { expiresAt: 1 },
     { expireAfterSeconds: 0 }
   );
+  await db.collection("retry_queue").createIndex({ nextAttempt: 1 });
+  await db.collection("open_trades").createIndex({ slId: 1 });
+  await db.collection("open_trades").createIndex({ targetId: 1 });
   // Ensure aligned tick storage exists for minute-level tick aggregation
   await db
     .collection("aligned_ticks")
@@ -63,4 +66,15 @@ export const connectDB = async (attempt = 0) => {
 const db = await connectDB();
 
 export default db;
+
+if (process.env.NODE_ENV === "test") {
+  process.once("exit", async () => {
+    try {
+      await client?.close();
+      await memoryServer?.stop();
+    } catch {
+      /* ignore */
+    }
+  });
+}
 

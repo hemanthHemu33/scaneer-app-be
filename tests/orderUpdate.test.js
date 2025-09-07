@@ -16,17 +16,19 @@ const kiteMock = test.mock.module('../kite.js', {
   }
 });
 
-const { openTrades } = await import('../orderExecution.js');
+const { addOpenTrade, getOpenTrade } = await import('../orderExecution.js');
 
 let received;
 emitter.on('update', (u) => { received = u; });
 
-openTrades.set('e1', { entryId: 'e1', slId: 's1', targetId: 't1', status: 'OPEN' });
+await addOpenTrade('e1', { entryId: 'e1', slId: 's1', targetId: 't1', status: 'OPEN' });
 emitter.emit('update', { order_id: 'e1', status: 'COMPLETE' });
+await new Promise((r) => setTimeout(r, 10));
 
-test('order update listener updates trades map', () => {
+test('order update listener updates trades map', async () => {
   assert.deepEqual(received, { order_id: 'e1', status: 'COMPLETE' });
-  assert.equal(openTrades.has('e1'), false);
+  const trade = await getOpenTrade('e1');
+  assert.equal(trade, null);
 });
 
 kiteMock.restore();
