@@ -25,6 +25,16 @@ import { getAccountBalance, initAccountBalance } from "./account.js";
 dotenv.config();
 
 import db from "./db.js"; // 🧠 Import database module for future use
+import initHistoricalStore from "./data/historicalStore.js";
+import {
+  candleHistory,
+  ensureCandleHistory,
+  pushCandle,
+  pushCandles,
+  clearCandleHistory,
+} from "./candleCache.js";
+
+const historicalStore = initHistoricalStore();
 
 // Collection name for aligned ticks stored in MongoDB
 const ALIGNED_COLLECTION = "aligned_ticks";
@@ -61,8 +71,6 @@ const sessionData = {};
 for (const doc of sessionDocs) {
   sessionData[doc.token] = doc.candles || doc.data || [];
 }
-
-let candleHistory = {}; // 🧠 Store per-token candle history for EMA, RSI, etc.
 
 // Fetch stock symbols from database
 async function getStockSymbols() {
@@ -379,18 +387,18 @@ async function loadHistoricalSessionCandles(tokens) {
 
   for (const doc of docs) {
     const tokenStr = String(doc.token);
-    if (!candleHistory[tokenStr]) candleHistory[tokenStr] = [];
-    candleHistory[tokenStr].push(
-      ...(doc.candles || doc.data || []).map((c) => ({
+    pushCandles(
+      tokenStr,
+      (doc.candles || doc.data || []).map((c) => ({
         open: c.open,
         high: c.high,
         low: c.low,
         close: c.close,
         volume: c.volume,
         timestamp: new Date(c.date),
-      }))
+      })),
+      60
     );
-    candleHistory[tokenStr] = candleHistory[tokenStr].slice(-60);
   }
 
   if (docs.length) {
@@ -424,18 +432,18 @@ async function startLiveFeed(io) {
 
     for (const token in sessionData) {
       const tokenStr = token;
-      if (!candleHistory[tokenStr]) candleHistory[tokenStr] = [];
-      candleHistory[tokenStr].push(
-        ...sessionData[token].map((c) => ({
+      pushCandles(
+        tokenStr,
+        sessionData[token].map((c) => ({
           open: c.open,
           high: c.high,
           low: c.low,
           close: c.close,
           volume: c.volume,
           timestamp: new Date(c.date),
-        }))
+        })),
+        60
       );
-      candleHistory[tokenStr] = candleHistory[tokenStr].slice(-60);
     }
     console.log("✅ Preloaded session candles into candle history");
 
@@ -496,22 +504,6 @@ async function startLiveFeed(io) {
 }
 
 // 🕒 Aligned tick storage (data persisted in MongoDB)
-async function ensureCandleHistory(tokenStr) {
-  if (candleHistory[tokenStr] && candleHistory[tokenStr].length) return;
-  const doc = await db
-    .collection("historical_session_data")
-    .findOne({ token: Number(tokenStr) });
-  const data = doc?.candles || doc?.data || [];
-  candleHistory[tokenStr] = data.map((c) => ({
-    open: c.open,
-    high: c.high,
-    low: c.low,
-    close: c.close,
-    volume: c.volume,
-    timestamp: new Date(c.date),
-  }));
-  candleHistory[tokenStr] = candleHistory[tokenStr].slice(-60);
-}
 async function storeTickAligned(tick) {
   const token = tick.instrument_token;
   const ts = new Date(tick.timestamp || Date.now());
@@ -645,9 +637,7 @@ export async function processAlignedCandles(io) {
             timestamp: new Date(minute),
           };
 
-          if (!candleHistory[tokenStr]) candleHistory[tokenStr] = [];
-          candleHistory[tokenStr].push(newCandle);
-          candleHistory[tokenStr] = candleHistory[tokenStr].slice(-60);
+          pushCandle(tokenStr, newCandle, 60);
 
           const signal = await analyzeCandles(
             candleHistory[tokenStr],
@@ -758,9 +748,7 @@ async function processBuffer(io) {
       timestamp: new Date(),
     };
 
-    if (!candleHistory[tokenStr]) candleHistory[tokenStr] = [];
-    candleHistory[tokenStr].push(newCandle);
-    candleHistory[tokenStr] = candleHistory[tokenStr].slice(-60); // Keep only last 60 candles
+    pushCandle(tokenStr, newCandle, 60); // Keep only last 60 candles
 
     try {
       const signal = await analyzeCandles(
@@ -843,8 +831,6 @@ async function fetchFallbackOneMinuteCandles() {
       const candles = await kc.getHistoricalData(token, "minute", from, to);
       const tokenStr = String(token);
 
-      if (!candleHistory[tokenStr]) candleHistory[tokenStr] = [];
-
       for (const c of candles) {
         const candleObj = {
           open: c.open,
@@ -854,18 +840,15 @@ async function fetchFallbackOneMinuteCandles() {
           volume: c.volume,
           timestamp: new Date(c.date),
         };
-        // candleHistory[tokenStr].push(candleObj);
-        const candleAlreadyExists = candleHistory[tokenStr].some(
+        const candleAlreadyExists = (candleHistory[tokenStr] || []).some(
           (existing) =>
             new Date(existing.timestamp).getTime() ===
             new Date(c.date).getTime()
         );
         if (!candleAlreadyExists) {
-          candleHistory[tokenStr].push(candleObj);
+          pushCandle(tokenStr, candleObj, 60);
         }
       }
-
-      candleHistory[tokenStr] = candleHistory[tokenStr].slice(-60);
     } catch (err) {
       logError(`Fallback candle fetch failed for ${symbol}`, err);
     }
@@ -1096,9 +1079,7 @@ async function fetchHistoricalIntradayData(
       volume: c.volume,
       timestamp: new Date(c.date),
     }));
-    if (!candleHistory[tokenStr]) candleHistory[tokenStr] = [];
-    candleHistory[tokenStr].push(...candles);
-    candleHistory[tokenStr] = candleHistory[tokenStr].slice(-60);
+    pushCandles(tokenStr, candles, 60);
   }
 }
 
@@ -1179,10 +1160,7 @@ fetchHistoricalData();
 
 async function getHistoricalData(tokenStr) {
   try {
-    const doc = await db
-      .collection("historical_data")
-      .findOne({}, { projection: { [tokenStr]: 1, _id: 0 } });
-    return doc?.[tokenStr] || [];
+    return await historicalStore.getDailyCandles(tokenStr);
   } catch (err) {
     console.error(`❌ Error fetching historical data for ${tokenStr}:`, err.message);
     return [];
@@ -1191,8 +1169,9 @@ async function getHistoricalData(tokenStr) {
 
 async function computeGapPercent(tokenStr) {
   const daily = await getHistoricalData(tokenStr);
-  const todayCandle = (candleHistory[tokenStr] || []).find((c) =>
-    isSameDay(c.timestamp, new Date())
+  const intraday = await historicalStore.getIntradayCandles(tokenStr);
+  const todayCandle = intraday.find((c) =>
+    isSameDay(c.date || c.timestamp, new Date())
   );
   if (!todayCandle || !daily.length) return;
   const yesterdayClose = daily[daily.length - 1]?.close;
@@ -1301,18 +1280,18 @@ async function fetchSessionData() {
           { upsert: true }
         );
       const tokenStr = String(token);
-      if (!candleHistory[tokenStr]) candleHistory[tokenStr] = [];
-      candleHistory[tokenStr].push(
-        ...sessionData[token].map((c) => ({
+      pushCandles(
+        tokenStr,
+        sessionData[token].map((c) => ({
           open: c.open,
           high: c.high,
           low: c.low,
           close: c.close,
           volume: c.volume,
           timestamp: new Date(c.date),
-        }))
+        })),
+        60
       );
-      candleHistory[tokenStr] = candleHistory[tokenStr].slice(-60);
       await computeGapPercent(tokenStr);
     }
     console.log("✅ Session data written to database.");
@@ -1371,7 +1350,7 @@ async function getATR(token, period = 14) {
 async function getAverageVolume(token, period) {
   const data = await getHistoricalData(token);
   return data?.length >= period
-    ? data.slice(-period).reduce((a, b) => a + b.volume, 0) / period
+    ? data.slice(-period).reduce((a, b) => a + (b.volume || 0), 0) / period
     : "NA";
 }
 
@@ -1518,7 +1497,7 @@ export async function rebuildThreeMinCandlesFromOneMin(token) {
 async function resetInMemoryData() {
   instrumentTokens = [];
   tickBuffer = {};
-  candleHistory = {};
+  clearCandleHistory();
   // Clear aligned tick data stored in MongoDB
   await db.collection(ALIGNED_COLLECTION).deleteMany({});
   warmupDone = false;
@@ -1541,6 +1520,7 @@ export {
   getMA,
   getATR,
   getAverageVolume,
+  historicalStore,
   tickBuffer,
   candleHistory,
   warmupCandleHistory,
