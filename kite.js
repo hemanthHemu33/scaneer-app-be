@@ -1499,6 +1499,5 @@ export {
   getHistoricalData,
   resetInMemoryData,
   loadTickDataFromDB,
-  rebuildThreeMinCandlesFromOneMin,
   lastTickTs,
 };
