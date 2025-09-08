@@ -19,6 +19,8 @@ import {
   resetInMemoryData,
   preloadStockData,
   kc,
+  tickBuffer,
+  lastTickTs,
 } from "./kite.js";
 import { sendSignal } from "./telegram.js";
 import {
@@ -73,6 +75,29 @@ app.use(cors(corsOptions));
 const io = new Server(server, { cors: corsOptions });
 
 app.use(express.json());
+
+async function ensureUniverseSeeded() {
+  const col = db.collection("stock_symbols");
+  const doc = await col.findOne({});
+  if (!doc || !Array.isArray(doc.symbols) || doc.symbols.length === 0) {
+    const seed = ["RELIANCE", "HDFCBANK", "INFY"];
+    await col.updateOne({}, { $set: { symbols: seed } }, { upsert: true });
+    console.log("🌱 Seeded stock_symbols with defaults:", seed);
+  } else {
+    console.log("✅ Universe present:", doc.symbols.length, "symbols");
+  }
+}
+
+app.get("/health", async (req, res) => {
+  const doc = await db.collection("stock_symbols").findOne({});
+  res.json({
+    session: Boolean(kc._access_token),
+    marketOpen: isMarketOpen(),
+    universeCount: doc?.symbols?.length || 0,
+    subscribedCount: Object.keys(tickBuffer).length,
+    lastTickTs,
+  });
+});
 
 // ADD STOCK SYMBOLS ENDPOINT
 app.post("/addStockSymbol", async (req, res) => {
@@ -273,14 +298,24 @@ io.on("connection", (socket) => {
   socket.emit("serverMessage", "Connected to backend.");
 });
 
-server.listen(3000, () => {
+server.listen(3000, async () => {
   console.log("📡 Backend running on port 3000");
 
-  if (isMarketOpen()) {
-    console.log("✅ Market is open. Starting live feed...");
-    startLiveFeed(io);
-  } else {
-    console.log("⏸ Market is closed. Skipping live feed start.");
+  try {
+    await ensureUniverseSeeded();
+    const token = await initSession();
+    if (!token) {
+      console.warn("⚠️ No Kite session; live feed will not start.");
+    } else if (isMarketOpen()) {
+      console.log("🕒 Market open; starting live feed…");
+      startLiveFeed(io);
+    } else {
+      console.log(
+        "🕒 Market closed; live feed will start automatically on next open if implemented via scheduler."
+      );
+    }
+  } catch (e) {
+    logError("server.listen init", e);
   }
 
   if (process.env.NODE_ENV !== "test") {

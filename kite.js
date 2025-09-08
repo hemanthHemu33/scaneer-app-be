@@ -197,6 +197,7 @@ let ticker,
   tickBuffer = {},
   candleInterval,
   globalIO;
+let lastTickTs = null;
 let errorLog = [],
   tradeLog = [];
 let riskState = {
@@ -228,73 +229,20 @@ function handleOrderUpdate(update) {
 }
 
 // 🔐 Initialize Kite session
-// async function initSession() {
-//   try {
-//     const sessionQuery = { type: "kite_session" };
-
-//     const savedSession = await db.collection("tokens").findOne(sessionQuery);
-
-//     if (savedSession?.access_token) {
-//       kc.setAccessToken(savedSession.access_token);
-//       console.log("♻️ Loaded saved access token from DB");
-//       return savedSession.access_token;
-//     }
-
-//     // 🧠 fallback to tokensData if needed
-//     const requestToken =
-//       savedSession?.request_token || tokensData?.request_token;
-
-//     if (!requestToken) {
-//       throw new Error("Missing request_token. Cannot generate session.");
-//     }
-
-//     const session = await kc.generateSession(requestToken, apiSecret);
-//     kc.setAccessToken(session.access_token);
-
-//     // ✅ Save session object with fixed identifier
-//     await db
-//       .collection("tokens")
-//       .updateOne(
-//         sessionQuery,
-//         { $set: { ...session, type: "kite_session" } },
-//         { upsert: true }
-//       );
-
-//     console.log("✅ Session generated and updated in DB:", session);
-//     return session.access_token;
-//   } catch (err) {
-//     logError("Session init failed", err);
-//     return null;
-//   }
-// }
-
 async function initSession() {
   try {
-    const session = await db
-      .collection("tokens")
-      .findOne({ type: "kite_session" });
+    const sessionQuery = { type: "kite_session" };
+    const savedSession = await db.collection("tokens").findOne(sessionQuery);
 
-    if (!session?.access_token) {
-      console.warn("⚠️ No valid access token found in DB.");
-      return null;
+    if (!savedSession?.access_token) {
+      throw new Error("No saved Kite access_token in DB. Login flow required.");
     }
 
-    const accessToken = String(session.access_token);
-    kc.setAccessToken(accessToken);
-
-    // 🔍 Optional: Check if token is still valid by calling a protected endpoint
-    try {
-      await kc.getProfile(); // Throws if token is expired
-      console.log("✅ Access token is valid and set.");
-      return accessToken;
-    } catch (err) {
-      console.error("❌ Access token is expired or invalid.", err.message);
-      kc.setAccessToken("");
-      // await resetDatabase();
-      return null;
-    }
+    kc.setAccessToken(savedSession.access_token);
+    console.log("♻️ Loaded access token from DB");
+    return savedSession.access_token;
   } catch (err) {
-    console.error("❌ Failed to load session from DB", err.message || err);
+    logError("initSession", err);
     return null;
   }
 }
@@ -419,6 +367,10 @@ async function preloadStockData() {
 
 async function startLiveFeed(io) {
   globalIO = io;
+  if (!isMarketOpen()) {
+    console.log("⏸ Market closed. Skipping live feed start.");
+    return;
+  }
 
   const accessToken = await initSession();
   if (!accessToken) return logError("Live feed start failed: No access token");
@@ -460,6 +412,13 @@ async function startLiveFeed(io) {
   }
 
   const symbols = await getStockSymbols();
+  if (!symbols.length) {
+    console.warn(
+      "⚠️ No stock symbols found. POST /addStockSymbol to add symbols."
+    );
+    return;
+  }
+
   instrumentTokens = await getTokensForSymbols(symbols);
   if (!instrumentTokens.length) return logError("No instrument tokens found");
 
@@ -467,10 +426,12 @@ async function startLiveFeed(io) {
   ticker.on("connect", () => {
     ticker.subscribe(instrumentTokens);
     ticker.setMode(ticker.modeFull, instrumentTokens);
-    console.log("🔗 Connected & subscribed:", instrumentTokens);
+    console.log("📈 Ticker connected");
+    console.log(`Subscribed ${instrumentTokens.length} symbols`);
   });
 
   ticker.on("ticks", (ticks) => {
+    lastTickTs = Date.now();
     for (const tick of ticks) {
       if (!tickBuffer[tick.instrument_token])
         tickBuffer[tick.instrument_token] = [];
@@ -1538,4 +1499,6 @@ export {
   getHistoricalData,
   resetInMemoryData,
   loadTickDataFromDB,
+  rebuildThreeMinCandlesFromOneMin,
+  lastTickTs,
 };
