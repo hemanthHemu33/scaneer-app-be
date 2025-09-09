@@ -894,7 +894,8 @@ async function flushTickBufferToDB() {
 }
 
 const lastSignalMap = {};
-async function emitUnifiedSignal(signal, source, io) {
+// Allow io to be optional and fall back to the initialized global socket
+async function emitUnifiedSignal(signal, source, io = globalIO) {
   const key = `${signal.stock}-${signal.pattern}-${signal.direction}`;
   const now = Date.now();
   if (lastSignalMap[key] && now - lastSignalMap[key] < 5 * 60 * 1000) {
@@ -928,7 +929,11 @@ async function emitUnifiedSignal(signal, source, io) {
     return;
   }
   console.log(`🚀 Emitting ${source} Signal:`, signal);
-  io.emit("tradeSignal", signal);
+  // Guard against missing socket instance which previously threw and prevented
+  // signal propagation
+  if (io) {
+    io.emit("tradeSignal", signal);
+  }
   logTrade(signal);
   sendSignal(signal);
   await addSignal(signal);
