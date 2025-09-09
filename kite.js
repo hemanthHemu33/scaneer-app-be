@@ -367,7 +367,7 @@ async function preloadStockData() {
 async function startLiveFeed(io) {
   globalIO = io;
   if (!isMarketOpen()) {
-    console.log("⏸ Market closed. Skipping live feed start.");
+    console.log("⛔ Market closed: not starting live feed.");
     return;
   }
 
@@ -426,7 +426,7 @@ async function startLiveFeed(io) {
     ticker.subscribe(instrumentTokens);
     ticker.setMode(ticker.modeFull, instrumentTokens);
     console.log("📈 Ticker connected");
-    console.log(`Subscribed ${instrumentTokens.length} symbols`);
+    console.log("🔔 Subscribed", instrumentTokens.length, "symbols");
   });
 
   ticker.on("ticks", (ticks) => {

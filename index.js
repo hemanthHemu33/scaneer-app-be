@@ -310,9 +310,7 @@ server.listen(3000, async () => {
       console.log("🕒 Market open; starting live feed…");
       startLiveFeed(io);
     } else {
-      console.log(
-        "🕒 Market closed; live feed will start automatically on next open if implemented via scheduler."
-      );
+      console.log("⛔ Market closed: not starting live feed.");
     }
   } catch (e) {
     logError("server.listen init", e);
