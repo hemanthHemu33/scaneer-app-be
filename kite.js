@@ -229,15 +229,14 @@ function handleOrderUpdate(update) {
 }
 
 // 🔐 Initialize Kite session
-async function initSession() {
+export async function initSession() {
   try {
-    const sessionQuery = { type: "kite_session" };
-    const savedSession = await db.collection("tokens").findOne(sessionQuery);
-
+    const savedSession = await db
+      .collection("tokens")
+      .findOne({ type: "kite_session" });
     if (!savedSession?.access_token) {
       throw new Error("No saved Kite access_token in DB. Login flow required.");
     }
-
     kc.setAccessToken(savedSession.access_token);
     console.log("♻️ Loaded access token from DB");
     return savedSession.access_token;
@@ -1492,7 +1491,6 @@ export {
   subscribeSymbol,
   ensureDataForSymbol,
   removeStockSymbol,
-  initSession,
   kc,
   getTokenForSymbol,
   getSymbolForToken,
