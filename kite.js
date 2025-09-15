@@ -47,6 +47,10 @@ const __dirname = path.dirname(__filename);
 const apiKey = process.env.KITE_API_KEY;
 const apiSecret = process.env.KITE_API_SECRET;
 const kc = new KiteConnect({ api_key: apiKey });
+
+// Initialize logs before any async operations that might reference them
+let errorLog = [], tradeLog = [];
+
 await initAccountBalance();
 
 // Order update event emitter and storage
@@ -193,14 +197,12 @@ async function getSymbolForToken(token) {
 
 let instrumentTokens = [];
 let tickIntervalMs = 10000;
-let ticker,
-  tickBuffer = {},
-  candleInterval,
-  globalIO;
-let lastTickTs = null;
-let errorLog = [],
-  tradeLog = [];
-let riskState = {
+  let ticker,
+    tickBuffer = {},
+    candleInterval,
+    globalIO;
+  let lastTickTs = null;
+  let riskState = {
   dailyLoss: 0,
   maxDailyLoss: 5000,
   consecutiveLosses: 0,
