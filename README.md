@@ -247,6 +247,31 @@ tests/
 
 ---
 
+## 🏁 Runbook (Live Signals)
+
+1. **Insert Kite session token**  
+   Ensure a document `{ type: "kite_session", access_token: "<token>" }` exists in the `tokens` collection.
+
+2. **Prepare universe (optional)**  
+   The server seeds a default universe if `stock_symbols.symbols` is empty. POST `/addStockSymbol` to add more.
+
+3. **Start server**  
+   `npm start` before 09:15 IST. Startup log should include `♻️ Loaded access token from DB`.
+
+4. **During market hours**  
+   When `isMarketOpen()` is true the log shows `🕒 Market open; starting live feed…` followed by `📈 Ticker connected` and subscription count. Signals will stream through Socket.IO and persist in MongoDB.
+
+5. **After hours / weekends**  
+   The backend skips live feed and waits for next open.
+
+## ✅ Acceptance Tests
+
+1. **Session load** – With a valid token doc, startup logs `♻️ Loaded access token from DB`.
+2. **Universe seed** – Empty `stock_symbols` results in `🌱 Seeded stock_symbols with defaults: [...]`.
+3. **Live feed starts** – During market hours logs `🕒 Market open; starting live feed…` and `📈 Ticker connected` with subscription count.
+4. **Signals flow** – With session and universe during market hours, new documents appear in `signals` collection and are emitted via WebSocket.
+5. **Guard conditions** – Without a session or outside market hours logs `⚠️ No Kite session; live feed will not start.` or `⏸ Market closed. Skipping live feed start.`
+
 ## 🗺️ Roadmap
 
 * Regime‑sensitive **Smart Strategy Selector** (VIX/ATR/breadth) gating
