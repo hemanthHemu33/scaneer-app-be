@@ -788,8 +788,19 @@ async function fetchFallbackOneMinuteCandles() {
   const stockSymbols = await getStockSymbols();
   for (const symbol of stockSymbols) {
     try {
-      const ltp = await kc.getLTP([symbol]);
-      const token = ltp[symbol].instrument_token;
+      const ltp = await kc.getLTP([symbol]).catch(() => null);
+      let token = ltp?.[symbol]?.instrument_token;
+
+      // Fallback to DB lookup if LTP doesn't return the token
+      if (!token) {
+        token = await getTokenForSymbol(symbol);
+      }
+
+      if (!token) {
+        logError(`Fallback candle fetch failed for ${symbol}`, "Instrument token unavailable");
+        continue;
+      }
+
       const candles = await kc.getHistoricalData(token, "minute", from, to);
       const tokenStr = String(token);
 
