@@ -16,8 +16,9 @@ if (token) {
 
 export function sendSignal(signal) {
   if (!bot || !chatId) {
-    console.warn("Telegram bot not configured properly.");
-    return;
+    const err = new Error("TELEGRAM_NOT_CONFIGURED");
+    err.code = "TELEGRAM_NOT_CONFIGURED";
+    return Promise.reject(err);
   }
 
   const data = signal.algoSignal || signal;
@@ -42,9 +43,7 @@ export function sendSignal(signal) {
     `📊 *Confidence Level:* ${confidence}\n\n` +
     `🕒 _Stay sharp. Market conditions may change quickly._`;
 
-  bot
-    .sendMessage(chatId, text, { parse_mode: "Markdown" })
-    .catch((err) => console.error("Telegram send error", err));
+  return bot.sendMessage(chatId, text, { parse_mode: "Markdown" });
 }
 
 export function sendNotification(message) {

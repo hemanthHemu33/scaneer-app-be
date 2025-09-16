@@ -1,4 +1,5 @@
 // Index.js
+import "./env.js";
 import express from "express";
 import http from "http";
 import { Server } from "socket.io";
@@ -22,7 +23,6 @@ import {
   tickBuffer,
   lastTickTs,
 } from "./kite.js";
-import { sendSignal } from "./telegram.js";
 import {
   trackOpenPositions,
   checkExposureLimits,

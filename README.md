@@ -146,6 +146,16 @@ Trigger historical backfill.
 { "interval": "minute", "days": 3 }
 ```
 
+### Rebuild today's aligned candles
+
+If the live aligner misses a window you can rebuild the 1‑minute series for the current trading day:
+
+```bash
+node backfillToday.js
+```
+
+The script reads `tick_data`, feeds the aligner, and upserts both `aligned_ticks` and `session_data` for the day (09:15–15:30 IST).
+
 ### GET `/kite-redirect`
 
 OAuth redirect capture for Kite `request_token` → creates/refreshes the trading session.

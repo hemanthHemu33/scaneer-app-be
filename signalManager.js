@@ -50,6 +50,7 @@ export async function addSignal(signal) {
     expiresAt,
   });
 
+  let insertedSignal = null;
   try {
     await db.collection('active_signals').updateOne(
       { signalId },
@@ -67,7 +68,7 @@ export async function addSignal(signal) {
       },
       { upsert: true }
     );
-    await db.collection('signals').insertOne({
+    const result = await db.collection('signals').insertOne({
       ...signal,
       signalId,
       symbol,
@@ -76,10 +77,15 @@ export async function addSignal(signal) {
       expiresAt: new Date(expiresAt),
       generatedAt: signal.generatedAt ? new Date(signal.generatedAt) : new Date(),
     });
+    insertedSignal = result;
   } catch (err) {
     logError('DB insert failed', err);
   }
-  return true;
+  return {
+    ok: Boolean(insertedSignal?.acknowledged),
+    insertedId: insertedSignal?.insertedId || null,
+    signalId,
+  };
 }
 
 export async function checkExpiries(now = Date.now()) {
