@@ -1,4 +1,5 @@
 // kite.js
+import "./env.js";
 import { KiteConnect, KiteTicker } from "kiteconnect";
 import { EventEmitter } from "events";
 import { calculateEMA, calculateSupertrend } from "./featureEngine.js";
@@ -7,10 +8,25 @@ import path from "path";
 import dotenv from "dotenv";
 import { fileURLToPath } from "url";
 import { ObjectId } from "mongodb";
-import { sendSignal } from "./telegram.js";
 import { fetchAIData } from "./openAI.js";
-import { addSignal } from "./signalManager.js";
 import { logSignalCreated, logSignalRejected } from "./auditLogger.js";
+import { logError, logWarnOncePerToken } from "./logger.js";
+import { canonToken, canonSymbol } from "./canon.js";
+import {
+  ensureLoad as ensureInstrumentMap,
+  tokenSymbolMap,
+  symbolTokenMap,
+  getSymbolForToken as getSymbolForTokenFromMap,
+  getTokenForSymbol as getTokenForSymbolFromMap,
+} from "./mapping.js";
+import {
+  ingestTick as ingestAlignedTick,
+  flushOpenCandles,
+  finalizeEOD as finalizeAlignedEOD,
+} from "./aligner.js";
+import { fallbackFetch } from "./fallbackFetcher.js";
+import { metrics, incrementMetric, onReject, startMetricsReporter } from "./metrics.js";
+import { persistThenNotify } from "./emitter.js";
 import {
   checkExposureLimits,
   preventReEntry,
@@ -49,9 +65,12 @@ const apiSecret = process.env.KITE_API_SECRET;
 const kc = new KiteConnect({ api_key: apiKey });
 
 // Initialize logs before any async operations that might reference them
-let errorLog = [], tradeLog = [];
+let tradeLog = [];
 
 await initAccountBalance();
+
+await ensureInstrumentMap(db);
+startMetricsReporter();
 
 // Order update event emitter and storage
 export const orderEvents = new EventEmitter();
@@ -73,7 +92,20 @@ const tokensData = await db.collection("tokens").findOne({});
 const sessionDocs = await db.collection("session_data").find({}).toArray();
 const sessionData = {};
 for (const doc of sessionDocs) {
-  sessionData[doc.token] = doc.candles || doc.data || [];
+  const tokenStr = canonToken(doc.token || doc.instrument_token);
+  if (!tokenStr) continue;
+  if (!sessionData[tokenStr]) sessionData[tokenStr] = [];
+  sessionData[tokenStr].push({
+    date: new Date(doc.ts || doc.minute || doc.date || doc.timestamp || Date.now()),
+    open: doc.open,
+    high: doc.high,
+    low: doc.low,
+    close: doc.close,
+    volume: doc.volume,
+  });
+}
+for (const token in sessionData) {
+  sessionData[token].sort((a, b) => +new Date(a.date) - +new Date(b.date));
 }
 
 // Fetch stock symbols from database
@@ -177,26 +209,36 @@ async function removeStockSymbol(symbol) {
 
 // Mapping helpers – fetch fresh data from DB on demand
 async function getTokenForSymbol(symbol) {
-  const withPrefix = symbol.includes(":") ? symbol : `NSE:${symbol}`;
-  const [exchange, tradingsymbol] = withPrefix.split(":");
-  const inst = await db
-    .collection("instruments")
-    .findOne({ exchange, tradingsymbol });
-  return inst?.instrument_token || null;
+  const sym = canonSymbol(symbol);
+  await ensureInstrumentMap(db);
+  const mapped = symbolTokenMap.get(sym);
+  if (mapped) return Number(mapped);
+  try {
+    const resolved = await fallbackFetch(sym, null, db);
+    if (resolved?.token) return Number(resolved.token);
+  } catch (err) {
+    logError("mapping.getTokenForSymbol", err, { symbol: sym });
+  }
+  return null;
 }
 
 async function getSymbolForToken(token) {
-  const inst = await db
-    .collection("instruments")
-    .findOne({ instrument_token: Number(token) });
-  if (!inst) return null;
-  const symbol = `${inst.exchange}:${inst.tradingsymbol}`;
-  const symbols = await getStockSymbols();
-  return symbols.includes(symbol) ? symbol : null;
+  const tokenStr = canonToken(token);
+  await ensureInstrumentMap(db);
+  const mapped = tokenSymbolMap.get(tokenStr);
+  if (mapped) return mapped;
+  try {
+    const resolved = await fallbackFetch(tokenStr, null, db);
+    return resolved?.symbol || null;
+  } catch (err) {
+    logError("mapping.getSymbolForToken", err, { token: tokenStr });
+    return null;
+  }
 }
 
 let instrumentTokens = [];
 let tickIntervalMs = 10000;
+let lastEODFlush = null;
   let ticker,
     tickBuffer = {},
     candleInterval,
@@ -288,18 +330,26 @@ function isMarketOpen() {
 }
 
 async function getTokensForSymbols(symbols) {
-  try {
-    const instruments = await db.collection("instruments").find({}).toArray();
-    const tokens = instruments
-      .filter((inst) =>
-        symbols.includes(`${inst.exchange}:${inst.tradingsymbol}`)
-      )
-      .map((inst) => parseInt(inst.instrument_token));
-    return tokens;
-  } catch (err) {
-    logError("Error reading instruments", err);
-    return [];
+  await ensureInstrumentMap(db);
+  const results = [];
+  for (const sym of symbols) {
+    const key = canonSymbol(sym);
+    let token = symbolTokenMap.get(key);
+    if (!token) {
+      try {
+        const resolved = await fallbackFetch(key, null, db);
+        token = resolved?.token;
+      } catch (err) {
+        logWarnOncePerToken("UNMAPPED_SUBSCRIBE", key, "token lookup failed", {
+          reason: err?.code || err?.message,
+        });
+      }
+    }
+    if (token) {
+      results.push(Number(token));
+    }
   }
+  return results;
 }
 
 let warmupDone = false;
@@ -384,7 +434,7 @@ async function startLiveFeed(io) {
     await loadHistoricalSessionCandles();
 
     for (const token in sessionData) {
-      const tokenStr = token;
+      const tokenStr = canonToken(token);
       pushCandles(
         tokenStr,
         sessionData[token].map((c) => ({
@@ -405,7 +455,7 @@ async function startLiveFeed(io) {
       console.log(
         `🔍 History loaded for ${token}: ${candleHistory[token].length} candles`
       );
-      await computeGapPercent(token);
+      await computeGapPercent(canonToken(token));
     }
     console.log("✅ Candle history initialized");
   } catch (err) {
@@ -433,11 +483,18 @@ async function startLiveFeed(io) {
 
   ticker.on("ticks", (ticks) => {
     lastTickTs = Date.now();
+    incrementMetric("ticks", ticks.length);
     for (const tick of ticks) {
-      if (!tickBuffer[tick.instrument_token])
-        tickBuffer[tick.instrument_token] = [];
-      tickBuffer[tick.instrument_token].push(tick);
-      storeTickAligned(tick); // NEW: Store tick for aligned candles
+      const tokenStr = canonToken(tick.instrument_token);
+      if (!tokenStr) continue;
+      const symbol = tokenSymbolMap.get(tokenStr);
+      if (!symbol) {
+        logWarnOncePerToken("UNMAPPED_TOKEN", tokenStr, "dropping tick");
+        continue;
+      }
+      if (!tickBuffer[tokenStr]) tickBuffer[tokenStr] = [];
+      tickBuffer[tokenStr].push({ ...tick, instrument_token: Number(tokenStr) });
+      ingestAlignedTick({ token: tokenStr, symbol, tick });
     }
   });
 
@@ -458,31 +515,31 @@ async function startLiveFeed(io) {
   ticker.connect();
   clearInterval(candleInterval);
   candleInterval = setInterval(() => processBuffer(io), tickIntervalMs);
-  setInterval(() => processAlignedCandles(io), 60000); // Process aligned candles every 1 min
-  setInterval(() => flushTickBufferToDB(), 10000); // persist ticks
+  candleInterval.unref?.();
+  const alignedTimer = setInterval(() => processAlignedCandles(io), 60000);
+  alignedTimer.unref?.();
+  const flushTimer = setInterval(() => {
+    flushOpenCandles({ force: false }).catch((err) =>
+      logError("aligner.flush", err)
+    );
+  }, 5000);
+  flushTimer.unref?.();
+  const persistTimer = setInterval(() => flushTickBufferToDB(), 10000);
+  persistTimer.unref?.();
+  const eodTimer = setInterval(() => {
+    const now = new Date();
+    if (isMarketOpen()) return;
+    const dayKey = now.toISOString().slice(0, 10);
+    if (lastEODFlush === dayKey) return;
+    lastEODFlush = dayKey;
+    finalizeAlignedEOD(now)
+      .then(() => flushOpenCandles({ force: true }))
+      .catch((err) => logError("aligner.finalizeEOD", err));
+  }, 60000);
+  eodTimer.unref?.();
   // Removed redundant hourly fetchHistoricalIntradayData
 
   // previous reload of historical data removed to avoid duplication
-}
-
-// 🕒 Aligned tick storage (data persisted in MongoDB)
-async function storeTickAligned(tick) {
-  const token = tick.instrument_token;
-  const ts = new Date(tick.timestamp || Date.now());
-  const minuteKey = new Date(Math.floor(ts.getTime() / 60000) * 60000)
-    .toISOString()
-    .slice(0, 16); // "YYYY-MM-DDTHH:mm"
-  try {
-    await db
-      .collection(ALIGNED_COLLECTION)
-      .updateOne(
-        { token, minute: minuteKey },
-        { $push: { ticks: tick } },
-        { upsert: true }
-      );
-  } catch (err) {
-    logError("storeTickAligned", err);
-  }
 }
 
 const BATCH_LIMIT = 100;
@@ -490,154 +547,77 @@ let processingInProgress = false;
 
 export async function processAlignedCandles(io) {
   if (processingInProgress) return;
-  if (!isMarketOpen()) {
-    console.log("Market closed, skipping aligned candle processing.");
-    processingInProgress = false;
-    return;
-  }
-
   processingInProgress = true;
 
-  const { analyzeCandles } = await import("./scanner.js");
-  let processedCount = 0;
-
   try {
-    const tokenList = await db
+    const docs = await db
       .collection(ALIGNED_COLLECTION)
-      .distinct("token");
+      .find({})
+      .sort({ minute: 1 })
+      .limit(BATCH_LIMIT)
+      .toArray();
 
-    for (const token of tokenList) {
-      const docs = await db
-        .collection(ALIGNED_COLLECTION)
-        .find({ token })
-        .sort({ minute: -1 })
-        .toArray();
+    if (!docs.length) {
+      processingInProgress = false;
+      return;
+    }
 
-      for (const doc of docs) {
-        if (processedCount >= BATCH_LIMIT) break;
-        const minute = doc.minute;
-        const ticks = doc.ticks || [];
+    const { analyzeCandles } = await import("./scanner.js");
 
-        try {
-          if (
-            !Array.isArray(ticks) ||
-            ticks.length === 0 ||
-            ticks.some((t) => typeof t?.last_price !== "number")
-          ) {
-            console.warn(`⚠️ Corrupt ticks for token ${token} at ${minute}`);
-            await db
-              .collection(ALIGNED_COLLECTION)
-              .deleteOne({ token, minute });
-            continue;
-          }
-
-          const prices = ticks
-            .map((t) => t.last_price)
-            .filter((p) => typeof p === "number" && !isNaN(p));
-
-          if (prices.length < 2) {
-            console.warn(
-              `⚠️ Insufficient valid prices for ${token} at ${minute}`
-            );
-            await db
-              .collection(ALIGNED_COLLECTION)
-              .deleteOne({ token, minute });
-            continue;
-          }
-
-          const open = prices[0];
-          const close = prices[prices.length - 1];
-          const high = Math.max(...prices);
-          const low = Math.min(...prices);
-          const volume = ticks.reduce((sum, t) => {
-            const qty = t?.last_traded_quantity;
-            return typeof qty === "number" && !isNaN(qty) ? sum + qty : sum;
-          }, 0);
-
-          const lastTick = ticks[ticks.length - 1] || {};
-          const depth = lastTick?.depth || null;
-          const totalBuy = lastTick?.total_buy_quantity || 0;
-          const totalSell = lastTick?.total_sell_quantity || 0;
-          const spread = depth
-            ? Math.abs(
-                (depth.sell?.[0]?.price || 0) - (depth.buy?.[0]?.price || 0)
-              )
-            : 0;
-
-          const tokenStr = String(token);
-          await ensureCandleHistory(tokenStr);
-          const symbol = await getSymbolForToken(tokenStr);
-          if (!symbol) {
-            logError(`❌ Missing symbol for token ${token}`);
-            await db
-              .collection(ALIGNED_COLLECTION)
-              .deleteOne({ token, minute });
-            continue;
-          }
-
-          const avgVol = (await getAverageVolume(tokenStr, 20)) || 1000;
-
-          let candleScore = 0;
-          if (ticks.length >= 5) candleScore++;
-          if (volume >= avgVol * 0.8) candleScore++;
-          if (spread < 1) candleScore++;
-
-          if (candleScore < 2) {
-            console.log(`⚠️ Low-quality candle skipped for ${symbol}`);
-            await db
-              .collection(ALIGNED_COLLECTION)
-              .deleteOne({ token, minute });
-            continue;
-          }
-
-          const newCandle = {
-            open,
-            high,
-            low,
-            close,
-            volume,
-            timestamp: new Date(minute),
-          };
-
-          pushCandle(tokenStr, newCandle, 60);
-
-          const signal = await analyzeCandles(
-            candleHistory[tokenStr],
-            symbol,
-            depth,
-            totalBuy,
-            totalSell,
-            0.1,
-            spread,
-            avgVol,
-            lastTick
-          );
-
-          if (signal) {
-            await emitUnifiedSignal(signal, "Aligned", io);
-          }
-        } catch (err) {
-          logError(`⚠️ Error processing token ${token} at ${minute}`, err);
-        }
-
-        await db
-          .collection(ALIGNED_COLLECTION)
-          .deleteOne({ token, minute });
-        processedCount++;
+    for (const doc of docs) {
+      const tokenStr = canonToken(doc.token);
+      await ensureCandleHistory(tokenStr);
+      const symbol = doc.symbol || (await getSymbolForToken(tokenStr));
+      if (!symbol) {
+        logWarnOncePerToken("UNMAPPED_TOKEN", tokenStr, "aligned candle missing symbol");
+        await db.collection(ALIGNED_COLLECTION).deleteOne({ _id: doc._id });
+        continue;
       }
 
-      if (processedCount >= BATCH_LIMIT) break;
+      const newCandle = {
+        open: doc.open,
+        high: doc.high,
+        low: doc.low,
+        close: doc.close,
+        volume: doc.volume,
+        timestamp: new Date(doc.minute),
+      };
+
+      pushCandle(tokenStr, newCandle, 60);
+
+      const lastTick = doc.lastTick || {};
+      const depth = lastTick.depth || null;
+      const totalBuy = lastTick.total_buy_quantity || 0;
+      const totalSell = lastTick.total_sell_quantity || 0;
+      const spread = depth
+        ? Math.abs((depth.sell?.[0]?.price || 0) - (depth.buy?.[0]?.price || 0))
+        : 0;
+
+      const avgVol = (await getAverageVolume(tokenStr, 20)) || 1000;
+      incrementMetric("evalSymbols");
+      const signal = await analyzeCandles(
+        candleHistory[tokenStr],
+        symbol,
+        depth,
+        totalBuy,
+        totalSell,
+        0.1,
+        spread,
+        avgVol,
+        lastTick
+      );
+
+      if (signal) {
+        incrementMetric("candidates");
+        await emitUnifiedSignal(signal, "Aligned", io);
+      }
+
+      await db.collection(ALIGNED_COLLECTION).deleteOne({ _id: doc._id });
     }
-  } catch (globalErr) {
-    logError("❌ processAlignedCandles global error", globalErr);
+  } catch (err) {
+    logError("processAlignedCandles", err);
   } finally {
     processingInProgress = false;
-    const remaining = await db
-      .collection(ALIGNED_COLLECTION)
-      .countDocuments();
-    if (remaining > 0) {
-      setTimeout(() => processAlignedCandles(io), 0);
-    }
   }
 }
 
@@ -660,7 +640,11 @@ async function processBuffer(io) {
       .filter((p) => typeof p === "number" && !isNaN(p));
 
     if (prices.length < 2) {
-      console.warn(`⚠️ Not enough valid price data for token ${token}`);
+      logWarnOncePerToken(
+        "SPARSE_TICK_BUFFER",
+        canonToken(token),
+        "not enough price data"
+      );
       continue;
     }
 
@@ -691,11 +675,15 @@ async function processBuffer(io) {
       ? Math.abs((depth.sell?.[0]?.price || 0) - (depth.buy?.[0]?.price || 0))
       : 0;
 
-    const tokenStr = String(token);
+    const tokenStr = canonToken(token);
     await ensureCandleHistory(tokenStr);
     const symbol = await getSymbolForToken(tokenStr);
     if (!symbol) {
-      logError(`❌ Missing symbol for token ${token}`);
+      logWarnOncePerToken(
+        "UNMAPPED_TOKEN",
+        tokenStr,
+        "tick buffer missing symbol"
+      );
       continue;
     }
 
@@ -713,6 +701,7 @@ async function processBuffer(io) {
     pushCandle(tokenStr, newCandle, 60); // Keep only last 60 candles
 
     try {
+      incrementMetric("evalSymbols");
       const signal = await analyzeCandles(
         candleHistory[tokenStr],
         symbol,
@@ -726,7 +715,7 @@ async function processBuffer(io) {
       );
 
       if (signal) {
-        // Step 9: final checks and emit
+        incrementMetric("candidates");
         await emitUnifiedSignal(signal, "TickBuffer", io);
       }
     } catch (err) {
@@ -788,21 +777,23 @@ async function fetchFallbackOneMinuteCandles() {
   const stockSymbols = await getStockSymbols();
   for (const symbol of stockSymbols) {
     try {
-      const ltp = await kc.getLTP([symbol]).catch(() => null);
-      let token = ltp?.[symbol]?.instrument_token;
-
-      // Fallback to DB lookup if LTP doesn't return the token
-      if (!token) {
-        token = await getTokenForSymbol(symbol);
-      }
-
-      if (!token) {
-        logError(`Fallback candle fetch failed for ${symbol}`, "Instrument token unavailable");
+      const resolved = await fallbackFetch(symbol, null, db);
+      if (!resolved?.token) {
+        logWarnOncePerToken(
+          "FALLBACK_NO_TOKEN",
+          symbol,
+          "Instrument token unavailable"
+        );
         continue;
       }
 
-      const candles = await kc.getHistoricalData(token, "minute", from, to);
-      const tokenStr = String(token);
+      const candles = await kc.getHistoricalData(
+        Number(resolved.token),
+        "minute",
+        from,
+        to
+      );
+      const tokenStr = canonToken(resolved.token);
 
       for (const c of candles) {
         const candleObj = {
@@ -826,20 +817,6 @@ async function fetchFallbackOneMinuteCandles() {
       logError(`Fallback candle fetch failed for ${symbol}`, err);
     }
   }
-}
-
-// Logging
-async function logError(context, err) {
-  const errorEntry = {
-    time: new Date(),
-    context,
-    message: err?.message || err,
-  };
-  console.error(`❌ [${context}]:`, err?.message || err);
-  errorLog.push(errorEntry);
-
-  await db.collection("error_logs").insertOne(errorEntry);
-  // fs.appendFileSync("error.log", JSON.stringify(errorEntry) + "\n");
 }
 
 async function logTrade(signal) {
@@ -871,9 +848,10 @@ async function loadTickDataFromDB() {
       .sort({ timestamp: 1 })
       .toArray();
     for (const t of ticks) {
-      const token = String(t.token);
-      if (!tickBuffer[token]) tickBuffer[token] = [];
-      tickBuffer[token].push(t);
+      const tokenStr = canonToken(t.token || t.instrument_token);
+      if (!tokenStr) continue;
+      if (!tickBuffer[tokenStr]) tickBuffer[tokenStr] = [];
+      tickBuffer[tokenStr].push({ ...t, instrument_token: Number(tokenStr) });
     }
     if (ticks.length) {
       await db.collection("tick_data").deleteMany({});
@@ -948,20 +926,26 @@ async function emitUnifiedSignal(signal, source, io = globalIO) {
     io.emit("tradeSignal", signal);
   }
   logTrade(signal);
-  sendSignal(signal);
-  await addSignal(signal);
+  const persistInfo = await persistThenNotify(signal);
+  incrementMetric("emitted");
   logSignalCreated(signal, {
     vix: marketContext.vix,
     regime: marketContext.regime,
     breadth: marketContext.breadth,
   });
-  const { insertedId } = await db.collection("signals").insertOne(signal);
+  const filter = persistInfo?.insertedId
+    ? { _id: persistInfo.insertedId }
+    : persistInfo?.signalId
+    ? { signalId: persistInfo.signalId }
+    : null;
   fetchAIData(signal)
     .then(async (ai) => {
       signal.ai = ai;
-      await db
-        .collection("signals")
-        .updateOne({ _id: insertedId }, { $set: { ai } });
+      if (filter) {
+        await db.collection("signals").updateOne(filter, {
+          $set: { ai, updatedAt: new Date() },
+        });
+      }
     })
     .catch((err) => logError("AI enrichment", err));
 }
@@ -1171,56 +1155,58 @@ async function fetchSessionData() {
     console.error("❌ Cannot fetch session data");
     return;
   }
-  if (!isMarketOpen()) {
-    console.log("Market closed. Skipping session data fetch.");
-    return;
-  }
+  await ensureInstrumentMap(db);
 
-  const sessionData = {};
   const now = new Date();
-  const istOffset = 5.5 * 60 * 60 * 1000; // IST offset in milliseconds
-  const nowIST = new Date(now.getTime() + istOffset);
+  const sessionStart = new Date(now);
+  sessionStart.setHours(9, 15, 0, 0);
+  const sessionEndExclusive = new Date(now);
+  sessionEndExclusive.setHours(15, 31, 0, 0);
 
-  // Set market start time to 09:15 AM IST
-  const marketStart = new Date(nowIST);
-  marketStart.setHours(9, 15, 0, 0);
-
-  // Align end time to the latest closed 1-minute candle
-  const alignedEnd = new Date(nowIST);
-  // alignedEnd.setMinutes(
-  //   alignedEnd.getMinutes() - (alignedEnd.getMinutes() % 3)
-  // );
-  // alignedEnd.setSeconds(0);
-  // alignedEnd.setMilliseconds(0);
-
-  alignedEnd.setMinutes(alignedEnd.getMinutes() - 1);
-  alignedEnd.setSeconds(0);
-  alignedEnd.setMilliseconds(0);
-
-  // Ensure alignedEnd is after marketStart
-  if (alignedEnd <= marketStart) {
-    console.warn("⚠️ Not enough candles formed yet");
+  if (now < sessionStart) {
+    console.log("⏳ Session has not started yet; skipping fetch.");
     return;
   }
 
-  // Format dates as 'yyyy-mm-dd hh:mm:ss'
-  const fromDate = marketStart.toISOString().slice(0, 19).replace("T", " ");
-  const toDate = alignedEnd.toISOString().slice(0, 19).replace("T", " ");
+  const fromDate = sessionStart.toISOString().slice(0, 19).replace("T", " ");
+  const toDate = sessionEndExclusive.toISOString().slice(0, 19).replace("T", " ");
 
   console.log(`⏳ Session Fetch Range: FROM ${fromDate} TO ${toDate}`);
 
   const stockSymbols = await getStockSymbols();
+  const bulkOps = [];
+  const memoryUpdate = new Map();
+
+  const formatMinute = (date) => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    const hours = String(date.getHours()).padStart(2, "0");
+    const minutes = String(date.getMinutes()).padStart(2, "0");
+    return `${year}-${month}-${day}T${hours}:${minutes}:00`;
+  };
+
+  const formatSession = (date) => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  };
+
   for (const symbol of stockSymbols) {
     try {
-      const ltp = await kc.getLTP([symbol]);
-      const token = ltp[symbol]?.instrument_token;
-      if (!token) {
-        console.warn(`⚠️ Skipping ${symbol} — token not found from LTP`);
+      const resolved = await fallbackFetch(symbol, null, db);
+      if (!resolved?.token) {
+        logWarnOncePerToken(
+          "SESSION_NO_TOKEN",
+          symbol,
+          "Instrument token unavailable"
+        );
         continue;
       }
-
+      const tokenStr = canonToken(resolved.token);
       const candles = await kc.getHistoricalData(
-        token,
+        Number(tokenStr),
         "minute",
         fromDate,
         toDate
@@ -1231,72 +1217,97 @@ async function fetchSessionData() {
         continue;
       }
 
-      sessionData[token] = candles.map((c) => ({
-        date: new Date(c.date).toLocaleString("en-IN", {
-          timeZone: "Asia/Kolkata",
-        }),
+      const docs = [];
+      for (const candle of candles) {
+        const ts = new Date(candle.date);
+        const sessionDoc = {
+          token: Number(tokenStr),
+          symbol: resolved.symbol || symbol,
+          ts,
+          minute: formatMinute(ts),
+          session: formatSession(ts),
+          open: candle.open,
+          high: candle.high,
+          low: candle.low,
+          close: candle.close,
+          volume: candle.volume,
+          trades: candle.trades ?? 0,
+          source: "fetchSessionData",
+          updatedAt: new Date(),
+        };
+        bulkOps.push({
+          updateOne: {
+            filter: { token: sessionDoc.token, ts: sessionDoc.ts },
+            update: {
+              $set: sessionDoc,
+              $setOnInsert: { createdAt: new Date() },
+            },
+            upsert: true,
+          },
+        });
+        docs.push(sessionDoc);
+      }
+
+      memoryUpdate.set(tokenStr, docs);
+      console.log(`📥 Fetched ${candles.length} session candles for ${symbol}`);
+    } catch (err) {
+      logError(`Session data error for ${symbol}`, err);
+    }
+  }
+
+  if (bulkOps.length) {
+    try {
+      await db.collection("session_data").bulkWrite(bulkOps, { ordered: false });
+      console.log("✅ Session data written to database.");
+    } catch (err) {
+      logError("session_data.bulkWrite", err);
+    }
+  } else {
+    console.warn("⚠️ No session data written to database (empty response)");
+  }
+
+  for (const [tokenStr, docs] of memoryUpdate.entries()) {
+    sessionData[tokenStr] = docs
+      .map((doc) => ({
+        date: doc.ts,
+        open: doc.open,
+        high: doc.high,
+        low: doc.low,
+        close: doc.close,
+        volume: doc.volume,
+      }))
+      .sort((a, b) => +new Date(a.date) - +new Date(b.date));
+
+    pushCandles(
+      tokenStr,
+      sessionData[tokenStr].map((c) => ({
         open: c.open,
         high: c.high,
         low: c.low,
         close: c.close,
         volume: c.volume,
-      }));
-
-      console.log(`📥 Fetched ${candles.length} session candles for ${symbol}`);
-    } catch (err) {
-      console.error(`❌ Session data error for ${symbol}:`, err.message);
-    }
-  }
-
-  if (Object.keys(sessionData).length > 0) {
-    for (const token in sessionData) {
-      await db
-        .collection("session_data")
-        .updateOne(
-          { token: Number(token) },
-          { $set: { token: Number(token), candles: sessionData[token] } },
-          { upsert: true }
-        );
-      const tokenStr = String(token);
-      pushCandles(
-        tokenStr,
-        sessionData[token].map((c) => ({
-          open: c.open,
-          high: c.high,
-          low: c.low,
-          close: c.close,
-          volume: c.volume,
-          timestamp: new Date(c.date),
-        })),
-        60
-      );
-      await computeGapPercent(tokenStr);
-    }
-    console.log("✅ Session data written to database.");
-  } else {
-    console.warn("⚠️ No session data written to database (empty response)");
-  }
-
-  const anyToken = Object.keys(sessionData)[0];
-  if (anyToken && sessionData[anyToken].length < 3) {
-    const minutes = nowIST.getHours() * 60 + nowIST.getMinutes();
-    if (minutes < 570) {
-      console.log("⏳ Session fetch incomplete. Retrying in 1m...");
-      setTimeout(fetchSessionData, 60 * 1000);
-    }
+        timestamp: new Date(c.date),
+      })),
+      60
+    );
+    await computeGapPercent(tokenStr);
   }
 }
 
 // setInterval(() => fetchSessionData(), 3 * 60 * 1000);
-fetchSessionData();
+if (process.env.NODE_ENV !== "test") {
+  fetchSessionData();
 
-setInterval(() => {
-  if (!isMarketOpen()) initSession(); // token refresh only
-  else fetchSessionData(); // full session + candle pull
-}, 3 * 60 * 1000);
+  const sessionTimer = setInterval(() => {
+    if (!isMarketOpen()) initSession(); // token refresh only
+    fetchSessionData(); // session pull regardless of market state
+  }, 3 * 60 * 1000);
+  sessionTimer.unref?.();
 
-// Periodically check if the warmup task should run
-setInterval(warmupCandleHistory, 60 * 1000);
+  // Periodically check if the warmup task should run
+  const warmupTimer = setInterval(warmupCandleHistory, 60 * 1000);
+  warmupTimer.unref?.();
+}
 
 async function getMA(token, period) {
   const data = await getHistoricalData(token);

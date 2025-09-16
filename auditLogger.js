@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import db from './db.js';
 import { sendNotification } from './telegram.js';
+import { onReject } from './metrics.js';
 
 const LOG_COLLECTION = 'audit_logs';
 const ARCHIVE_COLLECTION = 'audit_logs_archive';
@@ -82,6 +83,7 @@ export async function logSignalRejected(
   validationDetails,
   signalData = null
 ) {
+  onReject(reasonCode);
   await secureLogStore(
     {
       type: 'signal_rejected',
