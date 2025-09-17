@@ -257,6 +257,7 @@ export async function analyzeCandles(
       consolidationVolumeRatio: FILTERS.consolidationRatio,
       slippage,
       maxSlippage: FILTERS.maxSlippage,
+      maxSpread: FILTERS.maxSpread,
       maxSpreadPct: FILTERS.maxSpreadPct,
       minRR: RISK_REWARD_RATIO,
       minLiquidity: FILTERS.minLiquidity,
