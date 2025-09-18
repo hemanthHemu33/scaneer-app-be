@@ -146,6 +146,16 @@ Trigger historical backfill.
 { "interval": "minute", "days": 3 }
 ```
 
+### Rebuild today's aligned candles
+
+If the live aligner misses a window you can rebuild the 1‑minute series for the current trading day:
+
+```bash
+node backfillToday.js
+```
+
+The script reads `tick_data`, feeds the aligner, and upserts both `aligned_ticks` and `session_data` for the day (09:15–15:30 IST).
+
 ### GET `/kite-redirect`
 
 OAuth redirect capture for Kite `request_token` → creates/refreshes the trading session.
@@ -252,8 +262,8 @@ tests/
 1. **Insert Kite session token**  
    Ensure a document `{ type: "kite_session", access_token: "<token>" }` exists in the `tokens` collection.
 
-2. **Prepare universe (optional)**  
-   The server seeds a default universe if `stock_symbols.symbols` is empty. POST `/addStockSymbol` to add more.
+2. **Prepare universe (optional)**
+   The server initializes an empty universe if `stock_symbols` is missing. Use POST `/addStockSymbol` to add symbols.
 
 3. **Start server**  
    `npm start` before 09:15 IST. Startup log should include `♻️ Loaded access token from DB`.
@@ -267,7 +277,7 @@ tests/
 ## ✅ Acceptance Tests
 
 1. **Session load** – With a valid token doc, startup logs `♻️ Loaded access token from DB`.
-2. **Universe seed** – Empty `stock_symbols` results in `🌱 Seeded stock_symbols with defaults: [...]`.
+2. **Universe initialization** – On first run logs `🌱 Initialized stock_symbols with empty list`.
 3. **Live feed starts** – During market hours logs `🕒 Market open; starting live feed…`, `📈 Ticker connected`, and `🔔 Subscribed N symbols`.
 4. **Signals flow** – With session and universe during market hours, new documents appear in `signals` collection and are emitted via WebSocket.
 5. **Guard conditions** – Without a session or outside market hours logs `⚠️ No Kite session; live feed will not start.` or `⛔ Market closed: not starting live feed.`

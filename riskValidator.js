@@ -156,13 +156,28 @@ export function checkMarketConditions({
   timeSinceSignal = 0,
   volume,
   spread,
+  maxSpread,
+  maxSpreadPct,
+  price,
   newsImpact = false,
   eventActive = false,
 }) {
   if (avgAtr && atr > avgAtr * 1.5) return false;
   if (indexTrend && signalDirection && indexTrend !== signalDirection) return false;
   if (timeSinceSignal > 2 * 60 * 1000) return false;
-  if (typeof spread === 'number' && spread > 0.3) return false;
+  if (typeof spread === 'number') {
+    let spreadLimit = 0.3;
+    if (typeof maxSpread === 'number') {
+      spreadLimit = maxSpread;
+    } else if (typeof maxSpreadPct === 'number') {
+      if (typeof price === 'number' && price > 0) {
+        spreadLimit = (maxSpreadPct / 100) * price;
+      } else {
+        spreadLimit = maxSpreadPct;
+      }
+    }
+    if (spread > spreadLimit) return false;
+  }
   if (typeof volume === 'number' && volume <= 0) return false;
   if (newsImpact || eventActive) return false;
   return true;

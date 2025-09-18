@@ -1,4 +1,5 @@
 // Index.js
+import "./env.js";
 import express from "express";
 import http from "http";
 import { Server } from "socket.io";
@@ -22,7 +23,6 @@ import {
   tickBuffer,
   lastTickTs,
 } from "./kite.js";
-import { sendSignal } from "./telegram.js";
 import {
   trackOpenPositions,
   checkExposureLimits,
@@ -79,10 +79,12 @@ app.use(express.json());
 async function ensureUniverseSeeded(db) {
   const col = db.collection("stock_symbols");
   const doc = await col.findOne({});
-  if (!doc || !Array.isArray(doc.symbols) || doc.symbols.length === 0) {
-    const seed = ["RELIANCE", "HDFCBANK", "INFY"];
-    await col.updateOne({}, { $set: { symbols: seed } }, { upsert: true });
-    console.log("🌱 Seeded stock_symbols with defaults:", seed);
+  if (!doc) {
+    await col.insertOne({ symbols: [] });
+    console.log("🌱 Initialized stock_symbols with empty list");
+  } else if (!Array.isArray(doc.symbols)) {
+    await col.updateOne({}, { $set: { symbols: [] } });
+    console.log("🌱 Reset stock_symbols to empty list");
   } else {
     console.log("✅ Universe present:", doc.symbols.length, "symbols");
   }

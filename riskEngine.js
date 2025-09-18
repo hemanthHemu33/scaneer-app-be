@@ -506,6 +506,9 @@ export function isSignalValid(signal, ctx = {}) {
     timeSinceSignal: ctx.timeSinceSignal ?? 0,
     volume: signal.liquidity ?? ctx.volume,
     spread: signal.spread,
+    maxSpread: ctx.maxSpread,
+    maxSpreadPct: ctx.maxSpreadPct,
+    price: ctx.currentPrice ?? signal.entry,
     newsImpact: ctx.newsImpact,
     eventActive: ctx.eventActive,
   });
