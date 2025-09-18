@@ -76,7 +76,7 @@ const io = new Server(server, { cors: corsOptions });
 
 app.use(express.json());
 
-async function ensureUniverseSeeded() {
+async function ensureUniverseSeeded(db) {
   const col = db.collection("stock_symbols");
   const doc = await col.findOne({});
   if (!doc || !Array.isArray(doc.symbols) || doc.symbols.length === 0) {
@@ -302,7 +302,7 @@ server.listen(3000, async () => {
   console.log("📡 Backend running on port 3000");
 
   try {
-    await ensureUniverseSeeded();
+    await ensureUniverseSeeded(db);
     const token = await initSession();
     if (!token) {
       console.warn("⚠️ No Kite session; live feed will not start.");
@@ -310,9 +310,7 @@ server.listen(3000, async () => {
       console.log("🕒 Market open; starting live feed…");
       startLiveFeed(io);
     } else {
-      console.log(
-        "🕒 Market closed; live feed will start automatically on next open if implemented via scheduler."
-      );
+      console.log("⛔ Market closed: not starting live feed.");
     }
   } catch (e) {
     logError("server.listen init", e);
