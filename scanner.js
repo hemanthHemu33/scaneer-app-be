@@ -287,8 +287,12 @@ export async function analyzeCandles(
 
     // Step 6: Position sizing after risk filter
     const baseRisk = Math.abs(base.entry - base.stopLoss);
-    const riskReward = Math.abs((base.target2 ?? base.target1) - base.entry) / baseRisk;
-    const consolidationOk = isAwayFromConsolidation(validCandles.slice(0, -1), base.entry);
+    const riskReward =
+      Math.abs((base.target2 ?? base.target1) - base.entry) / baseRisk;
+    const consolidationOk = isAwayFromConsolidation(
+      validCandles.slice(0, -1),
+      base.entry
+    );
     let qty = calculatePositionSize({
       capital: accountBalance,
       risk: accountBalance * riskPerTradePercentage,
@@ -361,7 +365,11 @@ export async function analyzeCandles(
     // Step 7: Append meta information and build final signal
     const { signal } = buildSignal(
       contextForBuild,
-      { type: base.strategy, strength: base.confidence, direction: base.direction },
+      {
+        type: base.strategy,
+        strength: base.confidence,
+        direction: base.direction,
+      },
       tradeParams,
       base.confidence
     );
@@ -381,7 +389,8 @@ export async function analyzeCandles(
       badRR: riskReward < 1.5,
       positionConflict:
         openPositions.has(symbol) &&
-        openPositions.get(symbol).side !== (base.direction === "Long" ? "buy" : "sell"),
+        openPositions.get(symbol).side !==
+          (base.direction === "Long" ? "buy" : "sell"),
     });
     signal.confidence = penaltyAdjusted;
     signal.confidenceScore = penaltyAdjusted;
@@ -399,8 +408,6 @@ export async function analyzeCandles(
 export function getSignalHistory() {
   return signalHistory;
 }
-
-// Exit monitoring is triggered from kite.js once an order update reports COMPLETE
 
 // Rank signals and send top one to execution
 export async function rankAndExecute(signals = []) {
@@ -426,7 +433,9 @@ export async function rankAndExecute(signals = []) {
       });
     if (!exposureOk) {
       console.log(
-        `[PORTFOLIO] Exposure limits blocked trade for ${top.stock || top.symbol}`
+        `[PORTFOLIO] Exposure limits blocked trade for ${
+          top.stock || top.symbol
+        }`
       );
       return null;
     }
