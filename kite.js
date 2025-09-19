@@ -25,7 +25,12 @@ import {
   finalizeEOD as finalizeAlignedEOD,
 } from "./aligner.js";
 import { fallbackFetch } from "./fallbackFetcher.js";
-import { metrics, incrementMetric, onReject, startMetricsReporter } from "./metrics.js";
+import {
+  metrics,
+  incrementMetric,
+  onReject,
+  startMetricsReporter,
+} from "./metrics.js";
 import { persistThenNotify } from "./emitter.js";
 import {
   checkExposureLimits,
@@ -96,7 +101,9 @@ for (const doc of sessionDocs) {
   if (!tokenStr) continue;
   if (!sessionData[tokenStr]) sessionData[tokenStr] = [];
   sessionData[tokenStr].push({
-    date: new Date(doc.ts || doc.minute || doc.date || doc.timestamp || Date.now()),
+    date: new Date(
+      doc.ts || doc.minute || doc.date || doc.timestamp || Date.now()
+    ),
     open: doc.open,
     high: doc.high,
     low: doc.low,
@@ -145,7 +152,9 @@ async function removeStockSymbol(symbol) {
     delete tickBuffer[token];
     delete candleHistory[token];
     // Remove any aligned tick data for this token from DB
-    await db.collection(ALIGNED_COLLECTION).deleteMany({ token: Number(token) });
+    await db
+      .collection(ALIGNED_COLLECTION)
+      .deleteMany({ token: Number(token) });
     delete sessionData[token];
     if (ticker) ticker.unsubscribe([token]);
     updateInstrumentTokens(instrumentTokens);
@@ -239,12 +248,14 @@ async function getSymbolForToken(token) {
 let instrumentTokens = [];
 let tickIntervalMs = 10000;
 let lastEODFlush = null;
-  let ticker,
-    tickBuffer = {},
-    candleInterval,
-    globalIO;
-  let lastTickTs = null;
-  let riskState = {
+let ticker;
+let liveFeedActive = false;
+let liveFeedStarting = false;
+let tickBuffer = {};
+let candleInterval;
+let globalIO;
+let lastTickTs = null;
+let riskState = {
   dailyLoss: 0,
   maxDailyLoss: 5000,
   consecutiveLosses: 0,
@@ -378,7 +389,8 @@ async function warmupCandleHistory() {
 
 // Load historical intraday session candles from MongoDB into in-memory candleHistory
 async function loadHistoricalSessionCandles(tokens) {
-  const query = tokens && tokens.length ? { token: { $in: tokens.map(Number) } } : {};
+  const query =
+    tokens && tokens.length ? { token: { $in: tokens.map(Number) } } : {};
   const docs = await db
     .collection("historical_session_data")
     .find(query)
@@ -416,130 +428,175 @@ async function preloadStockData() {
   }
 }
 
+export function isLiveFeedRunning() {
+  if (liveFeedActive) return true;
+  if (ticker && typeof ticker.connected === "function") {
+    try {
+      return ticker.connected();
+    } catch (err) {
+      return false;
+    }
+  }
+  return liveFeedStarting;
+}
+
 async function startLiveFeed(io) {
   globalIO = io;
+
+  if (liveFeedStarting || isLiveFeedRunning()) {
+    console.log(
+      "⚠️ Live feed already starting or running. Skipping duplicate start."
+    );
+    return;
+  }
+
   if (!isMarketOpen()) {
     console.log("⛔ Market closed: not starting live feed.");
     return;
   }
 
-  const accessToken = await initSession();
-  if (!accessToken) return logError("Live feed start failed: No access token");
+  liveFeedStarting = true;
 
-  await warmupCandleHistory();
-  await loadTickDataFromDB();
-
-  // 🧠 Load historical intraday data then today's session data into candle history
   try {
-    await loadHistoricalSessionCandles();
-
-    for (const token in sessionData) {
-      const tokenStr = canonToken(token);
-      pushCandles(
-        tokenStr,
-        sessionData[token].map((c) => ({
-          open: c.open,
-          high: c.high,
-          low: c.low,
-          close: c.close,
-          volume: c.volume,
-          timestamp: new Date(c.date),
-        })),
-        60
-      );
+    const accessToken = await initSession();
+    if (!accessToken) {
+      liveFeedStarting = false;
+      return logError("Live feed start failed: No access token");
     }
-    console.log("✅ Preloaded session candles into candle history");
 
-    // ✅ NOW show how many were loaded per token
-    for (const token in candleHistory) {
-      console.log(
-        `🔍 History loaded for ${token}: ${candleHistory[token].length} candles`
-      );
-      await computeGapPercent(canonToken(token));
-    }
-    console.log("✅ Candle history initialized");
-  } catch (err) {
-    console.warn("⚠️ Could not preload session data:", err.message);
-  }
+    await warmupCandleHistory();
+    await loadTickDataFromDB();
 
-  const symbols = await getStockSymbols();
-  if (!symbols.length) {
-    console.warn(
-      "⚠️ No stock symbols found. POST /addStockSymbol to add symbols."
-    );
-    return;
-  }
-
-  instrumentTokens = await getTokensForSymbols(symbols);
-  if (!instrumentTokens.length) return logError("No instrument tokens found");
-
-  ticker = new KiteTicker({ api_key: apiKey, access_token: accessToken });
-  ticker.on("connect", () => {
-    ticker.subscribe(instrumentTokens);
-    ticker.setMode(ticker.modeFull, instrumentTokens);
-    console.log("📈 Ticker connected");
-    console.log("🔔 Subscribed", instrumentTokens.length, "symbols");
-  });
-
-  ticker.on("ticks", (ticks) => {
-    lastTickTs = Date.now();
-    incrementMetric("ticks", ticks.length);
-    for (const tick of ticks) {
-      const tokenStr = canonToken(tick.instrument_token);
-      if (!tokenStr) continue;
-      const symbol = tokenSymbolMap.get(tokenStr);
-      if (!symbol) {
-        logWarnOncePerToken("UNMAPPED_TOKEN", tokenStr, "dropping tick");
-        continue;
-      }
-      if (!tickBuffer[tokenStr]) tickBuffer[tokenStr] = [];
-      tickBuffer[tokenStr].push({ ...tick, instrument_token: Number(tokenStr) });
-      ingestAlignedTick({ token: tokenStr, symbol, tick });
-    }
-  });
-
-  ticker.on("order_update", handleOrderUpdate);
-
-  ticker.on("error", (err) => {
-    logError("WebSocket error", err);
+    // 🧠 Load historical intraday data then today's session data into candle history
     try {
-      ticker.disconnect();
-    } catch (e) {}
-    setTimeout(() => startLiveFeed(io), 5000);
-  });
-  ticker.on("close", () => {
-    logError("WebSocket closed, retrying...");
-    setTimeout(() => startLiveFeed(io), 5000);
-  });
+      await loadHistoricalSessionCandles();
 
-  ticker.connect();
-  clearInterval(candleInterval);
-  candleInterval = setInterval(() => processBuffer(io), tickIntervalMs);
-  candleInterval.unref?.();
-  const alignedTimer = setInterval(() => processAlignedCandles(io), 60000);
-  alignedTimer.unref?.();
-  const flushTimer = setInterval(() => {
-    flushOpenCandles({ force: false }).catch((err) =>
-      logError("aligner.flush", err)
-    );
-  }, 5000);
-  flushTimer.unref?.();
-  const persistTimer = setInterval(() => flushTickBufferToDB(), 10000);
-  persistTimer.unref?.();
-  const eodTimer = setInterval(() => {
-    const now = new Date();
-    if (isMarketOpen()) return;
-    const dayKey = now.toISOString().slice(0, 10);
-    if (lastEODFlush === dayKey) return;
-    lastEODFlush = dayKey;
-    finalizeAlignedEOD(now)
-      .then(() => flushOpenCandles({ force: true }))
-      .catch((err) => logError("aligner.finalizeEOD", err));
-  }, 60000);
-  eodTimer.unref?.();
-  // Removed redundant hourly fetchHistoricalIntradayData
+      for (const token in sessionData) {
+        const tokenStr = canonToken(token);
+        pushCandles(
+          tokenStr,
+          sessionData[token].map((c) => ({
+            open: c.open,
+            high: c.high,
+            low: c.low,
+            close: c.close,
+            volume: c.volume,
+            timestamp: new Date(c.date),
+          })),
+          60
+        );
+      }
+      console.log("✅ Preloaded session candles into candle history");
 
-  // previous reload of historical data removed to avoid duplication
+      // ✅ NOW show how many were loaded per token
+      for (const token in candleHistory) {
+        console.log(
+          `🔍 History loaded for ${token}: ${candleHistory[token].length} candles`
+        );
+        await computeGapPercent(canonToken(token));
+      }
+      console.log("✅ Candle history initialized");
+    } catch (err) {
+      console.warn("⚠️ Could not preload session data:", err.message);
+    }
+
+    const symbols = await getStockSymbols();
+    if (!symbols.length) {
+      liveFeedStarting = false;
+      console.warn(
+        "⚠️ No stock symbols found. POST /addStockSymbol to add symbols."
+      );
+      return;
+    }
+
+    instrumentTokens = await getTokensForSymbols(symbols);
+    if (!instrumentTokens.length) {
+      liveFeedStarting = false;
+      return logError("No instrument tokens found");
+    }
+
+    ticker = new KiteTicker({ api_key: apiKey, access_token: accessToken });
+    ticker.on("connect", () => {
+      ticker.subscribe(instrumentTokens);
+      ticker.setMode(ticker.modeFull, instrumentTokens);
+      console.log("📈 Ticker connected");
+      console.log("🔔 Subscribed", instrumentTokens.length, "symbols");
+      liveFeedActive = true;
+      liveFeedStarting = false;
+    });
+
+    ticker.on("ticks", (ticks) => {
+      lastTickTs = Date.now();
+      incrementMetric("ticks", ticks.length);
+      for (const tick of ticks) {
+        const tokenStr = canonToken(tick.instrument_token);
+        if (!tokenStr) continue;
+        const symbol = tokenSymbolMap.get(tokenStr);
+        if (!symbol) {
+          logWarnOncePerToken("UNMAPPED_TOKEN", tokenStr, "dropping tick");
+          continue;
+        }
+        if (!tickBuffer[tokenStr]) tickBuffer[tokenStr] = [];
+        tickBuffer[tokenStr].push({
+          ...tick,
+          instrument_token: Number(tokenStr),
+        });
+        ingestAlignedTick({ token: tokenStr, symbol, tick });
+      }
+    });
+
+    ticker.on("order_update", handleOrderUpdate);
+
+    ticker.on("error", (err) => {
+      liveFeedActive = false;
+      liveFeedStarting = false;
+      logError("WebSocket error", err);
+      try {
+        ticker.disconnect();
+      } catch (e) {}
+      ticker = null;
+      setTimeout(() => startLiveFeed(io), 5000);
+    });
+    ticker.on("close", () => {
+      liveFeedActive = false;
+      liveFeedStarting = false;
+      ticker = null;
+      logError("WebSocket closed, retrying...");
+      setTimeout(() => startLiveFeed(io), 5000);
+    });
+
+    ticker.connect();
+    clearInterval(candleInterval);
+    candleInterval = setInterval(() => processBuffer(io), tickIntervalMs);
+    candleInterval.unref?.();
+    const alignedTimer = setInterval(() => processAlignedCandles(io), 60000);
+    alignedTimer.unref?.();
+    const flushTimer = setInterval(() => {
+      flushOpenCandles({ force: false }).catch((err) =>
+        logError("aligner.flush", err)
+      );
+    }, 5000);
+    flushTimer.unref?.();
+    const persistTimer = setInterval(() => flushTickBufferToDB(), 10000);
+    persistTimer.unref?.();
+    const eodTimer = setInterval(() => {
+      const now = new Date();
+      if (isMarketOpen()) return;
+      const dayKey = now.toISOString().slice(0, 10);
+      if (lastEODFlush === dayKey) return;
+      lastEODFlush = dayKey;
+      finalizeAlignedEOD(now)
+        .then(() => flushOpenCandles({ force: true }))
+        .catch((err) => logError("aligner.finalizeEOD", err));
+    }, 60000);
+    eodTimer.unref?.();
+    // Removed redundant hourly fetchHistoricalIntradayData
+
+    // previous reload of historical data removed to avoid duplication
+  } catch (err) {
+    liveFeedStarting = false;
+    logError("startLiveFeed", err);
+  }
 }
 
 const BATCH_LIMIT = 100;
@@ -569,7 +626,11 @@ export async function processAlignedCandles(io) {
       await ensureCandleHistory(tokenStr);
       const symbol = doc.symbol || (await getSymbolForToken(tokenStr));
       if (!symbol) {
-        logWarnOncePerToken("UNMAPPED_TOKEN", tokenStr, "aligned candle missing symbol");
+        logWarnOncePerToken(
+          "UNMAPPED_TOKEN",
+          tokenStr,
+          "aligned candle missing symbol"
+        );
         await db.collection(ALIGNED_COLLECTION).deleteOne({ _id: doc._id });
         continue;
       }
@@ -912,7 +973,9 @@ async function emitUnifiedSignal(signal, source, io = globalIO) {
     });
   if (!allowed) {
     await logSignalRejected(
-      signal.signalId || signal.algoSignal?.signalId || `${symbol}-${Date.now()}`,
+      signal.signalId ||
+        signal.algoSignal?.signalId ||
+        `${symbol}-${Date.now()}`,
       "portfolioRules",
       { message: `Signal for ${symbol} rejected by portfolio rules` },
       signal
@@ -1124,7 +1187,10 @@ async function getHistoricalData(tokenStr) {
   try {
     return await historicalStore.getDailyCandles(tokenStr);
   } catch (err) {
-    console.error(`❌ Error fetching historical data for ${tokenStr}:`, err.message);
+    console.error(
+      `❌ Error fetching historical data for ${tokenStr}:`,
+      err.message
+    );
     return [];
   }
 }
@@ -1169,7 +1235,10 @@ async function fetchSessionData() {
   }
 
   const fromDate = sessionStart.toISOString().slice(0, 19).replace("T", " ");
-  const toDate = sessionEndExclusive.toISOString().slice(0, 19).replace("T", " ");
+  const toDate = sessionEndExclusive
+    .toISOString()
+    .slice(0, 19)
+    .replace("T", " ");
 
   console.log(`⏳ Session Fetch Range: FROM ${fromDate} TO ${toDate}`);
 
@@ -1257,7 +1326,9 @@ async function fetchSessionData() {
 
   if (bulkOps.length) {
     try {
-      await db.collection("session_data").bulkWrite(bulkOps, { ordered: false });
+      await db
+        .collection("session_data")
+        .bulkWrite(bulkOps, { ordered: false });
       console.log("✅ Session data written to database.");
     } catch (err) {
       logError("session_data.bulkWrite", err);
@@ -1496,6 +1567,8 @@ async function resetInMemoryData() {
     } catch {}
     ticker = null;
   }
+  liveFeedActive = false;
+  liveFeedStarting = false;
   kc.setAccessToken("");
 }
 
