@@ -1,5 +1,5 @@
 import db from "../db.js";
-import { isMarketOpen, startLiveFeed, kc } from "../kite.js";
+import { isMarketOpen, startLiveFeed, kc, isLiveFeedRunning } from "../kite.js";
 import { logError } from "../logger.js";
 import { getIO } from "../sockets/io.js";
 
@@ -28,7 +28,11 @@ export const kiteRedirect = async (req, res) => {
         { upsert: true }
       );
 
-    if (isMarketOpen()) startLiveFeed(getIO());
+    if (isMarketOpen() && !isLiveFeedRunning()) {
+      startLiveFeed(getIO());
+    } else if (isMarketOpen()) {
+      console.log("ℹ️ Live feed already running; skipping duplicate start.");
+    }
     return res.send("✅ Login successful, session created.");
   } catch (err) {
     logError("kite redirect", err);

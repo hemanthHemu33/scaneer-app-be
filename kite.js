@@ -239,12 +239,14 @@ async function getSymbolForToken(token) {
 let instrumentTokens = [];
 let tickIntervalMs = 10000;
 let lastEODFlush = null;
-  let ticker,
-    tickBuffer = {},
-    candleInterval,
-    globalIO;
-  let lastTickTs = null;
-  let riskState = {
+let ticker;
+let liveFeedActive = false;
+let liveFeedStarting = false;
+let tickBuffer = {};
+let candleInterval;
+let globalIO;
+let lastTickTs = null;
+let riskState = {
   dailyLoss: 0,
   maxDailyLoss: 5000,
   consecutiveLosses: 0,
@@ -416,15 +418,39 @@ async function preloadStockData() {
   }
 }
 
+export function isLiveFeedRunning() {
+  if (liveFeedActive) return true;
+  if (ticker && typeof ticker.connected === "function") {
+    try {
+      return ticker.connected();
+    } catch (err) {
+      return false;
+    }
+  }
+  return liveFeedStarting;
+}
+
 async function startLiveFeed(io) {
   globalIO = io;
+
+  if (liveFeedStarting || isLiveFeedRunning()) {
+    console.log("⚠️ Live feed already starting or running. Skipping duplicate start.");
+    return;
+  }
+
   if (!isMarketOpen()) {
     console.log("⛔ Market closed: not starting live feed.");
     return;
   }
 
-  const accessToken = await initSession();
-  if (!accessToken) return logError("Live feed start failed: No access token");
+  liveFeedStarting = true;
+
+  try {
+    const accessToken = await initSession();
+    if (!accessToken) {
+      liveFeedStarting = false;
+      return logError("Live feed start failed: No access token");
+    }
 
   await warmupCandleHistory();
   await loadTickDataFromDB();
@@ -462,24 +488,30 @@ async function startLiveFeed(io) {
     console.warn("⚠️ Could not preload session data:", err.message);
   }
 
-  const symbols = await getStockSymbols();
-  if (!symbols.length) {
-    console.warn(
-      "⚠️ No stock symbols found. POST /addStockSymbol to add symbols."
-    );
-    return;
-  }
+    const symbols = await getStockSymbols();
+    if (!symbols.length) {
+      liveFeedStarting = false;
+      console.warn(
+        "⚠️ No stock symbols found. POST /addStockSymbol to add symbols."
+      );
+      return;
+    }
 
-  instrumentTokens = await getTokensForSymbols(symbols);
-  if (!instrumentTokens.length) return logError("No instrument tokens found");
+    instrumentTokens = await getTokensForSymbols(symbols);
+    if (!instrumentTokens.length) {
+      liveFeedStarting = false;
+      return logError("No instrument tokens found");
+    }
 
-  ticker = new KiteTicker({ api_key: apiKey, access_token: accessToken });
-  ticker.on("connect", () => {
-    ticker.subscribe(instrumentTokens);
-    ticker.setMode(ticker.modeFull, instrumentTokens);
-    console.log("📈 Ticker connected");
-    console.log("🔔 Subscribed", instrumentTokens.length, "symbols");
-  });
+    ticker = new KiteTicker({ api_key: apiKey, access_token: accessToken });
+    ticker.on("connect", () => {
+      ticker.subscribe(instrumentTokens);
+      ticker.setMode(ticker.modeFull, instrumentTokens);
+      console.log("📈 Ticker connected");
+      console.log("🔔 Subscribed", instrumentTokens.length, "symbols");
+      liveFeedActive = true;
+      liveFeedStarting = false;
+    });
 
   ticker.on("ticks", (ticks) => {
     lastTickTs = Date.now();
@@ -498,48 +530,58 @@ async function startLiveFeed(io) {
     }
   });
 
-  ticker.on("order_update", handleOrderUpdate);
+    ticker.on("order_update", handleOrderUpdate);
 
-  ticker.on("error", (err) => {
-    logError("WebSocket error", err);
-    try {
-      ticker.disconnect();
-    } catch (e) {}
-    setTimeout(() => startLiveFeed(io), 5000);
-  });
-  ticker.on("close", () => {
-    logError("WebSocket closed, retrying...");
-    setTimeout(() => startLiveFeed(io), 5000);
-  });
+    ticker.on("error", (err) => {
+      liveFeedActive = false;
+      liveFeedStarting = false;
+      logError("WebSocket error", err);
+      try {
+        ticker.disconnect();
+      } catch (e) {}
+      ticker = null;
+      setTimeout(() => startLiveFeed(io), 5000);
+    });
+    ticker.on("close", () => {
+      liveFeedActive = false;
+      liveFeedStarting = false;
+      ticker = null;
+      logError("WebSocket closed, retrying...");
+      setTimeout(() => startLiveFeed(io), 5000);
+    });
 
-  ticker.connect();
-  clearInterval(candleInterval);
-  candleInterval = setInterval(() => processBuffer(io), tickIntervalMs);
-  candleInterval.unref?.();
-  const alignedTimer = setInterval(() => processAlignedCandles(io), 60000);
-  alignedTimer.unref?.();
-  const flushTimer = setInterval(() => {
-    flushOpenCandles({ force: false }).catch((err) =>
-      logError("aligner.flush", err)
-    );
-  }, 5000);
-  flushTimer.unref?.();
-  const persistTimer = setInterval(() => flushTickBufferToDB(), 10000);
-  persistTimer.unref?.();
-  const eodTimer = setInterval(() => {
-    const now = new Date();
-    if (isMarketOpen()) return;
-    const dayKey = now.toISOString().slice(0, 10);
-    if (lastEODFlush === dayKey) return;
-    lastEODFlush = dayKey;
-    finalizeAlignedEOD(now)
-      .then(() => flushOpenCandles({ force: true }))
-      .catch((err) => logError("aligner.finalizeEOD", err));
-  }, 60000);
-  eodTimer.unref?.();
-  // Removed redundant hourly fetchHistoricalIntradayData
+    ticker.connect();
+    clearInterval(candleInterval);
+    candleInterval = setInterval(() => processBuffer(io), tickIntervalMs);
+    candleInterval.unref?.();
+    const alignedTimer = setInterval(() => processAlignedCandles(io), 60000);
+    alignedTimer.unref?.();
+    const flushTimer = setInterval(() => {
+      flushOpenCandles({ force: false }).catch((err) =>
+        logError("aligner.flush", err)
+      );
+    }, 5000);
+    flushTimer.unref?.();
+    const persistTimer = setInterval(() => flushTickBufferToDB(), 10000);
+    persistTimer.unref?.();
+    const eodTimer = setInterval(() => {
+      const now = new Date();
+      if (isMarketOpen()) return;
+      const dayKey = now.toISOString().slice(0, 10);
+      if (lastEODFlush === dayKey) return;
+      lastEODFlush = dayKey;
+      finalizeAlignedEOD(now)
+        .then(() => flushOpenCandles({ force: true }))
+        .catch((err) => logError("aligner.finalizeEOD", err));
+    }, 60000);
+    eodTimer.unref?.();
+    // Removed redundant hourly fetchHistoricalIntradayData
 
-  // previous reload of historical data removed to avoid duplication
+    // previous reload of historical data removed to avoid duplication
+  } catch (err) {
+    liveFeedStarting = false;
+    logError("startLiveFeed", err);
+  }
 }
 
 const BATCH_LIMIT = 100;
@@ -1496,6 +1538,8 @@ async function resetInMemoryData() {
     } catch {}
     ticker = null;
   }
+  liveFeedActive = false;
+  liveFeedStarting = false;
   kc.setAccessToken("");
 }
 
@@ -1515,6 +1559,7 @@ export {
   warmupCandleHistory,
   preloadStockData,
   isMarketOpen,
+  isLiveFeedRunning,
   getStockSymbols,
   setStockSymbol,
   subscribeSymbol,

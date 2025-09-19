@@ -4,10 +4,12 @@ import { logError } from "../logger.js";
 import {
   startLiveFeed,
   isMarketOpen,
+  isLiveFeedRunning,
   initSession,
   preloadStockData,
 } from "../kite.js";
 import { trackOpenPositions } from "../portfolioContext.js";
+import { createLiveFeedMonitor } from "../../liveFeedMonitor.js";
 
 async function ensureUniverseSeeded(db) {
   const col = db.collection("stock_symbols");
@@ -21,6 +23,13 @@ async function ensureUniverseSeeded(db) {
   }
 }
 
+const liveFeedMonitor = createLiveFeedMonitor({
+  isMarketOpen,
+  isLiveFeedRunning,
+  startLiveFeed,
+  logger: console,
+});
+
 export async function runStartup(io) {
   try {
     await ensureUniverseSeeded(db);
@@ -29,8 +38,12 @@ export async function runStartup(io) {
     if (!token) {
       console.warn("⚠️ No Kite session; live feed will not start.");
     } else if (isMarketOpen()) {
-      console.log("🕒 Market open; starting live feed…");
-      startLiveFeed(io);
+      if (!isLiveFeedRunning()) {
+        console.log("🕒 Market open; starting live feed…");
+        startLiveFeed(io);
+      } else {
+        console.log("🟢 Market open; live feed already running.");
+      }
     } else {
       console.log("⛔ Market closed: not starting live feed.");
     }
@@ -53,4 +66,11 @@ export async function runStartup(io) {
   );
   const minutes = now.getHours() * 60 + now.getMinutes();
   if (minutes >= 510 && minutes <= 540) preloadStockData();
+
+  liveFeedMonitor.evaluate(io);
+  liveFeedMonitor.start(io);
+}
+
+export function stopLiveFeedMonitor() {
+  liveFeedMonitor.stop();
 }
