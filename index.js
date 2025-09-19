@@ -11,6 +11,7 @@ import {
   updateInstrumentTokens,
   setTickInterval,
   isMarketOpen,
+  isLiveFeedRunning,
   setStockSymbol,
   removeStockSymbol,
   initSession,
@@ -23,6 +24,7 @@ import {
   tickBuffer,
   lastTickTs,
 } from "./kite.js";
+import { createLiveFeedMonitor } from "./liveFeedMonitor.js";
 import {
   trackOpenPositions,
   checkExposureLimits,
@@ -75,6 +77,37 @@ app.use(cors(corsOptions));
 const io = new Server(server, { cors: corsOptions });
 
 app.use(express.json());
+
+const liveFeedMonitor = createLiveFeedMonitor({
+  isMarketOpen,
+  isLiveFeedRunning,
+  startLiveFeed,
+  logger: console,
+});
+
+let shuttingDown = false;
+
+const stopLiveFeedMonitor = () => {
+  liveFeedMonitor.stop();
+};
+
+const handleShutdown = () => {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  stopLiveFeedMonitor();
+  if (server.listening) {
+    server.close(() => process.exit(0));
+  } else {
+    process.exit(0);
+  }
+  const exitTimer = setTimeout(() => process.exit(0), 1000);
+  exitTimer.unref?.();
+};
+
+process.once("SIGINT", handleShutdown);
+process.once("SIGTERM", handleShutdown);
+process.once("beforeExit", stopLiveFeedMonitor);
+server.on("close", stopLiveFeedMonitor);
 
 async function ensureUniverseSeeded(db) {
   const col = db.collection("stock_symbols");
@@ -285,8 +318,10 @@ app.get("/kite-redirect", async (req, res) => {
       },
       { upsert: true }
     );
-    if (isMarketOpen()) {
+    if (isMarketOpen() && !isLiveFeedRunning()) {
       startLiveFeed(io);
+    } else if (isMarketOpen()) {
+      console.log("ℹ️ Live feed already running; skipping duplicate start.");
     }
     return res.send("✅ Login successful, session created.");
   } catch (err) {
@@ -309,8 +344,12 @@ server.listen(3000, async () => {
     if (!token) {
       console.warn("⚠️ No Kite session; live feed will not start.");
     } else if (isMarketOpen()) {
-      console.log("🕒 Market open; starting live feed…");
-      startLiveFeed(io);
+      if (!isLiveFeedRunning()) {
+        console.log("🕒 Market open; starting live feed…");
+        startLiveFeed(io);
+      } else {
+        console.log("🟢 Market open; live feed already running.");
+      }
     } else {
       console.log("⛔ Market closed: not starting live feed.");
     }
@@ -339,4 +378,7 @@ server.listen(3000, async () => {
   if (minutes >= 510 && minutes <= 540) {
     preloadStockData();
   }
+
+  liveFeedMonitor.evaluate(io);
+  liveFeedMonitor.start(io);
 });
