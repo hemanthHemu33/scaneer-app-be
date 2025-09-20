@@ -428,7 +428,7 @@ async function preloadStockData() {
   }
 }
 
-export function isLiveFeedRunning() {
+function isLiveFeedRunning() {
   if (liveFeedActive) return true;
   if (ticker && typeof ticker.connected === "function") {
     try {
@@ -1600,4 +1600,5 @@ export {
   resetInMemoryData,
   loadTickDataFromDB,
   lastTickTs,
+  isLiveFeedRunning,
 };
