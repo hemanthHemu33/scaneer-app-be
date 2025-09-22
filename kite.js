@@ -330,6 +330,27 @@ let riskState = {
 let gapPercent = {};
 let exitMonitorStarted = false;
 
+const DEFAULT_MAX_TICK_RESTORE = 10000;
+const parsedMaxTickRestore = Number(process.env.MAX_RESTORE_TICKS);
+const MAX_TICK_RESTORE =
+  Number.isFinite(parsedMaxTickRestore) && parsedMaxTickRestore > 0
+    ? Math.floor(parsedMaxTickRestore)
+    : DEFAULT_MAX_TICK_RESTORE;
+
+const DEFAULT_TICK_RESTORE_DELETE_BATCH = 5000;
+const parsedRestoreDeleteBatch = Number(
+  process.env.TICK_RESTORE_DELETE_BATCH
+);
+const TICK_RESTORE_DELETE_BATCH =
+  Number.isFinite(parsedRestoreDeleteBatch) && parsedRestoreDeleteBatch > 0
+    ? Math.floor(parsedRestoreDeleteBatch)
+    : DEFAULT_TICK_RESTORE_DELETE_BATCH;
+
+const TICK_RESTORE_CURSOR_BATCH =
+  TICK_RESTORE_DELETE_BATCH > 0
+    ? Math.min(TICK_RESTORE_DELETE_BATCH, 2000)
+    : 1000;
+
 function handleExit(trade, reason) {
   markExit(trade.symbol);
   logExit(trade, reason, trade.lastPrice);
@@ -969,22 +990,72 @@ async function logTrade(signal) {
 }
 
 // Load any persisted ticks from MongoDB on startup
-async function loadTickDataFromDB() {
+async function loadTickDataFromDB({
+  maxRestore = MAX_TICK_RESTORE,
+} = {}) {
   try {
-    const ticks = await db
-      .collection("tick_data")
+    const collection = db.collection("tick_data");
+    const cursor = collection
       .find({})
       .sort({ timestamp: 1 })
-      .toArray();
-    for (const t of ticks) {
-      const tokenStr = canonToken(t.token || t.instrument_token);
-      if (!tokenStr) continue;
-      if (!tickBuffer[tokenStr]) tickBuffer[tokenStr] = [];
-      tickBuffer[tokenStr].push({ ...t, instrument_token: Number(tokenStr) });
+      .batchSize(TICK_RESTORE_CURSOR_BATCH);
+
+    let restored = 0;
+    let skipped = 0;
+    let purged = 0;
+    let pendingDeleteIds = [];
+
+    try {
+      while (await cursor.hasNext()) {
+        const doc = await cursor.next();
+        if (!doc) continue;
+
+        if (doc._id) {
+          pendingDeleteIds.push(doc._id);
+        }
+
+        if (restored < maxRestore) {
+          const tokenStr = canonToken(doc.token || doc.instrument_token);
+          if (tokenStr) {
+            if (!tickBuffer[tokenStr]) tickBuffer[tokenStr] = [];
+            const { _id, ...tickData } = doc;
+            tickBuffer[tokenStr].push({
+              ...tickData,
+              token: Number(tokenStr),
+              instrument_token: Number(tokenStr),
+            });
+            restored += 1;
+          }
+        } else {
+          skipped += 1;
+        }
+
+        if (pendingDeleteIds.length >= TICK_RESTORE_DELETE_BATCH) {
+          const batchIds = pendingDeleteIds.splice(0, TICK_RESTORE_DELETE_BATCH);
+          if (batchIds.length) {
+            const { deletedCount = 0 } = await collection.deleteMany({
+              _id: { $in: batchIds },
+            });
+            purged += deletedCount;
+          }
+        }
+      }
+    } finally {
+      await cursor.close();
     }
-    if (ticks.length) {
-      await db.collection("tick_data").deleteMany({});
-      console.log(`✅ Loaded ${ticks.length} ticks from DB`);
+
+    if (pendingDeleteIds.length) {
+      const { deletedCount = 0 } = await collection.deleteMany({
+        _id: { $in: pendingDeleteIds },
+      });
+      purged += deletedCount;
+    }
+
+    if (restored || purged) {
+      const skippedMsg = skipped ? ` (skipped ${skipped} extra ticks)` : "";
+      console.log(
+        `✅ Restored ${restored} ticks from DB and purged ${purged}${skippedMsg}`
+      );
     }
   } catch (err) {
     logError("Tick data load", err);
