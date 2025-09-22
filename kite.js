@@ -94,25 +94,91 @@ export function getOrderUpdate(orderId) {
 // const sessionDataPath = path.join(__dirname, "session_data.json");
 
 const tokensData = await db.collection("tokens").findOne({});
-const sessionDocs = await db.collection("session_data").find({}).toArray();
 const sessionData = {};
-for (const doc of sessionDocs) {
-  const tokenStr = canonToken(doc.token || doc.instrument_token);
-  if (!tokenStr) continue;
-  if (!sessionData[tokenStr]) sessionData[tokenStr] = [];
-  sessionData[tokenStr].push({
-    date: new Date(
-      doc.ts || doc.minute || doc.date || doc.timestamp || Date.now()
-    ),
-    open: doc.open,
-    high: doc.high,
-    low: doc.low,
-    close: doc.close,
-    volume: doc.volume,
-  });
+const DEFAULT_SESSION_PRELOAD_LIMIT = 500;
+const parsedLimit = Number(process.env.SESSION_PRELOAD_LIMIT);
+const SESSION_PRELOAD_LIMIT = Number.isFinite(parsedLimit) && parsedLimit > 0
+  ? Math.floor(parsedLimit)
+  : DEFAULT_SESSION_PRELOAD_LIMIT;
+const parsedDays = Number(process.env.SESSION_PRELOAD_DAYS);
+const SESSION_PRELOAD_DAYS =
+  Number.isFinite(parsedDays) && parsedDays >= 0 ? parsedDays : 2;
+
+function getSessionHydrationWindow(days) {
+  const windowDays = Number.isFinite(days) && days > 0 ? days : 0;
+  if (!windowDays) return null;
+  const end = new Date();
+  const start = new Date(end.getTime() - windowDays * 24 * 60 * 60 * 1000);
+  return { start, end };
 }
-for (const token in sessionData) {
-  sessionData[token].sort((a, b) => +new Date(a.date) - +new Date(b.date));
+
+async function hydrateSessionData(
+  tokens,
+  { limit = SESSION_PRELOAD_LIMIT, days = SESSION_PRELOAD_DAYS } = {}
+) {
+  if (!Array.isArray(tokens) || tokens.length === 0) return;
+
+  const numericTokens = tokens
+    .map((t) => Number(canonToken(t)))
+    .filter((t) => Number.isFinite(t));
+  if (!numericTokens.length) return;
+
+  const requested = new Set(numericTokens.map((t) => String(t)));
+  const loaded = new Set();
+  const buffer = new Map();
+
+  const window = getSessionHydrationWindow(days);
+  const query = { token: { $in: numericTokens } };
+  if (window) {
+    query.ts = { $gte: window.start, $lte: window.end };
+  }
+
+  const cursor = db
+    .collection("session_data")
+    .find(query)
+    .sort({ token: 1, ts: -1 });
+
+  try {
+    while (await cursor.hasNext()) {
+      const doc = await cursor.next();
+      const tokenStr = canonToken(doc.token || doc.instrument_token);
+      if (!tokenStr) continue;
+      let arr = buffer.get(tokenStr);
+      if (!arr) {
+        arr = [];
+        buffer.set(tokenStr, arr);
+      }
+      if (arr.length >= limit) {
+        loaded.add(tokenStr);
+        if (loaded.size === requested.size) break;
+        continue;
+      }
+
+      arr.push({
+        date: new Date(
+          doc.ts || doc.minute || doc.date || doc.timestamp || Date.now()
+        ),
+        open: doc.open,
+        high: doc.high,
+        low: doc.low,
+        close: doc.close,
+        volume: doc.volume,
+      });
+
+      if (arr.length >= limit) {
+        loaded.add(tokenStr);
+        if (loaded.size === requested.size) break;
+      }
+    }
+  } finally {
+    await cursor.close();
+  }
+
+  for (const [tokenStr, arr] of buffer.entries()) {
+    sessionData[tokenStr] = arr
+      .slice()
+      .sort((a, b) => +new Date(a.date) - +new Date(b.date));
+  }
 }
 
 // Fetch stock symbols from database
@@ -467,9 +533,26 @@ async function startLiveFeed(io) {
     await warmupCandleHistory();
     await loadTickDataFromDB();
 
+    const symbols = await getStockSymbols();
+    if (!symbols.length) {
+      liveFeedStarting = false;
+      console.warn(
+        "⚠️ No stock symbols found. POST /addStockSymbol to add symbols."
+      );
+      return;
+    }
+
+    instrumentTokens = await getTokensForSymbols(symbols);
+    if (!instrumentTokens.length) {
+      liveFeedStarting = false;
+      return logError("No instrument tokens found");
+    }
+
+    await hydrateSessionData(instrumentTokens);
+
     // 🧠 Load historical intraday data then today's session data into candle history
     try {
-      await loadHistoricalSessionCandles();
+      await loadHistoricalSessionCandles(instrumentTokens);
 
       for (const token in sessionData) {
         const tokenStr = canonToken(token);
@@ -498,21 +581,6 @@ async function startLiveFeed(io) {
       console.log("✅ Candle history initialized");
     } catch (err) {
       console.warn("⚠️ Could not preload session data:", err.message);
-    }
-
-    const symbols = await getStockSymbols();
-    if (!symbols.length) {
-      liveFeedStarting = false;
-      console.warn(
-        "⚠️ No stock symbols found. POST /addStockSymbol to add symbols."
-      );
-      return;
-    }
-
-    instrumentTokens = await getTokensForSymbols(symbols);
-    if (!instrumentTokens.length) {
-      liveFeedStarting = false;
-      return logError("No instrument tokens found");
     }
 
     ticker = new KiteTicker({ api_key: apiKey, access_token: accessToken });
@@ -1338,7 +1406,7 @@ async function fetchSessionData() {
   }
 
   for (const [tokenStr, docs] of memoryUpdate.entries()) {
-    sessionData[tokenStr] = docs
+    const ordered = docs
       .map((doc) => ({
         date: doc.ts,
         open: doc.open,
@@ -1348,6 +1416,11 @@ async function fetchSessionData() {
         volume: doc.volume,
       }))
       .sort((a, b) => +new Date(a.date) - +new Date(b.date));
+
+    sessionData[tokenStr] =
+      ordered.length > SESSION_PRELOAD_LIMIT
+        ? ordered.slice(-SESSION_PRELOAD_LIMIT)
+        : ordered;
 
     pushCandles(
       tokenStr,
