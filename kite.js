@@ -1213,8 +1213,9 @@ async function fetchHistoricalData(symbols) {
   startDate.setDate(startDate.getDate() - 90);
   const startStr = startDate.toISOString().split("T")[0];
   const endStr = new Date().toISOString().split("T")[0];
-  const historicalData = {};
   const symbolList = symbols || (await getStockSymbols());
+  const historicalCol = db.collection("historical_data");
+  let updatedCount = 0;
   for (const symbol of symbolList) {
     try {
       const ltp = await kc.getLTP([symbol]);
@@ -1229,7 +1230,8 @@ async function fetchHistoricalData(symbols) {
         startStr,
         endStr
       );
-      historicalData[token] = candles.map((c) => ({
+      const tokenKey = String(token);
+      const formattedCandles = candles.map((c) => ({
         date: new Date(c.date).toLocaleString("en-IN", {
           timeZone: "Asia/Kolkata",
         }),
@@ -1239,15 +1241,28 @@ async function fetchHistoricalData(symbols) {
         close: c.close,
         volume: c.volume,
       }));
+      await historicalCol.updateOne(
+        {},
+        { $set: { [tokenKey]: formattedCandles } },
+        { upsert: true }
+      );
+      updatedCount += 1;
+      if (updatedCount % 25 === 0) {
+        console.log(
+          `📦 Historical candles stored for ${updatedCount} symbol${
+            updatedCount === 1 ? "" : "s"
+          }`
+        );
+      }
     } catch (err) {
       console.error(`❌ Error for ${symbol}:`, err.message);
     }
   }
-  // fs.writeFileSync(historicalDataPath, JSON.stringify(historicalData, null, 2));
-  await db
-    .collection("historical_data")
-    .updateOne({}, { $set: historicalData }, { upsert: true });
-  console.log("✅ historical_data.json written successfully");
+  if (updatedCount > 0) {
+    console.log("✅ historical_data.json written successfully");
+  } else {
+    console.log("ℹ️ No historical candles were stored");
+  }
 }
 fetchHistoricalData();
 
