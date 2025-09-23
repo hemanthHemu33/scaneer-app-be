@@ -746,7 +746,7 @@ export async function processAlignedCandles(io) {
         ? Math.abs((depth.sell?.[0]?.price || 0) - (depth.buy?.[0]?.price || 0))
         : 0;
 
-      const avgVol = (await getAverageVolume(tokenStr, 20)) || 1000;
+      const avgVol = (await getAverageVolume(tokenStr, 20)) ?? 1000;
       incrementMetric("evalSymbols");
       const signal = await analyzeCandles(
         candleHistory[tokenStr],
@@ -840,7 +840,7 @@ async function processBuffer(io) {
       continue;
     }
 
-    const avgVol = (await getAverageVolume(tokenStr, 20)) || 1000;
+    const avgVol = (await getAverageVolume(tokenStr, 20)) ?? 1000;
 
     const newCandle = {
       open,
@@ -1571,9 +1571,10 @@ async function getATR(token, period = 14) {
 
 async function getAverageVolume(token, period) {
   const data = await getHistoricalData(token);
-  return data?.length >= period
-    ? data.slice(-period).reduce((a, b) => a + (b.volume || 0), 0) / period
-    : "NA";
+  if (!data || data.length < period) return null;
+  return (
+    data.slice(-period).reduce((a, b) => a + (b.volume || 0), 0) / period
+  );
 }
 
 async function subscribeSymbol(symbol) {
