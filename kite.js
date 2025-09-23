@@ -897,10 +897,18 @@ function intradayATR(candles, period = 14) {
   return sum / period;
 }
 
-function checkMarketVolatility(tokenStr, threshold = 5) {
+function checkMarketVolatility(
+  tokenStr,
+  thresholdPct = Number(process.env.ATR_PCT_THRESHOLD) || 0.6
+) {
   const candles = candleHistory[tokenStr] || [];
+  if (!candles.length) return true;
   const atr = intradayATR(candles, 14);
-  return atr <= threshold;
+  const lastCandle = candles[candles.length - 1];
+  const lastClose = lastCandle?.close || 0;
+  if (!lastClose) return true;
+  const atrPct = (atr / lastClose) * 100;
+  return atrPct <= thresholdPct;
 }
 
 async function checkRisk(signal) {
