@@ -1668,7 +1668,8 @@ export async function getHigherTimeframeData(symbol, timeframe = "15minute") {
 
 export async function getSupportResistanceLevels(symbol) {
   const token = await getTokenForSymbol(symbol);
-  const candles = (candleHistory[token] || []).filter(
+  const tokenStr = canonToken(token);
+  const candles = (candleHistory[tokenStr] || []).filter(
     (c) =>
       c &&
       typeof c.high === "number" &&
