@@ -17,7 +17,6 @@ import {
   getHistoricalData,
   getTokenForSymbol,
 } from "./kite.js";
-import { candleHistory } from "./dataEngine.js";
 import { evaluateAllStrategies } from "./strategyEngine.js";
 import { evaluateStrategies } from "./strategies.js";
 import { RISK_REWARD_RATIO, calculatePositionSize } from "./positionSizing.js";
@@ -124,7 +123,7 @@ export async function analyzeCandles(
 
     const token = await getTokenForSymbol(symbol);
     const dailyHistory = await getHistoricalData(token);
-    const sessionData = candleHistory[token] || validCandles;
+    const sessionData = candles;
 
     const context = {
       symbol,
