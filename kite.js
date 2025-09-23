@@ -1272,16 +1272,8 @@ function getPastTradingDates(refDate, count) {
   return dates.reverse(); // Oldest first
 }
 
-fetchHistoricalData();
-// Session & Historical Data
-
 async function fetchHistoricalData(symbols) {
   const accessToken = await initSession();
-
-  if (!isMarketOpen()) {
-    console.log("Market closed. Skipping historical data fetch.");
-    return;
-  }
   if (!accessToken) return console.error("❌ Cannot fetch historical data");
   const startDate = new Date();
   startDate.setDate(startDate.getDate() - 90);
@@ -1338,7 +1330,6 @@ async function fetchHistoricalData(symbols) {
     console.log("ℹ️ No historical candles were stored");
   }
 }
-fetchHistoricalData();
 
 async function getHistoricalData(tokenStr) {
   try {
