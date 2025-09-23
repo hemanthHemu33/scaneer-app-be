@@ -312,7 +312,7 @@ async function getSymbolForToken(token) {
 }
 
 let instrumentTokens = [];
-let tickIntervalMs = 10000;
+let tickIntervalMs = 5000;
 let lastEODFlush = null;
 let ticker;
 let liveFeedActive = false;
@@ -654,8 +654,8 @@ async function startLiveFeed(io) {
       setTimeout(() => startLiveFeed(io), 5000);
     });
 
-    ticker.connect();
     clearInterval(candleInterval);
+    ticker.connect();
     candleInterval = setInterval(() => processBuffer(io), tickIntervalMs);
     candleInterval.unref?.();
     const alignedTimer = setInterval(() => processAlignedCandles(io), 60000);
@@ -666,8 +666,11 @@ async function startLiveFeed(io) {
       );
     }, 5000);
     flushTimer.unref?.();
-    const persistTimer = setInterval(() => flushTickBufferToDB(), 10000);
-    persistTimer.unref?.();
+    const persistTimerStarter = setTimeout(() => {
+      const persistTimer = setInterval(() => flushTickBufferToDB(), 15000);
+      persistTimer.unref?.();
+    }, 3000); // ensure buffer processing runs before the first flush
+    persistTimerStarter.unref?.();
     const eodTimer = setInterval(() => {
       const now = new Date();
       if (isMarketOpen()) return;
