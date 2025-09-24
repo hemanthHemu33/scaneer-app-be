@@ -312,6 +312,14 @@ async function getSymbolForToken(token) {
 }
 
 let instrumentTokens = [];
+
+function getInstrumentTokens() {
+  return instrumentTokens.slice();
+}
+
+function getInstrumentTokenCount() {
+  return instrumentTokens.length;
+}
 let tickIntervalMs = 5000;
 let lastEODFlush = null;
 let ticker;
@@ -390,28 +398,54 @@ export async function initSession() {
 
 // RESET THE COMPLETE DATA BASE IF THE ACCESS TOKEN IS EXPIRED
 async function resetDatabase() {
-  // Logic to reset the database
-  try {
-    const collections = await db.collections();
-    for (const collection of collections) {
-      if (
-        collection.collectionName !== "instruments" &&
-        collection.collectionName !== "nifty50stocksymbols" &&
-        collection.collectionName !== "nifty100qualitystocksymbols"
-      ) {
-        await collection.deleteMany({});
-      }
-    }
-    // Recreate the stock_symbols collection with an empty array
-    await db.collection("stock_symbols").deleteMany({});
-    await db.collection("stock_symbols").insertOne({ symbols: [] });
+  const collections = await db.collections();
+  const preservedCollections = [];
+  const clearedCollections = [];
+  const preserve = new Set([
+    "instruments",
+    "nifty50stocksymbols",
+    "nifty100qualitystocksymbols",
+  ]);
+  let stockSymbolsCleared = false;
 
-    await resetInMemoryData();
-    res.json({ status: "success", message: "Collections reset successfully" });
-  } catch (err) {
-    logError("reset collections", err);
-    res.status(500).json({ error: "Failed to reset collections" });
+  for (const collection of collections) {
+    const name = collection.collectionName;
+    if (preserve.has(name)) {
+      preservedCollections.push(name);
+      continue;
+    }
+
+    const result = await collection.deleteMany({});
+    clearedCollections.push({
+      name,
+      deletedCount:
+        typeof result?.deletedCount === "number" ? result.deletedCount : null,
+    });
+
+    if (name === "stock_symbols") {
+      stockSymbolsCleared = true;
+    }
   }
+
+  if (!stockSymbolsCleared) {
+    const result = await db.collection("stock_symbols").deleteMany({});
+    clearedCollections.push({
+      name: "stock_symbols",
+      deletedCount:
+        typeof result?.deletedCount === "number" ? result.deletedCount : null,
+    });
+  }
+
+  await db.collection("stock_symbols").insertOne({ symbols: [] });
+
+  await resetInMemoryData();
+
+  return {
+    status: "success",
+    message: "Collections reset successfully",
+    preservedCollections,
+    clearedCollections,
+  };
 }
 
 function isMarketOpen() {
@@ -1108,19 +1142,29 @@ async function emitUnifiedSignal(signal, source, io = globalIO) {
   if (!(await checkRisk(signal))) return;
   const symbol = signal.stock || signal.symbol;
   const tradeValue = signal.entry * (signal.qty || 1);
-  const allowed =
-    preventReEntry(symbol) &&
-    checkExposureLimits({
-      symbol,
-      tradeValue,
-      sector: signal.sector || "GEN",
-      totalCapital: getAccountBalance(),
-    }) &&
-    resolveSignalConflicts({
-      symbol,
-      side: signal.direction === "Long" ? "long" : "short",
-      strategy: signal.pattern,
+  const exposureOptions = {
+    symbol,
+    tradeValue,
+    sector: signal.sector || "GEN",
+    totalCapital: getAccountBalance(),
+  };
+  const reEntryAllowed = preventReEntry(symbol);
+  const exposureAllowed = checkExposureLimits(exposureOptions);
+  const conflictAllowed = resolveSignalConflicts({
+    symbol,
+    side: signal.direction === "Long" ? "long" : "short",
+    strategy: signal.pattern,
+  });
+
+  if (process.env.DEBUG_PORTFOLIO) {
+    console.log("[PORTFOLIO GATE]", {
+      reEntry: reEntryAllowed,
+      exposure: exposureAllowed,
+      conflict: conflictAllowed,
     });
+  }
+
+  const allowed = reEntryAllowed && exposureAllowed && conflictAllowed;
   if (!allowed) {
     await logSignalRejected(
       signal.signalId ||
@@ -1761,7 +1805,10 @@ export {
   getSymbolForToken,
   getHistoricalData,
   resetInMemoryData,
+  resetDatabase,
   loadTickDataFromDB,
   lastTickTs,
   isLiveFeedRunning,
+  getInstrumentTokens,
+  getInstrumentTokenCount,
 };
