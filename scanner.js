@@ -122,8 +122,9 @@ export async function analyzeCandles(
     if (!features) return null;
 
     const tokenNum = await getTokenForSymbol(symbol);
-    const tokenStr = String(tokenNum);
-    const dailyHistory = await getHistoricalData(tokenStr);
+    const tokenStr =
+      tokenNum !== undefined && tokenNum !== null ? String(tokenNum) : null;
+    const dailyHistory = tokenStr ? await getHistoricalData(tokenStr) : [];
     const sessionData = candles;
 
     const context = {
@@ -179,7 +180,14 @@ export async function analyzeCandles(
       : 1;
 
     // ⚠️ Momentum filter
-    if (rsi > 45 && rsi < 55 && atrValue < 1) {
+    const atrPct =
+      last && last.close
+        ? (atrValue / Math.max(last.close, 1)) * 100
+        : null;
+    const lowAtrEnvironment =
+      atrPct !== null ? atrPct < 0.15 : atrValue < 0.2;
+
+    if (typeof rsi === "number" && rsi > 45 && rsi < 55 && lowAtrEnvironment) {
       console.log(
         `[SKIP] ${symbol} - No momentum zone (RSI 45–55 and low ATR)`
       );
@@ -312,11 +320,11 @@ export async function analyzeCandles(
       qty,
     };
 
-    const ma20Val = await getMAForSymbol(String(token), 20);
-    const ma50Val = await getMAForSymbol(String(token), 50);
+    const ma20Val = tokenStr ? await getMAForSymbol(tokenStr, 20) : null;
+    const ma50Val = tokenStr ? await getMAForSymbol(tokenStr, 50) : null;
     const contextForBuild = {
       symbol,
-      instrumentToken: token,
+      instrumentToken: tokenNum ?? tokenStr,
       ma20Val,
       ma50Val,
       ema9,
