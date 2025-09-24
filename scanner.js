@@ -121,8 +121,9 @@ export async function analyzeCandles(
     const features = computeFeatures(validCandles);
     if (!features) return null;
 
-    const token = await getTokenForSymbol(symbol);
-    const dailyHistory = await getHistoricalData(token);
+    const tokenNum = await getTokenForSymbol(symbol);
+    const tokenStr = String(tokenNum);
+    const dailyHistory = await getHistoricalData(tokenStr);
     const sessionData = candles;
 
     const context = {
