@@ -25,7 +25,27 @@ export async function initAccountBalance() {
     const margin = await getAccountMargin();
     // console.log("Account Margin:", margin);
     // accountBalance = margin?.equity?.available?.cash ?? 0;
-    accountBalance = margin?.net;
+
+    const netBalance =
+      typeof margin?.net === "number" && Number.isFinite(margin?.net)
+        ? margin.net
+        : null;
+
+    if (netBalance === null) {
+      if (margin == null) {
+        console.warn(
+          "[ACCOUNT] Margin data unavailable; defaulting account balance to 0"
+        );
+      } else {
+        console.warn(
+          "[ACCOUNT] Margin response missing net balance; defaulting to 0"
+        );
+      }
+      accountBalance = 0;
+    } else {
+      accountBalance = netBalance;
+    }
+
     console.log(`[ACCOUNT] Account balance initialized: ${accountBalance}`);
   } catch (err) {
     console.error(`[ACCOUNT] Failed to fetch margin`, err?.message || err);
