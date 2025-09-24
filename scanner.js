@@ -199,8 +199,9 @@ export async function analyzeCandles(
       topN: 1,
     });
     const filtered = filterStrategiesByRegime(stratResults, marketContext);
-    const [base] = filtered;
-    if (!base) return null;
+    const basePick = (filtered.length ? filtered : stratResults)[0];
+    if (!basePick) return null;
+    const base = { ...basePick };
 
     if (altStrategies && altStrategies[0]) {
       base.strategy = altStrategies[0].name;
