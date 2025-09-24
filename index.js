@@ -18,11 +18,12 @@ import {
   fetchHistoricalIntradayData,
   getSupportResistanceLevels,
   rebuildThreeMinCandlesFromOneMin,
-  resetInMemoryData,
+  resetDatabase,
   preloadStockData,
   kc,
   tickBuffer,
   lastTickTs,
+  getInstrumentTokenCount,
 } from "./kite.js";
 import { createLiveFeedMonitor } from "./liveFeedMonitor.js";
 import {
@@ -125,11 +126,14 @@ async function ensureUniverseSeeded(db) {
 
 app.get("/health", async (req, res) => {
   const doc = await db.collection("stock_symbols").findOne({});
+  const subscribedCount = Object.keys(tickBuffer).length;
+  const instrumentTokenCount = getInstrumentTokenCount();
   res.json({
     session: Boolean(kc._access_token),
     marketOpen: isMarketOpen(),
     universeCount: doc?.symbols?.length || 0,
-    subscribedCount: Object.keys(tickBuffer).length,
+    subscribedCount,
+    instrumentTokenCount,
     lastTickTs,
   });
 });
@@ -183,22 +187,8 @@ app.delete("/stockSymbols/:symbol", async (req, res) => {
 // DELETE ALL THE COLLECTIONS EXCEPT THE instruments COLLECTIONS AND RECREATE THE COLLECTIONS WITH EMPTY DATA
 app.delete("/reset", async (req, res) => {
   try {
-    const collections = await db.collections();
-    for (const collection of collections) {
-      if (
-        collection.collectionName !== "instruments" &&
-        collection.collectionName !== "nifty50stocksymbols" &&
-        collection.collectionName !== "nifty100qualitystocksymbols"
-      ) {
-        await collection.deleteMany({});
-      }
-    }
-    // Recreate the stock_symbols collection with an empty array
-    await db.collection("stock_symbols").deleteMany({});
-    await db.collection("stock_symbols").insertOne({ symbols: [] });
-
-    await resetInMemoryData();
-    res.json({ status: "success", message: "Collections reset successfully" });
+    const result = await resetDatabase();
+    res.json(result);
   } catch (err) {
     logError("reset collections", err);
     res.status(500).json({ error: "Failed to reset collections" });
