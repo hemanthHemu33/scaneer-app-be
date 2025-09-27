@@ -114,6 +114,8 @@ export function validateVolatilitySlippage({
   maxSlippage,
   spread,
   maxSpreadPct,
+  price,
+  maxSpread,
 }) {
   if (typeof minATR === 'number' && typeof atr === 'number' && atr < minATR)
     return false;
@@ -139,12 +141,22 @@ export function validateVolatilitySlippage({
     slippage > maxSlippage
   )
     return false;
-  if (
-    typeof spread === 'number' &&
-    typeof maxSpreadPct === 'number' &&
-    spread > maxSpreadPct
-  )
-    return false;
+  {
+    // Spread limit handling (supports absolute or percentage thresholds)
+    let spreadLimit = null;
+    if (typeof maxSpread === 'number') {
+      spreadLimit = maxSpread;
+    } else if (typeof maxSpreadPct === 'number') {
+      if (typeof price === 'number' && price > 0) {
+        spreadLimit = (maxSpreadPct / 100) * price;
+      } else {
+        // Fallback: interpret maxSpreadPct as an absolute if price is unavailable
+        spreadLimit = maxSpreadPct;
+      }
+    }
+    if (typeof spread === 'number' && spreadLimit !== null && spread > spreadLimit)
+      return false;
+  }
   return true;
 }
 
