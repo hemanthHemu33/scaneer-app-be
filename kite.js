@@ -933,7 +933,7 @@ function intradayATR(candles, period = 14) {
 
 function checkMarketVolatility(
   tokenStr,
-  thresholdPct = Number(process.env.ATR_PCT_THRESHOLD) || 0.6
+  thresholdPct = Number(process.env.ATR_PCT_THRESHOLD) || 2.0
 ) {
   const candles = candleHistory[tokenStr] || [];
   if (!candles.length) return true;

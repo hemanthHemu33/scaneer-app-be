@@ -473,6 +473,8 @@ export function isSignalValid(signal, ctx = {}) {
       maxSlippage: ctx.maxSlippage,
       spread: signal.spread,
       maxSpreadPct: ctx.maxSpreadPct,
+      maxSpread: ctx.maxSpread,
+      price: ctx.currentPrice ?? signal.entry,
     })
   )
     return false;
