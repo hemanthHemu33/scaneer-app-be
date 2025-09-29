@@ -99,7 +99,7 @@ export async function analyzeCandles(
       riskState.lastResetDay = today;
     }
 
-    if (riskState.dailyLoss >= 500 || riskState.consecutiveLosses >= 3) {
+    if (riskState.dailyLoss >= 50000 || riskState.consecutiveLosses >= 333) {
       console.log(`[RISK BLOCK] Skipping ${symbol}`);
       return null;
     }
@@ -181,17 +181,13 @@ export async function analyzeCandles(
 
     // ⚠️ Momentum filter
     const atrPct =
-      last && last.close
-        ? (atrValue / Math.max(last.close, 1)) * 100
-        : null;
-    const lowAtrEnvironment =
-      atrPct !== null ? atrPct < 0.18 : atrValue < 0.25;
+      last && last.close ? (atrValue / Math.max(last.close, 1)) * 100 : null;
+    const lowAtrEnvironment = atrPct !== null ? atrPct < 0.18 : atrValue < 0.25;
     const rsiNeutral = typeof rsi === "number" && rsi > 47 && rsi < 53;
     const weakTrend =
       (typeof adx === "number" ? adx < 18 : false) &&
       (typeof trendStrength === "number" ? trendStrength < 0.35 : true);
-    const lowParticipation =
-      typeof rvol === "number" ? rvol < 0.9 : false;
+    const lowParticipation = typeof rvol === "number" ? rvol < 0.9 : false;
 
     if (rsiNeutral && lowAtrEnvironment && weakTrend && lowParticipation) {
       console.log(
