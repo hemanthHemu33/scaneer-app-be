@@ -185,11 +185,17 @@ export async function analyzeCandles(
         ? (atrValue / Math.max(last.close, 1)) * 100
         : null;
     const lowAtrEnvironment =
-      atrPct !== null ? atrPct < 0.15 : atrValue < 0.2;
+      atrPct !== null ? atrPct < 0.18 : atrValue < 0.25;
+    const rsiNeutral = typeof rsi === "number" && rsi > 47 && rsi < 53;
+    const weakTrend =
+      (typeof adx === "number" ? adx < 18 : false) &&
+      (typeof trendStrength === "number" ? trendStrength < 0.35 : true);
+    const lowParticipation =
+      typeof rvol === "number" ? rvol < 0.9 : false;
 
-    if (typeof rsi === "number" && rsi > 45 && rsi < 55 && lowAtrEnvironment) {
+    if (rsiNeutral && lowAtrEnvironment && weakTrend && lowParticipation) {
       console.log(
-        `[SKIP] ${symbol} - No momentum zone (RSI 45–55 and low ATR)`
+        `[SKIP] ${symbol} - No momentum zone (neutral RSI, low ATR, weak trend)`
       );
       return null;
     }
@@ -243,6 +249,19 @@ export async function analyzeCandles(
       liquidity,
     };
 
+    const momentumThresholds = {
+      minRsi: isUptrend ? 47 : 49,
+      maxRsi: isDowntrend ? 54 : 56,
+      minAdx:
+        typeof trendStrength === "number" && trendStrength > 0.6 ? 16 : 12,
+      minRvol:
+        marketContext.regime === "volatile"
+          ? 0.85
+          : marketContext.regime === "bearish"
+          ? 0.65
+          : 0.6,
+    };
+
     const riskCtx = {
       avgAtr: atrValue,
       indexTrend: isUptrend ? "up" : isDowntrend ? "down" : "sideways",
@@ -270,7 +289,7 @@ export async function analyzeCandles(
       maxSpreadPct: FILTERS.maxSpreadPct,
       minRR: RISK_REWARD_RATIO,
       minLiquidity: FILTERS.minLiquidity,
-      minVolumeRatio: 0.5,
+      minVolumeRatio: 0.4,
       minVwapParticipation: 0.9,
       maxIndexVolatility: 20,
       blockWatchlist: true,
@@ -278,9 +297,20 @@ export async function analyzeCandles(
       maxSignalAgeMinutes: 5,
       strategyFailWindowMs: 15 * 60 * 1000,
       minSLDistancePct: 0.001,
+      minRsi: momentumThresholds.minRsi,
+      maxRsi: momentumThresholds.maxRsi,
+      minAdx: momentumThresholds.minAdx,
+      minRvol: momentumThresholds.minRvol,
     };
+    riskCtx.debugTrace = [];
     const riskOk = isSignalValid(preliminary, riskCtx);
     if (!riskOk) {
+      if (Array.isArray(riskCtx.debugTrace) && riskCtx.debugTrace.length) {
+        const reasonSummary = riskCtx.debugTrace
+          .map((entry) => entry.code)
+          .join(", ");
+        console.log(`[RISK] ${symbol} blocked: ${reasonSummary}`);
+      }
       try {
         await logSignalRejected(
           `${symbol}-${Date.now()}`,
