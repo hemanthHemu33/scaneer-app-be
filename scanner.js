@@ -58,7 +58,7 @@ const SECTOR_CAPS = {
 // ⚙️ Scanner mode toggle
 const MODE = "relaxed"; // Options: "strict" | "relaxed"
 const FILTERS = {
-  atrThreshold: MODE === "strict" ? 2 : 0.4,
+  atrThreshold: MODE === "strict" ? 2 : 0.2,
   minBuySellRatio: MODE === "strict" ? 0.8 : 0.6,
   maxSpread: MODE === "strict" ? 1.5 : 2.0,
   minLiquidity: MODE === "strict" ? 500 : 300,
@@ -134,7 +134,7 @@ export async function analyzeCandles(
       depth,
       tick: liveTick,
       spread,
-      liquidity,
+      liquidity: effectiveLiquidity,
       totalBuy,
       totalSell,
       dailyHistory,
@@ -158,42 +158,49 @@ export async function analyzeCandles(
       volatilityClass,
     } = features;
     const last = validCandles.at(-1);
+    const lastVol = (last && (last.volume ?? last.v ?? last.qty)) ?? 0;
+    const effectiveLiquidity = liquidity || lastVol || avgVolume || 0;
     let dailyRangePct = 0;
     if (Array.isArray(dailyHistory) && dailyHistory.length) {
       const d = dailyHistory[dailyHistory.length - 1];
-      const ref = d.close ?? d.open ?? 1;
-      dailyRangePct = ref ? ((d.high - d.low) / ref) * 100 : 0;
+      const dHigh = Number(d?.high);
+      const dLow = Number(d?.low);
+      const ref = Number(d?.close ?? d?.open ?? 0);
+      if (Number.isFinite(dHigh) && Number.isFinite(dLow) && ref > 0) {
+        dailyRangePct = ((dHigh - dLow) / ref) * 100;
+      }
     }
 
     const wickPct = last ? getWickNoise(last) : 0;
     const strongPriceAction = isStrongPriceAction(validCandles);
     const atrStable = isAtrStable(validCandles);
-    const expiryMinutes = calculateExpiryMinutes({ atr: atrValue, rvol });
+    const expiryMinutesRaw = calculateExpiryMinutes({ atr: atrValue, rvol });
+    const expiryMinutes =
+      Number.isFinite(expiryMinutesRaw) && expiryMinutesRaw > 0
+        ? expiryMinutesRaw
+        : 5;
     const expiresAt = new Date(
       Date.now() + expiryMinutes * 60 * 1000
     ).toISOString();
 
     const isUptrend = ema9 > ema21 && ema21 > ema50;
     const isDowntrend = ema9 < ema21 && ema21 < ema50;
-    const vwapParticipation = vwap
-      ? 1 - Math.abs(last.close - vwap) / last.close
-      : 1;
+    const vwapParticipation =
+      Number.isFinite(vwap) && Number.isFinite(last?.close) && last.close > 0
+        ? 1 - Math.abs(last.close - vwap) / last.close
+        : 0.9;
 
     // ⚠️ Momentum filter
-    const atrPct =
-      last && last.close ? (atrValue / Math.max(last.close, 1)) * 100 : null;
-    const lowAtrEnvironment = atrPct !== null ? atrPct < 0.18 : atrValue < 0.25;
-    const rsiNeutral = typeof rsi === "number" && rsi > 47 && rsi < 53;
-    const weakTrend =
-      (typeof adx === "number" ? adx < 18 : false) &&
-      (typeof trendStrength === "number" ? trendStrength < 0.35 : true);
-    const lowParticipation = typeof rvol === "number" ? rvol < 0.9 : false;
-
-    if (rsiNeutral && lowAtrEnvironment && weakTrend && lowParticipation) {
-      console.log(
-        `[SKIP] ${symbol} - No momentum zone (neutral RSI, low ATR, weak trend)`
-      );
-      return null;
+    const atrPct = last?.close
+      ? (atrValue / Math.max(last.close, 1)) * 100
+      : null;
+    if (typeof rsi === "number" && atrPct != null) {
+      const inNoMoRSI = rsi > 47 && rsi < 53;
+      const ultraLowAtr = atrPct < 0.1;
+      if (inNoMoRSI && ultraLowAtr) {
+        console.log(`[SKIP] ${symbol} - No momentum (RSI 47–53 & ATR<0.10%)`);
+        return null;
+      }
     }
 
     const { support, resistance } = await getSupportResistanceLevels(symbol);
@@ -214,10 +221,13 @@ export async function analyzeCandles(
     if (!basePick) return null;
     const base = { ...basePick };
 
+    const primaryStrategy = basePick?.strategy || "unknown";
     if (altStrategies && altStrategies[0]) {
       base.strategy = altStrategies[0].name;
       base.confidence = altStrategies[0].confidence;
     }
+    const displayStrategy = altStrategies?.[0]?.name || primaryStrategy;
+    base.strategy = displayStrategy;
 
     // Debounce logic now that strategy name is known
     const conflictWindow = 3 * 60 * 1000;
@@ -226,7 +236,7 @@ export async function analyzeCandles(
         signalHistory,
         symbol,
         base.direction,
-        base.strategy,
+        primaryStrategy,
         conflictWindow
       )
     )
@@ -235,14 +245,14 @@ export async function analyzeCandles(
     // Preliminary signal for risk validation (no sizing or meta info)
     const preliminary = {
       stock: symbol,
-      pattern: base.strategy,
+      pattern: primaryStrategy,
       direction: base.direction,
       entry: base.entry,
       stopLoss: base.stopLoss,
       target2: base.target2,
       atr: atrValue,
       spread,
-      liquidity,
+      liquidity: effectiveLiquidity,
     };
 
     const momentumThresholds = {
@@ -258,20 +268,53 @@ export async function analyzeCandles(
           : 0.6,
     };
 
+    const safeVix = Number.isFinite(marketContext?.vix) ? marketContext.vix : 0;
+    const safeRegime = marketContext?.regime ?? "neutral";
+
+    const diagBaseRisk =
+      Number.isFinite(base.entry) && Number.isFinite(base.stopLoss)
+        ? Math.abs(base.entry - base.stopLoss)
+        : null;
+    const diagRrNumerator = Number.isFinite(base.target2 ?? base.target1)
+      ? Math.abs((base.target2 ?? base.target1) - base.entry)
+      : null;
+    console.log(`[DIAG] ${symbol}`, {
+      lastClose: last?.close,
+      rsi,
+      adx,
+      ema9,
+      ema21,
+      ema50,
+      vwap,
+      atrValue,
+      atrPct,
+      wickPct,
+      rvol,
+      avgVolume,
+      effectiveLiquidity,
+      vix: safeVix,
+      regime: safeRegime,
+      spread,
+      slippage,
+      rr:
+        diagBaseRisk && diagBaseRisk > 0 && diagRrNumerator !== null
+          ? (diagRrNumerator / diagBaseRisk).toFixed(2)
+          : null,
+    });
+
     const riskCtx = {
       avgAtr: atrValue,
       indexTrend: isUptrend ? "up" : isDowntrend ? "down" : "sideways",
-      indexVolatility: marketContext.vix,
+      indexVolatility: safeVix,
       timeSinceSignal: 0,
-      volume: liquidity,
+      volume: effectiveLiquidity,
       avgVolume,
       currentPrice: liveTick ? liveTick.last_price : last.close,
-      marketRegime: marketContext.regime,
+      marketRegime: safeRegime,
       vwapParticipation,
       rsi,
       adx,
       requireMomentum: true,
-      minATR: FILTERS.atrThreshold,
       maxATR: FILTERS.maxATR,
       minVolatility: FILTERS.atrThreshold,
       maxVolatility: FILTERS.maxATR,
@@ -284,23 +327,31 @@ export async function analyzeCandles(
       maxSpread: FILTERS.maxSpread,
       maxSpreadPct: FILTERS.maxSpreadPct,
       minRR: RISK_REWARD_RATIO,
-      minLiquidity: FILTERS.minLiquidity,
+      minLiquidity: effectiveLiquidity ? FILTERS.minLiquidity : 0,
       minVolumeRatio: 0.4,
       minVwapParticipation: 0.9,
       maxIndexVolatility: 20,
-      blockWatchlist: true,
+      blockWatchlist: false,
       addToWatchlist: false,
       maxSignalAgeMinutes: 5,
       strategyFailWindowMs: 15 * 60 * 1000,
-      minSLDistancePct: 0.001,
+      minSLDistancePct: 0.0005,
       minRsi: momentumThresholds.minRsi,
       maxRsi: momentumThresholds.maxRsi,
       minAdx: momentumThresholds.minAdx,
       minRvol: momentumThresholds.minRvol,
+      atrPct,
+      minAtrPct: 0.12,
     };
     riskCtx.debugTrace = [];
-    const riskOk = isSignalValid(preliminary, riskCtx);
+    const riskVerdict = isSignalValid(preliminary, riskCtx);
+    const riskOk =
+      typeof riskVerdict === "object" ? !!riskVerdict.ok : !!riskVerdict;
     if (!riskOk) {
+      const reason =
+        typeof riskVerdict === "object"
+          ? riskVerdict.reason
+          : "riskValidationFail";
       if (Array.isArray(riskCtx.debugTrace) && riskCtx.debugTrace.length) {
         const reasonSummary = riskCtx.debugTrace
           .map((entry) => entry.code)
@@ -310,7 +361,7 @@ export async function analyzeCandles(
       try {
         await logSignalRejected(
           `${symbol}-${Date.now()}`,
-          "riskValidationFail",
+          reason,
           riskCtx,
           preliminary
         );
@@ -322,8 +373,17 @@ export async function analyzeCandles(
 
     // Step 6: Position sizing after risk filter
     const baseRisk = Math.abs(base.entry - base.stopLoss);
-    const riskReward =
-      Math.abs((base.target2 ?? base.target1) - base.entry) / baseRisk;
+    if (!Number.isFinite(baseRisk) || baseRisk <= 0) {
+      console.log(`[SKIP] ${symbol} - invalid baseRisk`, {
+        entry: base.entry,
+        sl: base.stopLoss,
+      });
+      return null;
+    }
+    const rrNumerator = Number.isFinite(base.target2 ?? base.target1)
+      ? Math.abs((base.target2 ?? base.target1) - base.entry)
+      : 0;
+    const riskReward = baseRisk > 0 ? rrNumerator / baseRisk : 0;
     const consolidationOk = isAwayFromConsolidation(
       validCandles.slice(0, -1),
       base.entry
@@ -337,6 +397,7 @@ export async function analyzeCandles(
     });
     if (riskReward > 2) qty = Math.floor(qty * 1.1);
     else if (riskReward < 1.2) qty = Math.floor(qty * 0.9);
+    qty = Math.max(1, qty || 0);
 
     const tradeParams = {
       entry: base.entry,
@@ -362,7 +423,7 @@ export async function analyzeCandles(
       atrValue,
       slippage,
       spread,
-      liquidity,
+      liquidity: effectiveLiquidity,
       liveTick,
       depth,
       rrMultiplier: RISK_REWARD_RATIO,
@@ -409,12 +470,17 @@ export async function analyzeCandles(
       base.confidence
     );
 
-    signal.expiresAt = toISTISOString(expiresAt);
+    try {
+      signal.expiresAt = toISTISOString(expiresAt);
+    } catch {
+      signal.expiresAt = expiresAt;
+    }
     signal.ai = null; // Step 8: final enrichment placeholder
 
     const penaltyAdjusted = applyPenaltyConditions(signal.confidenceScore, {
       doji: wickPct > 0.6 || !strongPriceAction,
-      lowVolume: liquidity && avgVolume && liquidity < avgVolume * 0.5,
+      lowVolume:
+        effectiveLiquidity && avgVolume && effectiveLiquidity < avgVolume * 0.5,
       againstTrend:
         (base.direction === "Long" && isDowntrend) ||
         (base.direction === "Short" && isUptrend),
@@ -429,6 +495,7 @@ export async function analyzeCandles(
     });
     signal.confidence = penaltyAdjusted;
     signal.confidenceScore = penaltyAdjusted;
+    signal.strategy = displayStrategy;
 
     const sector = getSector(symbol);
     recordSectorSignal(sector, signal.direction);
