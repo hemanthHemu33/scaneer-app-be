@@ -97,9 +97,10 @@ const tokensData = await db.collection("tokens").findOne({});
 const sessionData = {};
 const DEFAULT_SESSION_PRELOAD_LIMIT = 500;
 const parsedLimit = Number(process.env.SESSION_PRELOAD_LIMIT);
-const SESSION_PRELOAD_LIMIT = Number.isFinite(parsedLimit) && parsedLimit > 0
-  ? Math.floor(parsedLimit)
-  : DEFAULT_SESSION_PRELOAD_LIMIT;
+const SESSION_PRELOAD_LIMIT =
+  Number.isFinite(parsedLimit) && parsedLimit > 0
+    ? Math.floor(parsedLimit)
+    : DEFAULT_SESSION_PRELOAD_LIMIT;
 const parsedDays = Number(process.env.SESSION_PRELOAD_DAYS);
 const SESSION_PRELOAD_DAYS =
   Number.isFinite(parsedDays) && parsedDays >= 0 ? parsedDays : 2;
@@ -346,9 +347,7 @@ const MAX_TICK_RESTORE =
     : DEFAULT_MAX_TICK_RESTORE;
 
 const DEFAULT_TICK_RESTORE_DELETE_BATCH = 5000;
-const parsedRestoreDeleteBatch = Number(
-  process.env.TICK_RESTORE_DELETE_BATCH
-);
+const parsedRestoreDeleteBatch = Number(process.env.TICK_RESTORE_DELETE_BATCH);
 const TICK_RESTORE_DELETE_BATCH =
   Number.isFinite(parsedRestoreDeleteBatch) && parsedRestoreDeleteBatch > 0
     ? Math.floor(parsedRestoreDeleteBatch)
@@ -782,13 +781,20 @@ export async function processAlignedCandles(io) {
 
       const avgVol = (await getAverageVolume(tokenStr, 20)) ?? 1000;
       incrementMetric("evalSymbols");
+      const lastPrice =
+        Number(lastTick?.last_price) || newCandle.close || newCandle.open || 0;
+      const slippagePct =
+        lastPrice > 0 && spread > 0
+          ? Math.min(spread / lastPrice, 0.003)
+          : 0.0005;
+      // cap at 0.30%; default 0.05%
       const signal = await analyzeCandles(
         candleHistory[tokenStr],
         symbol,
         depth,
         totalBuy,
         totalSell,
-        0.1,
+        slippagePct,
         spread,
         avgVol,
         lastTick
@@ -886,7 +892,11 @@ async function processBuffer(io) {
     };
 
     pushCandle(tokenStr, newCandle, 60); // Keep only last 60 candles
-
+    const lastPrice = Number(lastTick?.last_price) || close || open || 0;
+    const slippagePct =
+      lastPrice > 0 && spread > 0
+        ? Math.min(spread / lastPrice, 0.003)
+        : 0.0005;
     try {
       incrementMetric("evalSymbols");
       const signal = await analyzeCandles(
@@ -895,7 +905,7 @@ async function processBuffer(io) {
         depth,
         totalBuy,
         totalSell,
-        0.1,
+        slippagePct,
         spread,
         avgVol,
         lastTick
@@ -1035,9 +1045,7 @@ async function logTrade(signal) {
 }
 
 // Load any persisted ticks from MongoDB on startup
-async function loadTickDataFromDB({
-  maxRestore = MAX_TICK_RESTORE,
-} = {}) {
+async function loadTickDataFromDB({ maxRestore = MAX_TICK_RESTORE } = {}) {
   try {
     const collection = db.collection("tick_data");
     const cursor = collection
@@ -1076,7 +1084,10 @@ async function loadTickDataFromDB({
         }
 
         if (pendingDeleteIds.length >= TICK_RESTORE_DELETE_BATCH) {
-          const batchIds = pendingDeleteIds.splice(0, TICK_RESTORE_DELETE_BATCH);
+          const batchIds = pendingDeleteIds.splice(
+            0,
+            TICK_RESTORE_DELETE_BATCH
+          );
           if (batchIds.length) {
             const { deletedCount = 0 } = await collection.deleteMany({
               _id: { $in: batchIds },
@@ -1615,9 +1626,7 @@ async function getATR(token, period = 14) {
 async function getAverageVolume(token, period) {
   const data = await getHistoricalData(token);
   if (!data || data.length < period) return null;
-  return (
-    data.slice(-period).reduce((a, b) => a + (b.volume || 0), 0) / period
-  );
+  return data.slice(-period).reduce((a, b) => a + (b.volume || 0), 0) / period;
 }
 
 async function subscribeSymbol(symbol) {
