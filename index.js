@@ -112,13 +112,22 @@ server.on("close", stopLiveFeedMonitor);
 
 async function ensureUniverseSeeded(db) {
   const col = db.collection("stock_symbols");
-  const doc = await col.findOne({});
+  let doc = await col.findOne({});
+
   if (!doc) {
     await col.insertOne({ symbols: [] });
     console.log("🌱 Initialized stock_symbols with empty list");
+    doc = { symbols: [] };
   } else if (!Array.isArray(doc.symbols)) {
     await col.updateOne({}, { $set: { symbols: [] } });
     console.log("🌱 Reset stock_symbols to empty list");
+    doc = { symbols: [] };
+  }
+
+  if (!doc?.symbols?.length) {
+    console.warn(
+      "⚠️ Universe empty — no symbols attached; add them from the frontend."
+    );
   } else {
     console.log("✅ Universe present:", doc.symbols.length, "symbols");
   }
@@ -152,6 +161,29 @@ app.post("/addStockSymbol", async (req, res) => {
     logError("update symbols", err);
     res.status(500).json({ error: "Failed to update symbols" });
   }
+});
+
+const allowDebugFeedControls = process.env.NODE_ENV !== "production";
+
+app.post("/_debug/start-feed", (req, res) => {
+  if (!allowDebugFeedControls) {
+    return res.status(403).json({ error: "Debug feed controls disabled" });
+  }
+  if (!kc._access_token) {
+    return res.status(400).json({ error: "No Kite session" });
+  }
+  if (isLiveFeedRunning()) {
+    return res.json({ status: "already running" });
+  }
+  startLiveFeed(io);
+  res.json({ status: "started" });
+});
+
+app.post("/_debug/stop-feed", (req, res) => {
+  if (!allowDebugFeedControls) {
+    return res.status(403).json({ error: "Debug feed controls disabled" });
+  }
+  res.json({ status: "noop (implement if needed)" });
 });
 
 // GET STOCK SYMBOLS ENDPOINT
