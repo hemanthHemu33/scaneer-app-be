@@ -71,6 +71,8 @@ const kc = new KiteConnect({ api_key: apiKey });
 
 // Initialize logs before any async operations that might reference them
 let tradeLog = [];
+// ⬆️ Near top-level (once)
+const HISTORY_CAP = Number(process.env.HISTORY_CAP) || 300;
 
 await initAccountBalance();
 
