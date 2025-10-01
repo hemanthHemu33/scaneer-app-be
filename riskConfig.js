@@ -14,6 +14,9 @@ export const riskDefaults = Object.freeze({
   maxSimultaneousSignals: Number(process.env.MAX_SIMULTANEOUS_SIGNALS) || 0,
 
   // Optional drawdown controls (0 disables)
+  drawdownReduce25Pct: Number(process.env.DD_REDUCE_25_PCT) || 0.05,
+  drawdownReduce50Pct: Number(process.env.DD_REDUCE_50_PCT) || 0.1,
+  drawdownHaltPct: Number(process.env.DD_HALT_PCT) || 0.15,
   equityDrawdownLimitPct: Number(process.env.EQUITY_DRAWDOWN_LIMIT_PCT) || 0,
   maxDailyLossPct: Number(process.env.MAX_DAILY_LOSS_PCT) || 0,
   maxCumulativeLoss: Number(process.env.MAX_CUMULATIVE_LOSS) || 0,
