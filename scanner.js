@@ -306,7 +306,7 @@ export async function analyzeCandles(
     });
 
     const riskCtx = {
-      // give RR validator real win-rate info
+      // Provide win-rate so RR validator can adjust for scalping/fade setups
       winrate:
         (marketContext?.strategyWinrates?.[displayStrategy] ??
           marketContext?.winrate ??

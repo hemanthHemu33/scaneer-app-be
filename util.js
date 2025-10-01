@@ -1,5 +1,4 @@
 // util.js
-import { getMA } from "./kite.js"; // Reuse kite.js
 import dayjs from "dayjs";
 import utc from "dayjs/plugin/utc.js";
 import timezone from "dayjs/plugin/timezone.js";
@@ -138,9 +137,14 @@ export function calculateMA(prices, length) {
 // function reuses the last computed EMA value for that key to avoid
 // recalculating from the start of the array on every tick.
 
-export async function getMAForSymbol(symbol, period) {
-  return await getMA(symbol, period);
+// Avoid heavy circular deps: import kite.js only when needed
+export async function getMAForSymbol(symbolOrToken, period) {
+  const { getMA } = await import("./kite.js");
+  return getMA(symbolOrToken, period);
 }
+
+// Alias for clarity when callers provide a token id
+export const getMAForToken = getMAForSymbol;
 
 export function toISTISOString(date = new Date()) {
   return dayjs(date).tz("Asia/Kolkata").format();
@@ -1767,7 +1771,7 @@ export function getWickNoise(candle = {}) {
   const upper = (candle.high ?? 0) - Math.max(candle.close ?? 0, candle.open ?? 0);
   const lower = Math.min(candle.close ?? 0, candle.open ?? 0) - (candle.low ?? 0);
   const wick = Math.max(upper, lower);
-  return wick / body;
+  return Math.min(wick / body, 10);
 }
 
 // Check if ATR series is stable (std dev relative to mean below threshold)
@@ -1777,8 +1781,11 @@ export function isAtrStable(candles = [], period = 14, threshold = 0.3) {
   for (let i = candles.length - period; i < candles.length; i++) {
     atrValues.push(getATR(candles.slice(0, i + 1), period));
   }
-  const mean = atrValues.reduce((a, b) => a + b, 0) / atrValues.length;
-  const variance = atrValues.reduce((s, v) => s + Math.pow(v - mean, 2), 0) / atrValues.length;
+  const cleaned = atrValues.filter((v) => Number.isFinite(v));
+  if (!cleaned.length) return true;
+  const mean = cleaned.reduce((a, b) => a + b, 0) / cleaned.length;
+  const variance =
+    cleaned.reduce((s, v) => s + Math.pow(v - mean, 2), 0) / cleaned.length;
   const std = Math.sqrt(variance);
   return mean === 0 ? true : std / mean < threshold;
 }
@@ -1798,6 +1805,7 @@ export function isAwayFromConsolidation(candles = [], entry, lookback = 10) {
 
 export function aggregateCandles(candles = [], interval = 5) {
   if (!Array.isArray(candles) || candles.length === 0) return [];
+  if (interval <= 1) return candles.slice();
   const grouped = [];
   for (let i = 0; i < candles.length; i += interval) {
     const chunk = candles.slice(i, i + interval);
