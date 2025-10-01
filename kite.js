@@ -54,11 +54,11 @@ import {
   pushCandle,
   pushCandles,
   clearCandleHistory,
+  HISTORY_CAP,
 } from "./candleCache.js";
 
 const historicalStore = initHistoricalStore();
 
-const HISTORY_CAP = Number(process.env.HISTORY_CAP) || 300;
 const DEFAULT_SLIPPAGE_PCT = 0.0005;
 const MAX_SPREAD_SLIPPAGE = 0.003;
 
