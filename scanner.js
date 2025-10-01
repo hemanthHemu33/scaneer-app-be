@@ -232,6 +232,10 @@ export async function analyzeCandles(
     }
     const displayStrategy = altStrategies?.[0]?.name || primaryStrategy;
     base.strategy = displayStrategy;
+    const riskStrategyKey =
+      displayStrategy && displayStrategy !== primaryStrategy
+        ? displayStrategy
+        : base.strategyCategory || primaryStrategy;
 
     // Debounce logic now that strategy name is known
     const conflictWindow = 3 * 60 * 1000;
@@ -249,7 +253,7 @@ export async function analyzeCandles(
     // Preliminary signal for risk validation (no sizing or meta info)
     const preliminary = {
       stock: symbol,
-      pattern: primaryStrategy,
+      pattern: displayStrategy,
       direction: base.direction,
       entry: base.entry,
       stopLoss: base.stopLoss,
@@ -260,7 +264,7 @@ export async function analyzeCandles(
       support,
       resistance,
       // let the risk validator use our category mapping
-      algoSignal: base.strategyCategory ? { strategy: base.strategyCategory } : undefined,
+      algoSignal: riskStrategyKey ? { strategy: riskStrategyKey } : undefined,
     };
 
     const momentumThresholds = {
@@ -400,12 +404,15 @@ export async function analyzeCandles(
       : 0;
     const riskReward = baseRisk > 0 ? rrNumerator / baseRisk : 0;
     const consolidationOk = isAwayFromConsolidation(validCandles, base.entry);
+    const { getDrawdown } = await import("./account.js");
+    const dd = typeof getDrawdown === "function" ? getDrawdown() : 0;
     let qty = calculatePositionSize({
       capital: accountBalance,
       risk: accountBalance * riskPerTradePercentage,
       slPoints: baseRisk,
       price: base.entry,
       volatility: atrValue,
+      drawdown: dd,
     });
     if (riskReward > 2) qty = Math.floor(qty * 1.1);
     else if (riskReward < 1.2) qty = Math.floor(qty * 0.9);
@@ -524,7 +531,8 @@ export async function rankAndExecute(signals = []) {
   const { selectTopSignal } = await import("./signalRanker.js");
   const top = selectTopSignal(signals);
   if (top) {
-    await initAccountBalance();
+    const { refreshAccountBalance } = await import("./account.js");
+    await refreshAccountBalance();
     accountBalance = getAccountBalance();
     const requiredMargin = calculateRequiredMargin({
       price: top.entry,
