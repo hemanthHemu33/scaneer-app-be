@@ -352,17 +352,25 @@ export async function analyzeCandles(
     if (!riskOk) {
       const reason =
         typeof riskVerdict === "object" ? riskVerdict.reason : "riskValidationFail";
-      if (Array.isArray(riskCtx.debugTrace) && riskCtx.debugTrace.length) {
-        const reasonSummary = riskCtx.debugTrace
-          .map((entry) => entry.code)
-          .join(", ");
+      const debugTrace =
+        typeof riskVerdict === "object" && Array.isArray(riskVerdict.trace)
+          ? riskVerdict.trace
+          : Array.isArray(riskCtx.debugTrace)
+          ? riskCtx.debugTrace
+          : null;
+      if (debugTrace?.length) {
+        const reasonSummary = debugTrace.map((entry) => entry.code).join(", ");
         console.log(`[RISK] ${symbol} blocked: ${reasonSummary}`);
       }
       try {
+        const rejectionCtx =
+          debugTrace?.length && riskCtx
+            ? { ...riskCtx, debugTrace: [...debugTrace] }
+            : riskCtx;
         await logSignalRejected(
           `${symbol}-${Date.now()}`,
           reason,
-          riskCtx,
+          rejectionCtx,
           preliminary
         );
       } catch (e) {
