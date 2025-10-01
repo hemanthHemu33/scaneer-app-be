@@ -1,11 +1,4 @@
-import {
-  calculateEMA,
-  calculateRSI,
-  calculateSupertrend,
-  calculateVWAP,
-  getATR,
-  computeFeatures,
-} from './featureEngine.js';
+import { calculateEMA, getATR, computeFeatures } from './featureEngine.js';
 import { detectAllPatterns } from './util.js';
 import { detectGapUpOrDown } from './strategies.js';
 import { RISK_REWARD_RATIO, calculatePositionSize } from './positionSizing.js';
@@ -28,7 +21,9 @@ export function strategySupertrend(context = {}) {
   if (supertrend?.signal === 'Buy' && rsi > 55) {
     const entry = last.close;
     const stopLoss = last.low;
-    const risk = entry - stopLoss;
+    const risk = Math.abs(entry - stopLoss);
+    if (!Number.isFinite(risk) || risk <= 0) return null;
+    const rr = Math.max(RISK_REWARD_RATIO, 2);
     const qty = calculatePositionSize({
       capital: accountBalance,
       risk: accountBalance * riskPerTradePercentage,
@@ -43,8 +38,8 @@ export function strategySupertrend(context = {}) {
       direction: 'Long',
       entry,
       stopLoss,
-      target1: entry + risk * 0.75,
-      target2: entry + risk * 1.5,
+      target1: entry + risk * (rr * 0.5),
+      target2: entry + risk * rr,
       qty,
       atr,
       spread,
@@ -52,13 +47,16 @@ export function strategySupertrend(context = {}) {
       confidence: 0.6,
       generatedAt: new Date().toISOString(),
       source: 'strategySupertrend',
+      strategyCategory: 'trend-following',
     };
   }
 
   if (supertrend?.signal === 'Sell' && rsi < 45) {
     const entry = last.close;
     const stopLoss = last.high;
-    const risk = stopLoss - entry;
+    const risk = Math.abs(stopLoss - entry);
+    if (!Number.isFinite(risk) || risk <= 0) return null;
+    const rr = Math.max(RISK_REWARD_RATIO, 2);
     const qty = calculatePositionSize({
       capital: accountBalance,
       risk: accountBalance * riskPerTradePercentage,
@@ -73,8 +71,8 @@ export function strategySupertrend(context = {}) {
       direction: 'Short',
       entry,
       stopLoss,
-      target1: entry - risk * 0.75,
-      target2: entry - risk * 1.5,
+      target1: entry - risk * (rr * 0.5),
+      target2: entry - risk * rr,
       qty,
       atr,
       spread,
@@ -82,6 +80,7 @@ export function strategySupertrend(context = {}) {
       confidence: 0.6,
       generatedAt: new Date().toISOString(),
       source: 'strategySupertrend',
+      strategyCategory: 'trend-following',
     };
   }
 
@@ -105,17 +104,19 @@ export function strategyEMAReversal(context = {}) {
   const ema50 = calculateEMA(closes, 50);
   const last = candles[candles.length - 1];
   const prev = candles[candles.length - 2];
+  const atr = features?.atr ?? getATR(candles, 14);
 
   if (prev.close < ema20 && last.close > ema20 && ema20 > ema50) {
     const entry = last.close;
     const stopLoss = prev.low;
-    const risk = entry - stopLoss;
+    const risk = Math.abs(entry - stopLoss);
+    if (!Number.isFinite(risk) || risk <= 0) return null;
     const qty = calculatePositionSize({
       capital: accountBalance,
       risk: accountBalance * riskPerTradePercentage,
       slPoints: risk,
       price: entry,
-      volatility: risk,
+      volatility: atr,
     });
     return {
       stock: symbol,
@@ -124,28 +125,30 @@ export function strategyEMAReversal(context = {}) {
       direction: 'Long',
       entry,
       stopLoss,
-      target1: entry + risk * 0.5,
-      target2: entry + risk * 1,
+      target1: entry + risk * (RISK_REWARD_RATIO * 0.5),
+      target2: entry + risk * RISK_REWARD_RATIO,
       qty,
-      atr: risk,
+      atr,
       spread,
       liquidity,
       confidence: 0.55,
       generatedAt: new Date().toISOString(),
       source: 'strategyEMAReversal',
+      strategyCategory: 'mean-reversion',
     };
   }
 
   if (prev.close > ema20 && last.close < ema20 && ema20 < ema50) {
     const entry = last.close;
     const stopLoss = prev.high;
-    const risk = stopLoss - entry;
+    const risk = Math.abs(stopLoss - entry);
+    if (!Number.isFinite(risk) || risk <= 0) return null;
     const qty = calculatePositionSize({
       capital: accountBalance,
       risk: accountBalance * riskPerTradePercentage,
       slPoints: risk,
       price: entry,
-      volatility: risk,
+      volatility: atr,
     });
     return {
       stock: symbol,
@@ -154,15 +157,16 @@ export function strategyEMAReversal(context = {}) {
       direction: 'Short',
       entry,
       stopLoss,
-      target1: entry - risk * 0.5,
-      target2: entry - risk * 1,
+      target1: entry - risk * (RISK_REWARD_RATIO * 0.5),
+      target2: entry - risk * RISK_REWARD_RATIO,
       qty,
-      atr: risk,
+      atr,
       spread,
       liquidity,
       confidence: 0.55,
       generatedAt: new Date().toISOString(),
       source: 'strategyEMAReversal',
+      strategyCategory: 'mean-reversion',
     };
   }
 
@@ -190,7 +194,8 @@ export function strategyTripleTop(context = {}) {
 
   const entry = tripleTop.breakout;
   const stopLoss = tripleTop.stopLoss;
-  const risk = stopLoss - entry;
+  const risk = Math.abs(stopLoss - entry);
+  if (!Number.isFinite(risk) || risk <= 0) return null;
   const qty = calculatePositionSize({
     capital: accountBalance,
     risk: accountBalance * riskPerTradePercentage,
@@ -205,8 +210,8 @@ export function strategyTripleTop(context = {}) {
     direction: 'Short',
     entry,
     stopLoss,
-    target1: entry - risk * 0.5,
-    target2: entry - risk,
+    target1: entry - risk * (RISK_REWARD_RATIO * 0.5),
+    target2: entry - risk * RISK_REWARD_RATIO,
     qty,
     atr,
     spread,
@@ -214,6 +219,7 @@ export function strategyTripleTop(context = {}) {
     confidence: 0.6,
     generatedAt: new Date().toISOString(),
     source: 'strategyTripleTop',
+    strategyCategory: 'breakout',
   };
 }
 
@@ -237,6 +243,7 @@ export function strategyVWAPReversal(context = {}) {
   const entry = pattern.breakout;
   const stopLoss = pattern.stopLoss;
   const risk = Math.abs(entry - stopLoss);
+  if (!Number.isFinite(risk) || risk <= 0) return null;
   const direction = pattern.direction;
   const qty = calculatePositionSize({
     capital: accountBalance,
@@ -253,10 +260,12 @@ export function strategyVWAPReversal(context = {}) {
     direction,
     entry,
     stopLoss,
-    target1:
-      direction === 'Long' ? entry + risk * 0.5 : entry - risk * 0.5,
-    target2:
-      direction === 'Long' ? entry + risk : entry - risk,
+    target1: direction === 'Long'
+      ? entry + risk * (RISK_REWARD_RATIO * 0.5)
+      : entry - risk * (RISK_REWARD_RATIO * 0.5),
+    target2: direction === 'Long'
+      ? entry + risk * RISK_REWARD_RATIO
+      : entry - risk * RISK_REWARD_RATIO,
     qty,
     atr,
     spread,
@@ -264,6 +273,7 @@ export function strategyVWAPReversal(context = {}) {
     confidence: 0.55,
     generatedAt: new Date().toISOString(),
     source: 'strategyVWAPReversal',
+    strategyCategory: 'mean-reversion',
   };
 }
 
@@ -299,6 +309,7 @@ export function patternBasedStrategy(context = {}) {
   const stopLoss = best.stopLoss;
   const direction = best.direction;
   const risk = Math.abs(entry - stopLoss);
+  if (!Number.isFinite(risk) || risk <= 0) return null;
   const qty = calculatePositionSize({
     capital: accountBalance,
     risk: accountBalance * riskPerTradePercentage,
@@ -306,8 +317,9 @@ export function patternBasedStrategy(context = {}) {
     price: entry,
     volatility: atr,
   });
-  const target1 = entry + (direction === 'Long' ? 1 : -1) * risk * 1.5;
-  const target2 = entry + (direction === 'Long' ? 1 : -1) * risk * 2;
+  const dir = direction === 'Long' ? 1 : -1;
+  const target1 = entry + dir * risk * (RISK_REWARD_RATIO * 0.5);
+  const target2 = entry + dir * risk * RISK_REWARD_RATIO;
 
   return {
     stock: symbol,
@@ -325,6 +337,7 @@ export function patternBasedStrategy(context = {}) {
     confidence: best.confidence,
     generatedAt: new Date().toISOString(),
     source: 'patternBasedStrategy',
+    strategyCategory: /breakout|flag|triangle|channel|bos/i.test(best.type) ? 'breakout' : 'mean-reversion',
   };
 }
 
@@ -341,16 +354,18 @@ export function strategyGapUpDown(context = {}) {
 
   const pattern = detectGapUpOrDown({ dailyHistory, sessionCandles });
   if (!pattern) return null;
+  const atr = getATR(sessionCandles, 14) ?? getATR(dailyHistory, 14) ?? 0;
 
   const entry = pattern.breakout;
   const stopLoss = pattern.stopLoss;
   const risk = Math.abs(entry - stopLoss);
+  if (!Number.isFinite(risk) || risk <= 0) return null;
   const qty = calculatePositionSize({
     capital: accountBalance,
     risk: accountBalance * riskPerTradePercentage,
     slPoints: risk,
     price: entry,
-    volatility: risk,
+    volatility: atr,
   });
   const target1 =
     entry + (pattern.direction === 'Long' ? 1 : -1) * risk * RISK_REWARD_RATIO * 0.5;
@@ -367,13 +382,14 @@ export function strategyGapUpDown(context = {}) {
     target1,
     target2,
     qty,
-    atr: risk,
+    atr,
     spread,
     liquidity,
     confidence: 0.7,
     generatedAt: new Date().toISOString(),
     source: 'strategyGapUpDown',
     gapPercent: pattern.gapPercent,
+    strategyCategory: 'news-event',
   };
 }
 
