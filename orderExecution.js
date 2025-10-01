@@ -1,4 +1,4 @@
-// orderExecutor.js
+// orderExecution.js
 import dotenv from "dotenv";
 const logError = (ctx, err) => console.error(`[${ctx}]`, err?.message || err);
 import {
@@ -11,6 +11,7 @@ import {
 import { getAccountMargin } from "./account.js";
 import { calculateDynamicStopLoss } from "./dynamicRiskModel.js";
 import db from "./db.js";
+import { recordEntry, recordExit } from "./portfolioContext.js";
 
 // Store order id -> metadata mapping for traceability
 export const orderMetadata = new Map();
@@ -92,6 +93,14 @@ async function placeBracketGTTOrder(orderParams, meta) {
     if (response?.order_id) orderMetadata.set(response.order_id, meta);
     if (response?.trigger_id) orderMetadata.set(response.trigger_id, meta);
   }
+  const tradeId = response?.trigger_id || response?.order_id;
+  if (tradeId)
+    await addOpenTrade(tradeId, {
+      signal: meta?.signal || {},
+      status: "GTT_OPEN",
+      slId: "GTT-" + sl,
+      targetId: "GTT-" + target,
+    });
   return response;
 }
 
@@ -120,7 +129,7 @@ export async function sendOrder(variety = "regular", order, opts = {}) {
         if (response) return response;
       }
 
-      const response = await kc.placeOrder({ variety, ...orderParams });
+      const response = await kc.placeOrder(variety, orderParams);
       console.log("✅ Order placed:", response);
       if (meta) {
         if (response?.order_id) orderMetadata.set(response.order_id, meta);
@@ -139,10 +148,10 @@ export async function sendOrder(variety = "regular", order, opts = {}) {
 }
 
 // Modify an existing order
-export async function modifyOrder(orderId, order) {
+export async function modifyOrder(variety, orderId, order) {
   try {
     await initSession();
-    const response = await kc.modifyOrder(orderId, order);
+    const response = await kc.modifyOrder(variety, orderId, order);
     console.log("✏️ Order modified:", response);
     return response;
   } catch (err) {
@@ -204,7 +213,7 @@ export async function getHoldings() {
 export async function getMarginForStock(order) {
   try {
     await initSession();
-    const response = await kc.orderMargins(order);
+    const response = await kc.orderMargins([order]);
 
     const token = await getTokenForSymbol(order.tradingsymbol);
     const hist = await getHistoricalData(token);
@@ -213,8 +222,8 @@ export async function getMarginForStock(order) {
         ? hist.slice(-20).reduce((a, b) => a + (b.high - b.low), 0) /
           Math.min(hist.length, 20)
         : 0;
-
-    return { ...response, avgRange };
+    const info = Array.isArray(response) ? response[0] : response;
+    return info ? { ...info, avgRange } : { avgRange };
   } catch (err) {
     logError("Error fetching margin for stock", err);
     return null;
@@ -234,7 +243,7 @@ export async function canPlaceTrade(signal, sampleQty = 10) {
   };
   const margin = await getMarginForStock(order);
   const info = Array.isArray(margin) ? margin[0] : margin;
-  const required = info?.required ?? info?.total ?? 0;
+  const required = Number(info?.total ?? info?.required ?? 0);
   const perUnit = sampleQty > 0 ? required / sampleQty : 0;
   if (!perUnit || available < perUnit) {
     return { canPlace: false, quantity: 0, required: perUnit, available };
@@ -320,23 +329,34 @@ export async function cancelStaleOrders(maxAgeMs = 60000) {
  * @returns {Promise<Object|null>} order ids on success
  */
 export async function placeOrder(signal, maxRetries = 3) {
-  const symbol = signal.stock || signal.symbol;
-  const qty = signal.qty || 1;
-  const exitType = signal.direction === "Long" ? "SELL" : "BUY";
+  const normalizedSignal = { ...signal };
+  const derivedSide =
+    normalizedSignal.side ??
+    (normalizedSignal.direction === "Long" ? "buy" : "sell");
+  normalizedSignal.side = derivedSide;
+  const symbol = normalizedSignal.stock || normalizedSignal.symbol;
+  const qty = normalizedSignal.qty || 1;
+  const side = normalizedSignal.side;
+  const exitSide = side === "buy" ? "sell" : "buy";
+  const entryTransactionType = side.toUpperCase();
+  const exitTransactionType = exitSide.toUpperCase();
 
   const meta = {
-    strategy: signal.pattern || signal.strategy,
-    signalId: signal.signalId || signal.algoSignal?.signalId,
-    confidence: signal.confidence ?? signal.confidenceScore,
+    strategy: normalizedSignal.pattern || normalizedSignal.strategy,
+    signalId:
+      normalizedSignal.signalId || normalizedSignal.algoSignal?.signalId,
+    confidence:
+      normalizedSignal.confidence ?? normalizedSignal.confidenceScore,
+    signal: normalizedSignal,
   };
 
   const entryParams = {
     exchange: "NSE",
     tradingsymbol: symbol,
-    transaction_type: signal.direction === "Long" ? "BUY" : "SELL",
+    transaction_type: entryTransactionType,
     quantity: qty,
     order_type: "LIMIT",
-    price: signal.entry,
+    price: normalizedSignal.entry,
     product: "MIS",
     meta,
   };
@@ -344,7 +364,11 @@ export async function placeOrder(signal, maxRetries = 3) {
   const marginInfo = await getAccountMargin();
   const available = marginInfo?.equity?.available?.cash ?? 0;
   const req = await getMarginForStock(entryParams);
-  const required = Array.isArray(req) ? req[0]?.total : req?.total;
+  const required = Number(
+    Array.isArray(req)
+      ? req[0]?.total ?? req[0]?.required
+      : req?.total ?? req?.required
+  );
   if (required && required > available) {
     console.log(
       `[MARGIN] Insufficient funds for ${symbol}: required ${required}, available ${available}`
@@ -354,6 +378,7 @@ export async function placeOrder(signal, maxRetries = 3) {
 
   let attempt = 0;
   let entry;
+  let lastStatus = null;
   while (attempt < maxRetries) {
     entry = await sendOrder("regular", entryParams);
     if (!entry) {
@@ -361,32 +386,51 @@ export async function placeOrder(signal, maxRetries = 3) {
       continue;
     }
     const status = await monitorOrder(entry.order_id, 20000);
+    lastStatus = status;
     if (status === "FILLED") break;
     attempt++;
   }
   if (!entry) return null;
+  if (lastStatus === "FILLED") {
+    const orders = await kc.getOrders().catch(() => []);
+    const entryOrd = orders?.find((o) => o.order_id === entry.order_id);
+    const avgFill = Number(
+      entryOrd?.average_price ?? normalizedSignal.entry
+    );
+    const fillQty = Number(
+      entryOrd?.filled_quantity ?? normalizedSignal.qty ?? 1
+    );
+    await recordEntry({
+      symbol,
+      side,
+      qty: fillQty,
+      entryPrice: avgFill,
+      sector: normalizedSignal.sector || "GEN",
+      strategy: meta.strategy,
+    }).catch((err) => logError("recordEntry", err));
+  }
 
   trackOrder(entry.order_id, { type: "ENTRY", symbol });
 
   const stopLoss =
-    signal.stopLoss ??
+    normalizedSignal.stopLoss ??
     calculateDynamicStopLoss({
-      atr: signal.atr,
-      entry: signal.entry,
-      direction: signal.direction,
+      atr: normalizedSignal.atr,
+      entry: normalizedSignal.entry,
+      direction: normalizedSignal.direction,
     });
-  const risk = Math.abs(signal.entry - stopLoss);
+  const risk = Math.abs(normalizedSignal.entry - stopLoss);
   const target =
-    signal.target2 ||
-    signal.target ||
-    (signal.direction === "Long"
-      ? signal.entry + risk * 2
-      : signal.entry - risk * 2);
+    normalizedSignal.target2 ||
+    normalizedSignal.target ||
+    (normalizedSignal.direction === "Long"
+      ? normalizedSignal.entry + risk * 2
+      : normalizedSignal.entry - risk * 2);
 
   const slParams = {
     exchange: "NSE",
     tradingsymbol: symbol,
-    transaction_type: exitType,
+    transaction_type: exitTransactionType,
     quantity: qty,
     order_type: "SL",
     price: stopLoss,
@@ -397,7 +441,7 @@ export async function placeOrder(signal, maxRetries = 3) {
   const tgtParams = {
     exchange: "NSE",
     tradingsymbol: symbol,
-    transaction_type: exitType,
+    transaction_type: exitTransactionType,
     quantity: qty,
     order_type: "LIMIT",
     price: target,
@@ -430,19 +474,36 @@ async function updateOpenTrades(update) {
     ],
   });
   if (!trade) return;
+  const exitPrice = Number(update.average_price ?? update.price ?? 0) || undefined;
+
   if (trade._id === update.order_id) {
     trade.status = update.status;
     if (update.status === "COMPLETE") {
       await removeOpenTrade(trade._id);
+      // safety: entry already recorded above
     } else {
       await addOpenTrade(trade._id, trade);
     }
   } else if (trade.slId === update.order_id) {
     trade.status = "SL_FILLED";
     await removeOpenTrade(trade._id);
+    if (exitPrice)
+      await recordExit(trade.signal?.stock || trade.signal?.symbol, {
+        exitPrice,
+        qty:
+          trade.signal?.qty != null ? Number(trade.signal?.qty) : undefined,
+        reason: "stop-loss",
+      }).catch((e) => logError("recordExit", e));
   } else if (trade.targetId === update.order_id) {
     trade.status = "TARGET_FILLED";
     await removeOpenTrade(trade._id);
+    if (exitPrice)
+      await recordExit(trade.signal?.stock || trade.signal?.symbol, {
+        exitPrice,
+        qty:
+          trade.signal?.qty != null ? Number(trade.signal?.qty) : undefined,
+        reason: "target",
+      }).catch((e) => logError("recordExit", e));
   }
 }
 onOrderUpdate((u) => updateOpenTrades(u).catch((e) => logError("updateOpenTrades", e)));
@@ -476,7 +537,20 @@ export async function sendToExecution(signal, opts = {}) {
     if (retryOnFail) await queueFailedSignal(signal, opts);
     return null;
   }
-  const sizedSignal = { ...signal, qty: marginCheck.quantity };
+  const side = signal.direction === "Long" ? "buy" : "sell";
+  const requestedQty = Number(signal.qty ?? 1);
+  const sizedSignal = {
+    ...signal,
+    side,
+    qty: Math.max(0, Math.min(requestedQty, marginCheck.quantity)),
+  };
+  if (sizedSignal.qty === 0) {
+    console.log(
+      `[MARGIN] Requested qty ${requestedQty} exceeds available. Max=${marginCheck.quantity}`
+    );
+    if (retryOnFail) await queueFailedSignal(signal, opts);
+    return null;
+  }
   const orders = await placeOrder(sizedSignal);
   if (orders) {
     await addOpenTrade(orders.entryId, {
