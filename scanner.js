@@ -302,6 +302,11 @@ export async function analyzeCandles(
     });
 
     const riskCtx = {
+      // Provide win-rate so RR validator can adjust for scalping/fade setups
+      winrate:
+        marketContext?.strategyWinrates?.[displayStrategy] ??
+        marketContext?.winrate ??
+        0,
       avgAtr: atrValue,
       indexTrend: isUptrend ? "up" : isDowntrend ? "down" : "sideways",
       indexVolatility: safeVix,
@@ -348,16 +353,9 @@ export async function analyzeCandles(
       typeof riskVerdict === "object" ? !!riskVerdict.ok : !!riskVerdict;
     if (!riskOk) {
       const reason =
-<<<<<<< HEAD
         typeof riskVerdict === "object"
           ? riskVerdict.reason
           : "riskValidationFail";
-      if (Array.isArray(riskCtx.debugTrace) && riskCtx.debugTrace.length) {
-        const reasonSummary = riskCtx.debugTrace
-          .map((entry) => entry.code)
-          .join(", ");
-=======
-        typeof riskVerdict === "object" ? riskVerdict.reason : "riskValidationFail";
       const debugTrace =
         typeof riskVerdict === "object" && Array.isArray(riskVerdict.trace)
           ? riskVerdict.trace
@@ -366,7 +364,6 @@ export async function analyzeCandles(
           : null;
       if (debugTrace?.length) {
         const reasonSummary = debugTrace.map((entry) => entry.code).join(", ");
->>>>>>> 97b1e380f1136409266f356b009508d0a29baf92
         console.log(`[RISK] ${symbol} blocked: ${reasonSummary}`);
       }
       try {

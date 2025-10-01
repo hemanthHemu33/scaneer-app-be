@@ -104,45 +104,62 @@ export function calculateWMA(prices, length) {
   return num / denom;
 }
 
+function wmaAt(prices, length, endIndex) {
+  const start = endIndex - length + 1;
+  if (start < 0) return null;
+  const slice = prices.slice(start, endIndex + 1);
+  const weights = slice.map((_, i) => i + 1);
+  const denom = weights.reduce((a, b) => a + b, 0);
+  const num = slice.reduce((s, p, i) => s + p * weights[i], 0);
+  return num / denom;
+}
+
 export function calculateHMA(prices, length) {
   if (!prices || prices.length < length) return null;
-  const wmaHalf = calculateWMA(prices, Math.round(length / 2));
-  const wmaFull = calculateWMA(prices, length);
-  const diff = 2 * wmaHalf - wmaFull;
-  const temp = prices.slice();
-  temp[temp.length - 1] = diff;
-  return calculateWMA(temp, Math.round(Math.sqrt(length)));
+  const n2 = Math.max(1, Math.round(length / 2));
+  const ns = Math.max(1, Math.round(Math.sqrt(length)));
+  const raw = [];
+  for (let i = length - 1; i < prices.length; i++) {
+    const wHalf = wmaAt(prices, n2, i);
+    const wFull = wmaAt(prices, length, i);
+    if (wHalf == null || wFull == null) continue;
+    raw.push(2 * wHalf - wFull);
+  }
+  if (raw.length < ns) return null;
+  const end = raw.length - 1;
+  const weights = Array.from({ length: ns }, (_, i) => i + 1);
+  const denom = weights.reduce((a, b) => a + b, 0);
+  const num = raw.slice(end - ns + 1).reduce((s, v, i) => s + v * weights[i], 0);
+  return num / denom;
 }
 
 export function calculateDEMA(prices, length) {
   if (!prices || prices.length < length) return null;
-  const ema = calculateEMA(prices, length);
-  const emaOfEma = calculateEMA(prices.map((_p, i) => calculateEMA(prices.slice(0, i + 1), length)), length);
-  return 2 * ema - emaOfEma;
+  const ema1Series = emaSeries(prices, length);
+  const ema1 = ema1Series.at(-1);
+  const ema2 = emaSeries(ema1Series, length).at(-1);
+  return 2 * ema1 - ema2;
 }
 
 export function calculateTEMA(prices, length) {
   if (!prices || prices.length < length) return null;
-  const ema1 = calculateEMA(prices, length);
-  const ema2 = calculateEMA(prices.map((_p, i) => calculateEMA(prices.slice(0, i + 1), length)), length);
-  const ema3 = calculateEMA(
-    prices.map((_p, i) => calculateEMA(prices.slice(0, i + 1).map((_q, j) => calculateEMA(prices.slice(0, j + 1), length)), length)),
-    length
-  );
-  return 3 * (ema1 - ema2) + ema3;
+  const ema1S = emaSeries(prices, length);
+  const e1 = ema1S.at(-1);
+  const ema2S = emaSeries(ema1S, length);
+  const e2 = ema2S.at(-1);
+  const e3 = emaSeries(ema2S, length).at(-1);
+  return 3 * e1 - 3 * e2 + e3;
 }
 
 export function calculateMACD(prices, shortLength = 12, longLength = 26, signalLength = 9) {
   if (!prices || prices.length < longLength) return null;
-  const emaShort = calculateEMA(prices, shortLength);
-  const emaLong = calculateEMA(prices, longLength);
-  const macdLine = emaShort - emaLong;
-  const signal = calculateEMA(prices.slice(-signalLength).map((_p, i) => {
-    const subset = prices.slice(-(signalLength - i));
-    return calculateEMA(subset, shortLength) - calculateEMA(subset, longLength);
-  }), signalLength);
-  const histogram = macdLine - signal;
-  return { macd: macdLine, signal, histogram };
+  const shortS = emaSeries(prices, shortLength);
+  const longS = emaSeries(prices, longLength);
+  const macdSeries = shortS.map((v, i) => v - longS[i]);
+  const macd = macdSeries.at(-1);
+  const signal = emaSeries(macdSeries, signalLength).at(-1);
+  const histogram = macd - signal;
+  return { macd, signal, histogram };
 }
 
 export function calculateADX(candles, period = 14) {
@@ -164,9 +181,10 @@ export function calculateADX(candles, period = 14) {
     plusSum += up > down && up > 0 ? up : 0;
     minusSum += down > up && down > 0 ? down : 0;
   }
-  const plusDI = (plusSum / trSum) * 100;
-  const minusDI = (minusSum / trSum) * 100;
-  const dx = Math.abs(plusDI - minusDI) / (plusDI + minusDI) * 100;
+  const plusDI = trSum ? (plusSum / trSum) * 100 : 0;
+  const minusDI = trSum ? (minusSum / trSum) * 100 : 0;
+  const denom = plusDI + minusDI;
+  const dx = denom ? (Math.abs(plusDI - minusDI) / denom) * 100 : 0;
   return { adx: dx, plusDI, minusDI };
 }
 
@@ -249,14 +267,17 @@ export function calculateStochastic(candles, kPeriod = 14, dPeriod = 3) {
   const lows = candles.map((c) => c.low);
   const hh = Math.max(...highs.slice(-kPeriod));
   const ll = Math.min(...lows.slice(-kPeriod));
-  const k = ((closes.at(-1) - ll) / (hh - ll)) * 100;
+  const k = ((closes.at(-1) - ll) / (hh - ll || 1)) * 100;
   const kVals = [];
-  for (let i = candles.length - kPeriod; i < candles.length; i++) {
-    const h = Math.max(...highs.slice(i - kPeriod + 1, i + 1));
-    const l = Math.min(...lows.slice(i - kPeriod + 1, i + 1));
-    kVals.push(((closes[i] - l) / (h - l)) * 100);
+  const start = Math.max(0, candles.length - kPeriod - (dPeriod - 1));
+  for (let i = start; i <= candles.length - kPeriod; i++) {
+    const wHigh = Math.max(...highs.slice(i, i + kPeriod));
+    const wLow = Math.min(...lows.slice(i, i + kPeriod));
+    const c = closes[i + kPeriod - 1];
+    kVals.push(((c - wLow) / (wHigh - wLow || 1)) * 100);
   }
-  const d = kVals.slice(-dPeriod).reduce((a, b) => a + b, 0) / dPeriod;
+  const dSlice = kVals.slice(-dPeriod);
+  const d = dSlice.length ? dSlice.reduce((a, b) => a + b, 0) / dSlice.length : k;
   return { k, d };
 }
 
@@ -898,13 +919,13 @@ export function calculateWeightedClose(candle) {
 
 export function calculateTTMSqueeze(
   candles,
-  bbLength = 20,
-  kcLength = 20,
-  mult = 1.5
+  bbLength = 20,      // Bollinger length (std practice: mult=2)
+  kcLength = 20,      // Keltner EMA & ATR length
+  kcMult = 1.5        // Keltner multiplier (std practice: 1.5)
 ) {
   const closes = candles.map((c) => c.close);
-  const bb = calculateBollingerBands(closes, bbLength, mult);
-  const kc = calculateKeltnerChannels(candles, kcLength, mult, 1);
+  const bb = calculateBollingerBands(closes, bbLength, 2);
+  const kc = calculateKeltnerChannels(candles, kcLength, kcLength, kcMult);
   if (!bb || !kc) return null;
   const squeezeOn = bb.upper <= kc.upper && bb.lower >= kc.lower;
   return { squeezeOn, width: bb.upper - bb.lower };
@@ -934,7 +955,8 @@ export function calculateElderImpulse(candles) {
 export function calculateDonchianWidth(candles, length = 20) {
   const dc = calculateDonchianChannels(candles, length);
   if (!dc) return null;
-  return (dc.upper - dc.lower) / (dc.middle || 1);
+  const ref = candles.at(-1)?.close ?? dc.middle ?? 1;
+  return (dc.upper - dc.lower) / (ref || 1);
 }
 
 export function calculateIchimokuBaseLine(candles) {
@@ -1020,7 +1042,8 @@ export function calculateTrendIntensityIndex(prices, length = 20) {
 export function calculateBollingerPB(prices, length = 20, mult = 2) {
   const bb = calculateBollingerBands(prices, length, mult);
   if (!bb) return null;
-  return (prices.at(-1) - bb.lower) / (bb.upper - bb.lower);
+  const denom = bb.upper - bb.lower || Number.EPSILON;
+  return (prices.at(-1) - bb.lower) / denom;
 }
 
 export function calculateMACDHistogram(prices, shortL = 12, longL = 26, signalL = 9) {
