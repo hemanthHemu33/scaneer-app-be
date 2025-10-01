@@ -535,7 +535,7 @@ export function isSignalValid(signal, ctx = {}) {
     winrate: ctx.winrate || 0,
   });
   if (!rr.valid)
-    return recordRejection("rrBelowMinimum", {
+    return recordRejection(rr.reason || "rrBelowMinimum", {
       rr: rr.rr,
       min: rr.minRR,
     });
