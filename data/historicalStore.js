@@ -4,7 +4,7 @@ import { logError } from "../logger.js";
 
 const defaults = {
   maxBarsDaily: 300,
-  maxBarsIntraday: 120,
+  maxBarsIntraday: 300,
   dailyStaleMs: 6 * 60 * 60 * 1000,
   intradayStaleMs: 5 * 60 * 1000,
   enableChangeStream: false,
@@ -63,13 +63,18 @@ function initHistoricalStore(options = {}) {
   function dedupeAndSort(arr) {
     const map = new Map();
     for (const c of arr || []) {
-      const t = +new Date(c.date || c.timestamp);
+      const t = +new Date(c.date ?? c.timestamp);
       if (!Number.isFinite(t)) continue;
-      if (!map.has(t)) map.set(t, { ...c, date: new Date(t).toISOString() });
+      if (!map.has(t)) {
+        const d = new Date(t);
+        map.set(t, {
+          ...c,
+          date: d,
+          timestamp: d,
+        });
+      }
     }
-    return [...map.values()].sort(
-      (a, b) => +new Date(a.date) - +new Date(b.date)
-    );
+    return [...map.values()].sort((a, b) => +a.date - +b.date);
   }
 
   async function detectDailyModel() {
@@ -92,11 +97,11 @@ function initHistoricalStore(options = {}) {
     let arr = candles || [];
     if (from) {
       const f = +new Date(from);
-      arr = arr.filter((c) => +new Date(c.date || c.timestamp) >= f);
+      arr = arr.filter((c) => +new Date(c.date ?? c.timestamp) >= f);
     }
     if (to) {
       const t = +new Date(to);
-      arr = arr.filter((c) => +new Date(c.date || c.timestamp) <= t);
+      arr = arr.filter((c) => +new Date(c.date ?? c.timestamp) <= t);
     }
     if (limit) arr = arr.slice(-limit);
     return arr;
@@ -160,7 +165,20 @@ function initHistoricalStore(options = {}) {
     const k = key(token);
     return withLock(dailyLocks, k, async () => {
       const entry = dailyCache.get(k) || { candles: [], lastLoadedAt: 0 };
-      const merged = dedupeAndSort([...entry.candles, ...candles]);
+      const normalized = candles
+        .map((c) => {
+          const raw = c.date ?? c.timestamp;
+          const date = c.date instanceof Date ? c.date : new Date(raw);
+          const timestamp =
+            c.timestamp instanceof Date ? c.timestamp : new Date(raw);
+          return {
+            ...c,
+            date,
+            timestamp,
+          };
+        })
+        .filter((c) => Number.isFinite(+c.date));
+      const merged = dedupeAndSort([...entry.candles, ...normalized]);
       const bounded = merged.slice(-cfg.maxBarsDaily);
       const start = Date.now();
       try {
@@ -169,14 +187,18 @@ function initHistoricalStore(options = {}) {
         if (model === "single") {
           await col.updateOne(
             {},
-            { $push: { [k]: { $each: candles, $slice: -cfg.maxBarsDaily } } },
+            {
+              $push: { [k]: { $each: normalized, $slice: -cfg.maxBarsDaily } },
+            },
             { upsert: true }
           );
         } else {
           await col.updateOne(
             { token: Number(k) },
             {
-              $push: { candles: { $each: candles, $slice: -cfg.maxBarsDaily } },
+              $push: {
+                candles: { $each: normalized, $slice: -cfg.maxBarsDaily },
+              },
             },
             { upsert: true }
           );
@@ -196,18 +218,16 @@ function initHistoricalStore(options = {}) {
     const max = cfg.maxBarsIntraday;
     const start = Date.now();
     try {
-      const doc = await db
-        .collection("historical_session_data")
-        .findOne(
-          { token: Number(k) },
-          {
-            projection: {
-              candles: { $slice: -max },
-              data: { $slice: -max },
-              _id: 0,
-            },
-          }
-        );
+      const doc = await db.collection("historical_session_data").findOne(
+        { token: Number(k) },
+        {
+          projection: {
+            candles: { $slice: -max },
+            data: { $slice: -max },
+            _id: 0,
+          },
+        }
+      );
       const arr = doc?.candles || doc?.data || [];
       const candles = dedupeAndSort(arr).slice(-max);
       intradayCache.set(k, { candles, lastLoadedAt: Date.now() });
@@ -239,7 +259,20 @@ function initHistoricalStore(options = {}) {
     const k = key(token);
     return withLock(intradayLocks, k, async () => {
       const entry = intradayCache.get(k) || { candles: [], lastLoadedAt: 0 };
-      const merged = dedupeAndSort([...entry.candles, ...candles]);
+      const normalized = candles
+        .map((c) => {
+          const raw = c.date ?? c.timestamp;
+          const date = c.date instanceof Date ? c.date : new Date(raw);
+          const timestamp =
+            c.timestamp instanceof Date ? c.timestamp : new Date(raw);
+          return {
+            ...c,
+            date,
+            timestamp,
+          };
+        })
+        .filter((c) => Number.isFinite(+c.date));
+      const merged = dedupeAndSort([...entry.candles, ...normalized]);
       const bounded = merged.slice(-cfg.maxBarsIntraday);
       const start = Date.now();
       try {
@@ -249,7 +282,7 @@ function initHistoricalStore(options = {}) {
             { token: Number(k) },
             {
               $push: {
-                candles: { $each: candles, $slice: -cfg.maxBarsIntraday },
+                candles: { $each: normalized, $slice: -cfg.maxBarsIntraday },
               },
             },
             { upsert: true }
