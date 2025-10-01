@@ -25,13 +25,19 @@ function getMinuteStart(timestamp) {
 }
 
 function formatMinuteIST(minuteMs) {
-  const d = new Date(minuteMs);
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  const hours = String(d.getHours()).padStart(2, "0");
-  const minutes = String(d.getMinutes()).padStart(2, "0");
-  return `${year}-${month}-${day}T${hours}:${minutes}:00`;
+  return (
+    new Date(minuteMs)
+      .toLocaleString("en-CA", {
+        timeZone: "Asia/Kolkata",
+        hour12: false,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+      })
+      .replace(", ", "T") + ":00"
+  );
 }
 
 function getSessionDate(minuteMs) {
@@ -77,7 +83,7 @@ function finalizeBucket(bucket) {
     close,
     volume,
     trades,
-    ticks: bucket.ticks.length,
+    tickCount: bucket.ticks.length,
     lastTick: bucket.ticks[bucket.ticks.length - 1],
     createdAt: new Date(),
   });
@@ -116,7 +122,8 @@ function finalizeReadyBuckets(nowMs = Date.now()) {
 export function ingestTick({ token, symbol, tick }) {
   const tokenStr = canonToken(token);
   if (!tokenStr || !symbol) return;
-  const minuteMs = getMinuteStart(tick.timestamp || Date.now());
+  const ts = tick.timestamp || tick.last_trade_time || Date.now();
+  const minuteMs = getMinuteStart(ts);
   const buckets = ensureTokenBuckets(tokenStr);
   if (!buckets.has(minuteMs)) {
     buckets.set(minuteMs, {
@@ -151,7 +158,7 @@ export async function persistAlignedCandleBatch() {
           close: doc.close,
           volume: doc.volume,
           trades: doc.trades,
-          ticks: doc.ticks,
+          tickCount: doc.tickCount,
           lastTick: doc.lastTick,
           updatedAt: new Date(),
         },
