@@ -135,7 +135,11 @@ export function isSignalValid(signal, ctx = {}) {
   const today = new Date().getDate();
   const week = getWeekNumber();
   const month = new Date().getMonth();
-  const debugTrace = Array.isArray(ctx.debugTrace) ? ctx.debugTrace : null;
+  const debugTrace = Array.isArray(ctx.debugTrace)
+    ? ctx.debugTrace
+    : riskDebug
+    ? []
+    : null;
   const symbol = signal.stock || signal.symbol || "UNKNOWN";
   const recordRejection = (code, details = {}) => {
     if (debugTrace) {
@@ -153,7 +157,9 @@ export function isSignalValid(signal, ctx = {}) {
         console.log(`[RISK][${symbol}] ${code}`);
       }
     }
-    return false;
+    return debugTrace
+      ? { ok: false, reason: code, trace: debugTrace }
+      : false;
   };
   if (riskState.lastResetDay !== today) resetRiskState();
   if (riskState.lastResetWeek !== week) {
@@ -339,7 +345,8 @@ export function isSignalValid(signal, ctx = {}) {
     !resolveSignalConflicts({
       symbol: signal.stock || signal.symbol,
       side: dir,
-      strategy: signal.algoSignal?.strategy || signal.pattern,
+      strategy:
+        signal.algoSignal?.strategy || signal.pattern || signal.strategy,
     })
   )
     return recordRejection("resolveConflictBlocked");
@@ -347,7 +354,9 @@ export function isSignalValid(signal, ctx = {}) {
   const inst = signal.stock || signal.symbol;
   if (ctx.blockWatchlist && riskState.watchList.has(inst))
     return recordRejection("watchlistBlocked");
-  const stratKey = `${inst}-${signal.algoSignal?.strategy || signal.pattern}`;
+  const stratKey = `${inst}-${
+    signal.algoSignal?.strategy || signal.pattern || signal.strategy
+  }`;
   if (
     ctx.strategyFailWindowMs &&
     riskState.strategyFailMap.has(stratKey) &&
@@ -506,15 +515,27 @@ export function isSignalValid(signal, ctx = {}) {
       expiresAt: signal.expiresAt,
     });
 
+  if (
+    ![signal.entry, signal.stopLoss].every(
+      (x) => typeof x === "number" && Number.isFinite(x)
+    )
+  ) {
+    return recordRejection("invalidPrices", {
+      entry: signal.entry,
+      stopLoss: signal.stopLoss,
+    });
+  }
+
   const rr = validateRR({
-    strategy: signal.algoSignal?.strategy || signal.pattern,
+    strategy:
+      signal.algoSignal?.strategy || signal.pattern || signal.strategy,
     entry: signal.entry,
     stopLoss: signal.stopLoss,
     target: signal.target2 ?? signal.target,
     winrate: ctx.winrate || 0,
   });
   if (!rr.valid)
-    return recordRejection("rrBelowMinimum", {
+    return recordRejection(rr.reason || "rrBelowMinimum", {
       rr: rr.rr,
       min: rr.minRR,
     });
@@ -672,6 +693,17 @@ export function isSignalValid(signal, ctx = {}) {
       maxSpread: ctx.maxSpread,
     });
 
+  if (
+    typeof ctx.minAtrPct === "number" &&
+    typeof ctx.atrPct === "number" &&
+    ctx.atrPct < ctx.minAtrPct
+  ) {
+    return recordRejection("minAtrPct", {
+      atrPct: ctx.atrPct,
+      minAtrPct: ctx.minAtrPct,
+    });
+  }
+
   if (typeof ctx.minATR === "number" && signal.atr < ctx.minATR)
     return recordRejection("minAtr", {
       atr: signal.atr,
@@ -743,7 +775,7 @@ export function isSignalValid(signal, ctx = {}) {
   if (!timingOk) return recordRejection("timingFilters");
 
   const key = `${signal.stock || signal.symbol}-${signal.direction}-${
-    signal.pattern || signal.algoSignal?.strategy
+    signal.pattern || signal.algoSignal?.strategy || signal.strategy
   }`;
   const dupWindow = ctx.duplicateWindowMs || 5 * 60 * 1000;
   if (
@@ -775,5 +807,5 @@ export function isSignalValid(signal, ctx = {}) {
   }
 
   if (ctx.addToWatchlist) riskState.watchList.add(inst);
-  return true;
+  return debugTrace ? { ok: true, trace: debugTrace } : true;
 }

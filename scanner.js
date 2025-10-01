@@ -348,6 +348,7 @@ export async function analyzeCandles(
       typeof riskVerdict === "object" ? !!riskVerdict.ok : !!riskVerdict;
     if (!riskOk) {
       const reason =
+<<<<<<< HEAD
         typeof riskVerdict === "object"
           ? riskVerdict.reason
           : "riskValidationFail";
@@ -355,13 +356,28 @@ export async function analyzeCandles(
         const reasonSummary = riskCtx.debugTrace
           .map((entry) => entry.code)
           .join(", ");
+=======
+        typeof riskVerdict === "object" ? riskVerdict.reason : "riskValidationFail";
+      const debugTrace =
+        typeof riskVerdict === "object" && Array.isArray(riskVerdict.trace)
+          ? riskVerdict.trace
+          : Array.isArray(riskCtx.debugTrace)
+          ? riskCtx.debugTrace
+          : null;
+      if (debugTrace?.length) {
+        const reasonSummary = debugTrace.map((entry) => entry.code).join(", ");
+>>>>>>> 97b1e380f1136409266f356b009508d0a29baf92
         console.log(`[RISK] ${symbol} blocked: ${reasonSummary}`);
       }
       try {
+        const rejectionCtx =
+          debugTrace?.length && riskCtx
+            ? { ...riskCtx, debugTrace: [...debugTrace] }
+            : riskCtx;
         await logSignalRejected(
           `${symbol}-${Date.now()}`,
           reason,
-          riskCtx,
+          rejectionCtx,
           preliminary
         );
       } catch (e) {

@@ -15,7 +15,7 @@ export function getMinRRForStrategy(strategy, winrate = 0) {
       return 1.5;
     case 'scalping':
     case 'fade':
-      return winrate > 0.65 ? 1.2 : Infinity;
+      return 1.2; // require high winrate separately
     case 'news':
     case 'news-event':
     case 'news/event setups':
@@ -30,6 +30,11 @@ export function validateRR({ strategy, entry, stopLoss, target, winrate = 0 }) {
   if (!risk) return { valid: false, rr: 0, minRR: Infinity };
   const rr = Math.abs((target - entry) / risk);
   const minRR = getMinRRForStrategy(strategy, winrate);
+  // extra rule: scalping/fade needs winrate > 0.65
+  const s = (strategy || '').toLowerCase();
+  if ((s === 'scalping' || s === 'fade') && winrate <= 0.65) {
+    return { valid: false, rr, minRR, reason: 'winrateTooLowForScalping' };
+  }
   return { valid: rr >= minRR, rr, minRR };
 }
 
@@ -65,7 +70,9 @@ export function validateATRStopLoss({
   minMult = 0.5,
   maxMult = 3,
 }) {
-  if (!atr) return true;
+  if (!Number.isFinite(atr)) return true;
+  if (![entry, stopLoss].every((n) => typeof n === 'number' && Number.isFinite(n)))
+    return false;
   const dist = Math.abs(entry - stopLoss);
   if (dist <= atr * minMult) return false;
   if (dist > atr * maxMult) return false;
@@ -82,12 +89,10 @@ export function validateSupportResistance({
 }) {
   const buffer = atr ? atr * 0.5 : entry * 0.01;
   if (direction === 'Long') {
-    if (typeof support === 'number' && entry - support <= buffer) return false;
-    if (typeof resistance === 'number' && resistance - entry <= buffer)
-      return false;
+    // block if too close to resistance
+    if (typeof resistance === 'number' && resistance - entry <= buffer) return false;
   } else if (direction === 'Short') {
-    if (typeof resistance === 'number' && resistance - entry <= buffer)
-      return false;
+    // block if too close to support
     if (typeof support === 'number' && entry - support <= buffer) return false;
   }
   return true;
