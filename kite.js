@@ -57,6 +57,8 @@ import {
 
 const historicalStore = initHistoricalStore();
 
+const HISTORY_CAP = Number(process.env.HISTORY_CAP) || 300;
+
 // Collection name for aligned ticks stored in MongoDB
 const ALIGNED_COLLECTION = "aligned_ticks";
 // Ensure the collection exists. Mongo will create it automatically if missing.
@@ -71,14 +73,10 @@ const kc = new KiteConnect({ api_key: apiKey });
 
 // Initialize logs before any async operations that might reference them
 let tradeLog = [];
-// ⬆️ Near top-level (once)
-const HISTORY_CAP = Number(process.env.HISTORY_CAP) || 300;
 
 await initAccountBalance();
-
 await ensureInstrumentMap(db);
 startMetricsReporter();
-
 // Order update event emitter and storage
 export const orderEvents = new EventEmitter();
 const orderUpdateMap = new Map();
@@ -90,10 +88,6 @@ export function onOrderUpdate(cb) {
 export function getOrderUpdate(orderId) {
   return orderUpdateMap.get(orderId);
 }
-
-// const tokensPath = path.join(__dirname, "tokens.json");
-// const historicalDataPath = path.join(__dirname, "historical_data.json");
-// const sessionDataPath = path.join(__dirname, "session_data.json");
 
 const tokensData = await db.collection("tokens").findOne({});
 const sessionData = {};
@@ -530,7 +524,7 @@ async function loadHistoricalSessionCandles(tokens) {
         volume: c.volume,
         timestamp: new Date(c.date),
       })),
-      60
+      HISTORY_CAP
     );
   }
 
@@ -622,7 +616,7 @@ async function startLiveFeed(io) {
             volume: c.volume,
             timestamp: new Date(c.date),
           })),
-          60
+          HISTORY_CAP
         );
       }
       console.log("✅ Preloaded session candles into candle history");
@@ -643,8 +637,12 @@ async function startLiveFeed(io) {
     ticker.on("connect", () => {
       ticker.subscribe(instrumentTokens);
       ticker.setMode(ticker.modeFull, instrumentTokens);
-      console.log("📈 Ticker connected");
-      console.log("🔔 Subscribed", instrumentTokens.length, "symbols");
+      console.log(
+        "📈 Ticker connected; subscribed:",
+        instrumentTokens.length,
+        "e.g.",
+        instrumentTokens.slice(0, 5)
+      );
       liveFeedActive = true;
       liveFeedStarting = false;
     });
@@ -728,6 +726,10 @@ async function startLiveFeed(io) {
 
 const BATCH_LIMIT = 100;
 let processingInProgress = false;
+let lastEmptyAlignedLog = 0;
+const EMPTY_ALIGNED_LOG_INTERVAL = 60 * 1000;
+
+const bufferLogState = new Map();
 
 export async function processAlignedCandles(io) {
   if (processingInProgress) return;
@@ -742,9 +744,16 @@ export async function processAlignedCandles(io) {
       .toArray();
 
     if (!docs.length) {
+      const now = Date.now();
+      if (now - lastEmptyAlignedLog > EMPTY_ALIGNED_LOG_INTERVAL) {
+        console.log("ℹ️ aligned_ticks empty this cycle");
+        lastEmptyAlignedLog = now;
+      }
       processingInProgress = false;
       return;
     }
+
+    console.log(`🧱 Aligned batch: ${docs.length} docs`);
 
     const { analyzeCandles } = await import("./scanner.js");
 
@@ -771,7 +780,7 @@ export async function processAlignedCandles(io) {
         timestamp: new Date(doc.minute),
       };
 
-      pushCandle(tokenStr, newCandle, 60);
+      pushCandle(tokenStr, newCandle, HISTORY_CAP);
 
       const lastTick = doc.lastTick || {};
       const depth = lastTick.depth || null;
@@ -882,6 +891,13 @@ async function processBuffer(io) {
       continue;
     }
 
+    const minuteKey = Math.floor(Date.now() / 60000);
+    const lastLog = bufferLogState.get(tokenStr);
+    if (!lastLog || lastLog.minute !== minuteKey) {
+      console.log(`🧮 Tick buffer for ${symbol}: ${ticks.length} ticks`);
+      bufferLogState.set(tokenStr, { minute: minuteKey, count: ticks.length });
+    }
+
     const avgVol = (await getAverageVolume(tokenStr, 20)) ?? 1000;
 
     const newCandle = {
@@ -893,12 +909,8 @@ async function processBuffer(io) {
       timestamp: new Date(),
     };
 
-    pushCandle(tokenStr, newCandle, 60); // Keep only last 60 candles
-    const lastPrice = Number(lastTick?.last_price) || close || open || 0;
-    const slippagePct =
-      lastPrice > 0 && spread > 0
-        ? Math.min(spread / lastPrice, 0.003)
-        : 0.0005;
+    pushCandle(tokenStr, newCandle, HISTORY_CAP); // Keep only last HISTORY_CAP candles
+
     try {
       incrementMetric("evalSymbols");
       const signal = await analyzeCandles(
@@ -1017,7 +1029,7 @@ async function fetchFallbackOneMinuteCandles() {
             new Date(c.date).getTime()
         );
         if (!candleAlreadyExists) {
-          pushCandle(tokenStr, candleObj, 60);
+          pushCandle(tokenStr, candleObj, HISTORY_CAP);
         }
       }
     } catch (err) {
@@ -1239,6 +1251,10 @@ async function fetchHistoricalIntradayData(
 
   for (const dateStr of tradingDates) {
     console.log(`📆 Fetching ${interval} data for: ${dateStr}`);
+    const [year, month, day] = dateStr.split("-").map(Number);
+    const from = new Date(Date.UTC(year, month - 1, day, 3, 45));
+    const to = new Date(Date.UTC(year, month - 1, day, 10, 0));
+
     for (const symbol of symbolsToUse) {
       try {
         // 1) Lookup instrument token
@@ -1253,8 +1269,8 @@ async function fetchHistoricalIntradayData(
         const candles = await kc.getHistoricalData(
           token,
           interval,
-          dateStr,
-          dateStr,
+          new Date(from),
+          new Date(to),
           false // continuous = false
         );
         if (!candles?.length) {
@@ -1311,7 +1327,7 @@ async function fetchHistoricalIntradayData(
       volume: c.volume,
       timestamp: new Date(c.date),
     }));
-    pushCandles(tokenStr, candles, 60);
+    pushCandles(tokenStr, candles, HISTORY_CAP);
   }
 }
 
@@ -1439,21 +1455,17 @@ async function fetchSessionData() {
   const now = new Date();
   const sessionStart = new Date(now);
   sessionStart.setHours(9, 15, 0, 0);
-  const sessionEndExclusive = new Date(now);
-  sessionEndExclusive.setHours(15, 31, 0, 0);
+  const sessionEnd = new Date(now);
+  sessionEnd.setHours(15, 30, 0, 0);
 
   if (now < sessionStart) {
     console.log("⏳ Session has not started yet; skipping fetch.");
     return;
   }
 
-  const fromDate = sessionStart.toISOString().slice(0, 19).replace("T", " ");
-  const toDate = sessionEndExclusive
-    .toISOString()
-    .slice(0, 19)
-    .replace("T", " ");
-
-  console.log(`⏳ Session Fetch Range: FROM ${fromDate} TO ${toDate}`);
+  console.log(
+    `⏳ Session Fetch Range: FROM ${sessionStart.toISOString()} TO ${sessionEnd.toISOString()}`
+  );
 
   const stockSymbols = await getStockSymbols();
   const bulkOps = [];
@@ -1490,8 +1502,8 @@ async function fetchSessionData() {
       const candles = await kc.getHistoricalData(
         Number(tokenStr),
         "minute",
-        fromDate,
-        toDate
+        sessionStart,
+        sessionEnd
       );
 
       if (!candles || candles.length === 0) {
@@ -1671,13 +1683,26 @@ async function ensureDataForSymbol(symbol) {
 //   instrumentTokens = tokens;
 // }
 function updateInstrumentTokens(tokens) {
+  const next = Array.from(new Set(tokens.map((t) => Number(t)))).filter((t) =>
+    Number.isFinite(t)
+  );
   if (ticker) {
-    ticker.unsubscribe(instrumentTokens);
-    ticker.subscribe(tokens);
-    ticker.setMode(ticker.modeFull, tokens); // ensure FULL for the new set
-    console.log("🔄 Updated tokens (FULL mode):", tokens);
+    const currentSet = new Set(instrumentTokens.map((t) => Number(t)));
+    const toRemove = instrumentTokens
+      .filter((t) => !next.includes(Number(t)))
+      .map((t) => Number(t));
+    const toAdd = next.filter((t) => !currentSet.has(t));
+
+    if (toRemove.length) {
+      ticker.unsubscribe(toRemove);
+    }
+    if (toAdd.length) {
+      ticker.subscribe(toAdd);
+      ticker.setMode(ticker.modeFull, toAdd);
+    }
+    console.log("🔄 Tokens updated:", "+", toAdd.length, "-", toRemove.length);
   }
-  instrumentTokens = tokens;
+  instrumentTokens = next;
 }
 
 function setTickInterval(interval) {

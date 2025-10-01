@@ -1,5 +1,5 @@
+// candleCache.js
 import db from "./db.js";
-
 export const candleHistory = {};
 const loaders = {};
 const MAX_CANDLES = 300;
@@ -60,7 +60,8 @@ export function clearCandleHistory() {
 }
 
 export async function preloadCandleHistory(tokens) {
-  const query = tokens && tokens.length ? { token: { $in: tokens.map(Number) } } : {};
+  const query =
+    tokens && tokens.length ? { token: { $in: tokens.map(Number) } } : {};
   const docs = await db
     .collection("historical_session_data")
     .find(query)

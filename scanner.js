@@ -127,20 +127,6 @@ export async function analyzeCandles(
     const dailyHistory = tokenStr ? await getHistoricalData(tokenStr) : [];
     const sessionData = candles;
 
-    const context = {
-      symbol,
-      candles: validCandles,
-      features,
-      depth,
-      tick: liveTick,
-      spread,
-      liquidity: effectiveLiquidity,
-      totalBuy,
-      totalSell,
-      dailyHistory,
-      sessionCandles: sessionData,
-    };
-
     const {
       ema9,
       ema21,
@@ -160,6 +146,19 @@ export async function analyzeCandles(
     const last = validCandles.at(-1);
     const lastVol = (last && (last.volume ?? last.v ?? last.qty)) ?? 0;
     const effectiveLiquidity = liquidity || lastVol || avgVolume || 0;
+    const context = {
+      symbol,
+      candles: validCandles,
+      features,
+      depth,
+      tick: liveTick,
+      spread,
+      liquidity: effectiveLiquidity,
+      totalBuy,
+      totalSell,
+      dailyHistory,
+      sessionCandles: sessionData,
+    };
     let dailyRangePct = 0;
     if (Array.isArray(dailyHistory) && dailyHistory.length) {
       const d = dailyHistory[dailyHistory.length - 1];

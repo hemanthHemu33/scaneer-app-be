@@ -1,5 +1,6 @@
-import db from '../db.js';
-import { logError } from '../logger.js';
+// historicalStore.js
+import db from "../db.js";
+import { logError } from "../logger.js";
 
 const defaults = {
   maxBarsDaily: 300,
@@ -28,9 +29,9 @@ function initHistoricalStore(options = {}) {
   function metric(name, ...args) {
     try {
       const fn = metrics[name];
-      if (typeof fn === 'function') fn(...args);
+      if (typeof fn === "function") fn(...args);
     } catch (err) {
-      logError('historicalStore.metric', err);
+      logError("historicalStore.metric", err);
     }
   }
 
@@ -47,7 +48,10 @@ function initHistoricalStore(options = {}) {
     const prev = map.get(k) || Promise.resolve();
     let release;
     const p = new Promise((res) => (release = res));
-    map.set(k, prev.then(() => p));
+    map.set(
+      k,
+      prev.then(() => p)
+    );
     return prev
       .then(() => fn())
       .finally(() => {
@@ -63,21 +67,23 @@ function initHistoricalStore(options = {}) {
       if (!Number.isFinite(t)) continue;
       if (!map.has(t)) map.set(t, { ...c, date: new Date(t).toISOString() });
     }
-    return [...map.values()].sort((a, b) => +new Date(a.date) - +new Date(b.date));
+    return [...map.values()].sort(
+      (a, b) => +new Date(a.date) - +new Date(b.date)
+    );
   }
 
   async function detectDailyModel() {
     if (state.dailyModel) return state.dailyModel;
     try {
-      const doc = await db.collection('historical_data').findOne({});
+      const doc = await db.collection("historical_data").findOne({});
       if (doc && (doc.token || doc.candles)) {
-        state.dailyModel = 'token';
+        state.dailyModel = "token";
       } else {
-        state.dailyModel = 'single';
+        state.dailyModel = "single";
       }
     } catch (err) {
-      logError('historicalStore.detectDailyModel', err);
-      state.dailyModel = 'single';
+      logError("historicalStore.detectDailyModel", err);
+      state.dailyModel = "single";
     }
     return state.dailyModel;
   }
@@ -101,7 +107,7 @@ function initHistoricalStore(options = {}) {
     const max = cfg.maxBarsDaily;
     const start = Date.now();
     try {
-      const col = db.collection('historical_data');
+      const col = db.collection("historical_data");
       const limit = max;
       // try single doc model first
       const projection = { [k]: { $slice: -limit }, _id: 0 };
@@ -111,20 +117,26 @@ function initHistoricalStore(options = {}) {
         // per-token model
         doc = await col.findOne(
           { token: Number(k) },
-          { projection: { candles: { $slice: -limit }, data: { $slice: -limit }, _id: 0 } }
+          {
+            projection: {
+              candles: { $slice: -limit },
+              data: { $slice: -limit },
+              _id: 0,
+            },
+          }
         );
         arr = doc?.candles || doc?.data;
-        if (arr) state.dailyModel = 'token';
+        if (arr) state.dailyModel = "token";
       } else {
-        state.dailyModel = 'single';
+        state.dailyModel = "single";
       }
       const candles = dedupeAndSort(arr || []).slice(-max);
       dailyCache.set(k, { candles, lastLoadedAt: Date.now() });
-      metric('onLoadMs', Date.now() - start, 'daily');
+      metric("onLoadMs", Date.now() - start, "daily");
       return candles;
     } catch (err) {
-      logError('historicalStore.loadDaily', err);
-      metric('onError', err, token, 'daily');
+      logError("historicalStore.loadDaily", err);
+      metric("onError", err, token, "daily");
       dailyCache.set(k, { candles: [], lastLoadedAt: Date.now() });
       return [];
     }
@@ -135,10 +147,10 @@ function initHistoricalStore(options = {}) {
     return withLock(dailyLocks, k, async () => {
       let entry = dailyCache.get(k);
       if (entry && !isStale(entry, cfg.dailyStaleMs)) {
-        metric('onHit', 'daily');
+        metric("onHit", "daily");
         return sliceCandles(entry.candles, opts);
       }
-      metric('onMiss', 'daily');
+      metric("onMiss", "daily");
       const candles = await loadDaily(k);
       return sliceCandles(candles, opts);
     });
@@ -153,8 +165,8 @@ function initHistoricalStore(options = {}) {
       const start = Date.now();
       try {
         const model = await detectDailyModel();
-        const col = db.collection('historical_data');
-        if (model === 'single') {
+        const col = db.collection("historical_data");
+        if (model === "single") {
           await col.updateOne(
             {},
             { $push: { [k]: { $each: candles, $slice: -cfg.maxBarsDaily } } },
@@ -163,14 +175,16 @@ function initHistoricalStore(options = {}) {
         } else {
           await col.updateOne(
             { token: Number(k) },
-            { $push: { candles: { $each: candles, $slice: -cfg.maxBarsDaily } } },
+            {
+              $push: { candles: { $each: candles, $slice: -cfg.maxBarsDaily } },
+            },
             { upsert: true }
           );
         }
-        metric('onWriteMs', Date.now() - start, 'daily');
+        metric("onWriteMs", Date.now() - start, "daily");
       } catch (err) {
-        logError('historicalStore.appendDailyCandles', err);
-        metric('onError', err, token, 'daily');
+        logError("historicalStore.appendDailyCandles", err);
+        metric("onError", err, token, "daily");
       }
       dailyCache.set(k, { candles: bounded, lastLoadedAt: Date.now() });
       return bounded;
@@ -183,19 +197,25 @@ function initHistoricalStore(options = {}) {
     const start = Date.now();
     try {
       const doc = await db
-        .collection('historical_session_data')
+        .collection("historical_session_data")
         .findOne(
           { token: Number(k) },
-          { projection: { candles: { $slice: -max }, data: { $slice: -max }, _id: 0 } }
+          {
+            projection: {
+              candles: { $slice: -max },
+              data: { $slice: -max },
+              _id: 0,
+            },
+          }
         );
       const arr = doc?.candles || doc?.data || [];
       const candles = dedupeAndSort(arr).slice(-max);
       intradayCache.set(k, { candles, lastLoadedAt: Date.now() });
-      metric('onLoadMs', Date.now() - start, 'intraday');
+      metric("onLoadMs", Date.now() - start, "intraday");
       return candles;
     } catch (err) {
-      logError('historicalStore.loadIntraday', err);
-      metric('onError', err, token, 'intraday');
+      logError("historicalStore.loadIntraday", err);
+      metric("onError", err, token, "intraday");
       intradayCache.set(k, { candles: [], lastLoadedAt: Date.now() });
       return [];
     }
@@ -206,10 +226,10 @@ function initHistoricalStore(options = {}) {
     return withLock(intradayLocks, k, async () => {
       let entry = intradayCache.get(k);
       if (entry && !isStale(entry, cfg.intradayStaleMs)) {
-        metric('onHit', 'intraday');
+        metric("onHit", "intraday");
         return sliceCandles(entry.candles, opts);
       }
-      metric('onMiss', 'intraday');
+      metric("onMiss", "intraday");
       const candles = await loadIntraday(k);
       return sliceCandles(candles, opts);
     });
@@ -223,15 +243,21 @@ function initHistoricalStore(options = {}) {
       const bounded = merged.slice(-cfg.maxBarsIntraday);
       const start = Date.now();
       try {
-        await db.collection('historical_session_data').updateOne(
-          { token: Number(k) },
-          { $push: { candles: { $each: candles, $slice: -cfg.maxBarsIntraday } } },
-          { upsert: true }
-        );
-        metric('onWriteMs', Date.now() - start, 'intraday');
+        await db
+          .collection("historical_session_data")
+          .updateOne(
+            { token: Number(k) },
+            {
+              $push: {
+                candles: { $each: candles, $slice: -cfg.maxBarsIntraday },
+              },
+            },
+            { upsert: true }
+          );
+        metric("onWriteMs", Date.now() - start, "intraday");
       } catch (err) {
-        logError('historicalStore.appendIntradayCandles', err);
-        metric('onError', err, token, 'intraday');
+        logError("historicalStore.appendIntradayCandles", err);
+        metric("onError", err, token, "intraday");
       }
       intradayCache.set(k, { candles: bounded, lastLoadedAt: Date.now() });
       return bounded;
@@ -248,10 +274,10 @@ function initHistoricalStore(options = {}) {
     await Promise.all(tasks);
   }
 
-  function invalidate(token, { scope = 'all' } = {}) {
+  function invalidate(token, { scope = "all" } = {}) {
     const k = key(token);
-    if (scope === 'all' || scope === 'daily') dailyCache.delete(k);
-    if (scope === 'all' || scope === 'intraday') intradayCache.delete(k);
+    if (scope === "all" || scope === "daily") dailyCache.delete(k);
+    if (scope === "all" || scope === "intraday") intradayCache.delete(k);
   }
 
   function shutdown() {
@@ -279,4 +305,3 @@ function initHistoricalStore(options = {}) {
 
 export { initHistoricalStore };
 export default initHistoricalStore;
-
