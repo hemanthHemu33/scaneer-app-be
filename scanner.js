@@ -145,7 +145,7 @@ export async function analyzeCandles(
     } = features;
     const last = validCandles.at(-1);
     const lastVol = (last && (last.volume ?? last.v ?? last.qty)) ?? 0;
-    const effectiveLiquidity = liquidity || lastVol || avgVolume || 0;
+    const effectiveLiquidity = liquidity || avgVolume || lastVol || 0;
     const context = {
       symbol,
       candles: validCandles,
@@ -186,12 +186,15 @@ export async function analyzeCandles(
     const isDowntrend = ema9 < ema21 && ema21 < ema50;
     const vwapParticipation =
       Number.isFinite(vwap) && Number.isFinite(last?.close) && last.close > 0
-        ? 1 - Math.abs(last.close - vwap) / last.close
+        ? Math.max(
+            0,
+            Math.min(1, 1 - Math.abs(last.close - vwap) / last.close)
+          )
         : 0.9;
 
     // ⚠️ Momentum filter
     const atrPct = last?.close
-      ? (atrValue / Math.max(last.close, 1)) * 100
+      ? Math.min(100, (atrValue / Math.max(last.close, 1)) * 100)
       : null;
     if (typeof rsi === "number" && atrPct != null) {
       const inNoMoRSI = rsi > 47 && rsi < 53;
@@ -353,29 +356,24 @@ export async function analyzeCandles(
     };
     riskCtx.debugTrace = [];
     const riskVerdict = isSignalValid(preliminary, riskCtx);
-    const riskOk = typeof riskVerdict === "object" ? !!riskVerdict.ok : !!riskVerdict;
+    const riskOk =
+      typeof riskVerdict === "object" ? !!riskVerdict.ok : !!riskVerdict;
     if (!riskOk) {
-      const reason =
-        typeof riskVerdict === "object" ? riskVerdict.reason : "riskValidationFail";
-      const debugTrace =
-        typeof riskVerdict === "object" && Array.isArray(riskVerdict.trace)
-          ? riskVerdict.trace
-          : Array.isArray(riskCtx.debugTrace)
-          ? riskCtx.debugTrace
-          : null;
-      if (debugTrace?.length) {
-        const reasonSummary = debugTrace.map((entry) => entry.code).join(", ");
-        console.log(`[RISK] ${symbol} blocked: ${reasonSummary}`);
-      }
+      const debugTrace = Array.isArray(riskCtx.debugTrace)
+        ? riskCtx.debugTrace
+        : Array.isArray(riskVerdict?.trace)
+        ? riskVerdict.trace
+        : [];
+      const reasonSummary =
+        (typeof riskVerdict === "object" && riskVerdict.reason) ||
+        debugTrace.map((d) => d.code).join(", ") ||
+        "riskValidationFail";
+      console.log(`[RISK] ${symbol} blocked: ${reasonSummary}`);
       try {
-        const rejectionCtx =
-          debugTrace?.length && riskCtx
-            ? { ...riskCtx, debugTrace: [...debugTrace] }
-            : riskCtx;
         await logSignalRejected(
           `${symbol}-${Date.now()}`,
-          reason,
-          rejectionCtx,
+          reasonSummary,
+          { ...riskCtx, debugTrace },
           preliminary
         );
       } catch (e) {
@@ -397,10 +395,7 @@ export async function analyzeCandles(
       ? Math.abs((base.target2 ?? base.target1) - base.entry)
       : 0;
     const riskReward = baseRisk > 0 ? rrNumerator / baseRisk : 0;
-    const consolidationOk = isAwayFromConsolidation(
-      validCandles.slice(0, -1),
-      base.entry
-    );
+    const consolidationOk = isAwayFromConsolidation(validCandles, base.entry);
     let qty = calculatePositionSize({
       capital: accountBalance,
       risk: accountBalance * riskPerTradePercentage,
@@ -420,8 +415,8 @@ export async function analyzeCandles(
       qty,
     };
 
-    const ma20Val = tokenStr ? await getMAForSymbol(tokenStr, 20) : null;
-    const ma50Val = tokenStr ? await getMAForSymbol(tokenStr, 50) : null;
+    const ma20Val = await getMAForSymbol(symbol, 20);
+    const ma50Val = await getMAForSymbol(symbol, 50);
     const contextForBuild = {
       symbol,
       instrumentToken: tokenNum ?? tokenStr,
@@ -483,11 +478,7 @@ export async function analyzeCandles(
       base.confidence
     );
 
-    try {
-      signal.expiresAt = toISTISOString(expiresAt);
-    } catch {
-      signal.expiresAt = expiresAt;
-    }
+    signal.expiresAt = toISTISOString(expiresAt);
     signal.ai = null; // Step 8: final enrichment placeholder
 
     const penaltyAdjusted = applyPenaltyConditions(signal.confidenceScore, {
