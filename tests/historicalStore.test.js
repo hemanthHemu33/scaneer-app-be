@@ -51,10 +51,14 @@ test('write-through append dedupe and bounds', async () => {
     { date:'2019-12-31', open:0, high:0, low:0, close:0, volume:0 }
   ]);
   assert.equal(res.length,2); // bounded to 2 most recent
-    assert.equal(res[0].date.startsWith('2020-01-01'), true);
+    assert.equal(res[0].date instanceof Date, true);
+    assert.equal(res[0].timestamp instanceof Date, true);
+    assert.equal(res[0].date.toISOString().startsWith('2020-01-01'), true);
     const doc = await db.collection('historical_data').findOne({});
     const arr = doc.candles || doc['3'];
     assert.equal(arr.length,2);
+    assert.equal(arr[0].date instanceof Date, true);
+    assert.equal(arr[0].timestamp instanceof Date, true);
 });
 
 test('concurrent reads load once', async () => {

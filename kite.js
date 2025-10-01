@@ -1298,16 +1298,18 @@ async function fetchHistoricalIntradayData(
         }
 
         // 3) Format and accumulate
-        const formatted = candles.map((c) => ({
-          date: new Date(c.date).toLocaleString("en-IN", {
-            timeZone: "Asia/Kolkata",
-          }),
-          open: c.open,
-          high: c.high,
-          low: c.low,
-          close: c.close,
-          volume: c.volume,
-        }));
+        const formatted = candles.map((c) => {
+          const d = new Date(c.date);
+          return {
+            date: d,
+            timestamp: d,
+            open: c.open,
+            high: c.high,
+            low: c.low,
+            close: c.close,
+            volume: c.volume,
+          };
+        });
 
         if (!historicalData[token]) {
           historicalData[token] = [];
@@ -1396,16 +1398,18 @@ async function fetchHistoricalData(symbols) {
         endDate
       );
       const tokenKey = String(token);
-      const formattedCandles = candles.map((c) => ({
-        date: new Date(c.date).toLocaleString("en-IN", {
-          timeZone: "Asia/Kolkata",
-        }),
-        open: c.open,
-        high: c.high,
-        low: c.low,
-        close: c.close,
-        volume: c.volume,
-      }));
+      const formattedCandles = candles.map((c) => {
+        const d = new Date(c.date);
+        return {
+          date: d,
+          timestamp: d,
+          open: c.open,
+          high: c.high,
+          low: c.low,
+          close: c.close,
+          volume: c.volume,
+        };
+      });
       await historicalCol.updateOne(
         {},
         { $set: { [tokenKey]: formattedCandles } },
