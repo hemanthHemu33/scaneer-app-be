@@ -306,6 +306,11 @@ export async function analyzeCandles(
     });
 
     const riskCtx = {
+      // give RR validator real win-rate info
+      winrate:
+        (marketContext?.strategyWinrates?.[displayStrategy] ??
+          marketContext?.winrate ??
+          0),
       avgAtr: atrValue,
       indexTrend: isUptrend ? "up" : isDowntrend ? "down" : "sideways",
       indexVolatility: safeVix,
