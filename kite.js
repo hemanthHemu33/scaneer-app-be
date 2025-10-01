@@ -910,6 +910,7 @@ async function processBuffer(io) {
     }
 
     const avgVol = (await getAverageVolume(tokenStr, 20)) ?? 1000;
+    // Critical fix: derive lastPrice/slippage before analyzeCandles so references stay defined
     const lastPrice = Number(lastTick?.last_price) || close || open || 0;
     const slippagePct =
       lastPrice > 0 && spread > 0
