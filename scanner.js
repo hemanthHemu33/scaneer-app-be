@@ -257,6 +257,10 @@ export async function analyzeCandles(
       atr: atrValue,
       spread,
       liquidity: effectiveLiquidity,
+      support,
+      resistance,
+      // let the risk validator use our category mapping
+      algoSignal: base.strategyCategory ? { strategy: base.strategyCategory } : undefined,
     };
 
     const momentumThresholds = {
