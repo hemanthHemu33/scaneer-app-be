@@ -41,15 +41,15 @@ class RiskState {
       dailyRisk: 0,
       // Limits
       maxDailyLoss: this.config.maxDailyLoss,
-      maxDailyLossPct: 0,
-      maxCumulativeLoss: 0,
-      maxWeeklyDrawdown: 0,
-      maxMonthlyDrawdown: 0,
-      maxLossPerTradePct: 0,
+      maxDailyLossPct: this.config.maxDailyLossPct,
+      maxCumulativeLoss: this.config.maxCumulativeLoss,
+      maxWeeklyDrawdown: this.config.maxWeeklyDrawdown,
+      maxMonthlyDrawdown: this.config.maxMonthlyDrawdown,
+      maxLossPerTradePct: this.config.maxLossPerTradePct,
       maxDailyRisk: this.config.maxDailyRisk,
       equity: 0,
       equityPeak: 0,
-      equityDrawdownLimitPct: 0,
+      equityDrawdownLimitPct: this.config.equityDrawdownLimitPct,
       // Trade tracking
       tradeCount: 0,
       maxTradesPerDay: this.config.maxTradesPerDay,
@@ -176,12 +176,13 @@ export function isSignalValid(signal, ctx = {}) {
   const bucketMs = ctx.timeBucketMs || 60 * 1000;
   const bucket = Math.floor(now / bucketMs);
   const count = riskState.timeBuckets.get(bucket) || 0;
-  if (
-    typeof ctx.maxSimultaneousSignals === "number" &&
-    count >= ctx.maxSimultaneousSignals
-  )
+  const maxSimul =
+    (typeof ctx.maxSimultaneousSignals === "number"
+      ? ctx.maxSimultaneousSignals
+      : riskState.config.maxSimultaneousSignals) || 0;
+  if (maxSimul && count >= maxSimul)
     return recordRejection("tooManySimultaneousSignals", {
-      max: ctx.maxSimultaneousSignals,
+      max: maxSimul,
     });
   riskState.timeBuckets.set(bucket, count + 1);
   if (riskState.timeBuckets.size > 10) {
@@ -255,7 +256,8 @@ export function isSignalValid(signal, ctx = {}) {
       loss: riskState.dailyLoss,
       max: maxLoss,
     });
-  const maxLossPct = ctx.maxDailyLossPct ?? riskState.maxDailyLossPct;
+  const maxLossPct =
+    ctx.maxDailyLossPct ?? riskState.config.maxDailyLossPct ?? 0;
   if (
     maxLossPct > 0 &&
     riskState.equityPeak > 0 &&
@@ -266,26 +268,31 @@ export function isSignalValid(signal, ctx = {}) {
       peak: riskState.equityPeak,
       maxPct: maxLossPct,
     });
-  const maxCum = ctx.maxCumulativeLoss ?? riskState.maxCumulativeLoss;
+  const maxCum =
+    ctx.maxCumulativeLoss ?? riskState.config.maxCumulativeLoss ?? 0;
   if (maxCum > 0 && riskState.dailyLoss >= maxCum)
     return recordRejection("maxCumulativeLoss", {
       loss: riskState.dailyLoss,
       max: maxCum,
     });
-  const maxWeekly = ctx.maxWeeklyDrawdown ?? riskState.maxWeeklyDrawdown;
+  const maxWeekly =
+    ctx.maxWeeklyDrawdown ?? riskState.config.maxWeeklyDrawdown ?? 0;
   if (maxWeekly > 0 && riskState.weeklyLoss >= maxWeekly)
     return recordRejection("maxWeeklyDrawdown", {
       loss: riskState.weeklyLoss,
       max: maxWeekly,
     });
-  const maxMonthly = ctx.maxMonthlyDrawdown ?? riskState.maxMonthlyDrawdown;
+  const maxMonthly =
+    ctx.maxMonthlyDrawdown ?? riskState.config.maxMonthlyDrawdown ?? 0;
   if (maxMonthly > 0 && riskState.monthlyLoss >= maxMonthly)
     return recordRejection("maxMonthlyDrawdown", {
       loss: riskState.monthlyLoss,
       max: maxMonthly,
     });
   const drawdownLimit =
-    ctx.equityDrawdownLimitPct ?? riskState.equityDrawdownLimitPct;
+    ctx.equityDrawdownLimitPct ??
+    riskState.config.equityDrawdownLimitPct ??
+    0;
   if (
     drawdownLimit > 0 &&
     riskState.equityPeak > 0 &&
@@ -316,14 +323,18 @@ export function isSignalValid(signal, ctx = {}) {
     });
   if (ctx.cooloffAfterLoss && riskState.lastTradeWasLoss)
     return recordRejection("cooloffAfterLoss");
+  const maxOpen =
+    (typeof ctx.maxOpenPositions === "number"
+      ? ctx.maxOpenPositions
+      : riskState.config.maxOpenPositions) || 0;
   if (
-    typeof ctx.maxOpenPositions === "number" &&
+    maxOpen &&
     typeof ctx.openPositionsCount === "number" &&
-    ctx.openPositionsCount >= ctx.maxOpenPositions
+    ctx.openPositionsCount >= maxOpen
   )
     return recordRejection("maxOpenPositions", {
       count: ctx.openPositionsCount,
-      max: ctx.maxOpenPositions,
+      max: maxOpen,
     });
   if (ctx.preventOverlap && Array.isArray(ctx.openSymbols)) {
     if (ctx.openSymbols.includes(signal.stock || signal.symbol))
@@ -727,7 +738,8 @@ export function isSignalValid(signal, ctx = {}) {
 
   const slDist = Math.abs(signal.entry - signal.stopLoss);
   const lossPct = slDist / signal.entry;
-  const maxPerTrade = ctx.maxLossPerTradePct ?? riskState.maxLossPerTradePct;
+  const maxPerTrade =
+    ctx.maxLossPerTradePct ?? riskState.config.maxLossPerTradePct ?? 0;
   if (maxPerTrade > 0 && lossPct > maxPerTrade)
     return recordRejection("maxLossPerTradePct", {
       lossPct,
