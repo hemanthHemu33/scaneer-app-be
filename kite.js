@@ -59,6 +59,13 @@ import {
 const historicalStore = initHistoricalStore();
 
 const HISTORY_CAP = Number(process.env.HISTORY_CAP) || 300;
+const DEFAULT_SLIPPAGE_PCT = 0.0005;
+const MAX_SPREAD_SLIPPAGE = 0.003;
+
+const computeSlippagePct = (lastPrice, spread) =>
+  lastPrice > 0 && spread > 0
+    ? Math.min(spread / lastPrice, MAX_SPREAD_SLIPPAGE)
+    : DEFAULT_SLIPPAGE_PCT;
 
 // Collection name for aligned ticks stored in MongoDB
 const ALIGNED_COLLECTION = "aligned_ticks";
@@ -801,10 +808,7 @@ export async function processAlignedCandles(io) {
       const avgVol = (await getAverageVolume(tokenStr, 20)) ?? 1000;
       const lastPrice =
         Number(lastTick?.last_price) || newCandle.close || newCandle.open || 0;
-      const slippagePct =
-        lastPrice > 0 && spread > 0
-          ? Math.min(spread / lastPrice, 0.003)
-          : 0.0005;
+      const slippagePct = computeSlippagePct(lastPrice, spread);
       incrementMetric("evalSymbols");
       const signal = await analyzeCandles(
         candleHistory[tokenStr],
@@ -907,10 +911,7 @@ async function processBuffer(io) {
 
     const avgVol = (await getAverageVolume(tokenStr, 20)) ?? 1000;
     const lastPrice = Number(lastTick?.last_price) || close || open || 0;
-    const slippagePct =
-      lastPrice > 0 && spread > 0
-        ? Math.min(spread / lastPrice, 0.003)
-        : 0.0005;
+    const slippagePct = computeSlippagePct(lastPrice, spread);
 
     const newCandle = {
       open,
