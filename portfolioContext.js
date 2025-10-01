@@ -2,9 +2,22 @@
 // Provides portfolio context management utilities
 import db from './db.js';
 import { sendNotification } from './telegram.js';
+import { applyRealizedPnL } from './account.js';
 
 export const openPositions = new Map(); // symbol -> position object
 const lastExitTime = new Map();
+
+// --- helpers ---
+const normSide = (side = 'buy') => {
+  const s = String(side).toLowerCase();
+  if (s === 'buy' || s === 'long') return 'buy';
+  if (s === 'sell' || s === 'short') return 'sell';
+  return 'buy';
+};
+
+function upsertLivePositionDoc(p) {
+  return { ...p, updatedAt: new Date() };
+}
 
 /**
  * Persist current open positions to MongoDB collection 'live_positions'.
@@ -14,7 +27,7 @@ export async function saveLivePositions(cache = db) {
   if (!cache?.collection) return;
   const col = cache.collection('live_positions');
   await col.deleteMany({});
-  const docs = Array.from(openPositions.values()).map((p) => ({ ...p, updatedAt: new Date() }));
+  const docs = Array.from(openPositions.values()).map(upsertLivePositionDoc);
   if (docs.length) await col.insertMany(docs);
 }
 
@@ -29,6 +42,7 @@ export async function loadLivePositions(cache = db) {
   openPositions.clear();
   for (const p of docs) {
     const { _id, ...rest } = p;
+    rest.side = normSide(rest.side);
     openPositions.set(rest.symbol, rest);
   }
 }
@@ -48,10 +62,11 @@ export async function trackOpenPositions(broker, cache = db) {
     if (!symbol) continue;
     const position = {
       symbol,
-      side: p.side || p.transaction_type || 'Long',
+      side: normSide(p.side || p.transaction_type || 'buy'),
       strategy: p.strategy || '',
-      qty: p.qty || p.quantity || 0,
-      entryPrice: p.entryPrice || p.average_price || 0,
+      qty: Number(p.qty ?? p.quantity ?? 0),
+      entryPrice: Number(p.entryPrice ?? p.average_price ?? 0),
+      markPrice: Number(p.last_price ?? p.mark_price ?? p.ltp ?? p.close ?? 0) || undefined,
       sector: p.sector || 'GEN',
       updatedAt: new Date(),
     };
@@ -64,21 +79,22 @@ export async function trackOpenPositions(broker, cache = db) {
     if (docs.length) await col.insertMany(docs);
     const live = cache.collection('live_positions');
     await live.deleteMany({});
-    if (docs.length) await live.insertMany(docs);
+    if (docs.length) await live.insertMany(docs.map(upsertLivePositionDoc));
   }
 }
 
-function calculateExposure(symbol, sector) {
+function calculateExposure(symbol, sector, { markToMarket = false } = {}) {
   let gross = 0;
   let sectorExposure = 0;
   for (const p of openPositions.values()) {
-    const value = p.entryPrice * p.qty;
+    const px = markToMarket && p.markPrice ? p.markPrice : p.entryPrice;
+    const value = px * p.qty;
     gross += value;
     if (p.sector === sector) sectorExposure += value;
   }
-  const instValue = openPositions.has(symbol)
-    ? openPositions.get(symbol).entryPrice * openPositions.get(symbol).qty
-    : 0;
+  const instPos = openPositions.get(symbol);
+  const instPx = markToMarket && instPos?.markPrice ? instPos.markPrice : instPos?.entryPrice ?? 0;
+  const instValue = instPos ? instPx * instPos.qty : 0;
   return { gross, sectorExposure, instValue };
 }
 
@@ -138,6 +154,7 @@ export function checkExposureLimits({
   minTradeCapital = 0,
   maxTradeCapital = Infinity,
   priority = false,
+  markToMarket = false,
 }) {
   if (priority) return true;
 
@@ -147,7 +164,7 @@ export function checkExposureLimits({
     if (tradeValue > totalCapital * tradeCapPct) return false;
   }
 
-  const { gross, sectorExposure, instValue } = calculateExposure(symbol, sector);
+  const { gross, sectorExposure, instValue } = calculateExposure(symbol, sector, { markToMarket });
   return enforceExposureLimits({
     tradeValue,
     totalCapital,
@@ -177,15 +194,87 @@ export function preventReEntry(symbol, windowMs = 15 * 60 * 1000) {
 }
 
 /**
+ * Record new entry locally (use on fill/confirm).
+ * Persist to 'live_positions' for continuity between process restarts.
+ */
+export async function recordEntry({
+  symbol,
+  side,
+  qty,
+  entryPrice,
+  sector = 'GEN',
+  strategy = '',
+  markPrice,
+}) {
+  if (!symbol || !qty || !entryPrice) return;
+  const position = {
+    symbol,
+    side: normSide(side),
+    qty: Number(qty),
+    entryPrice: Number(entryPrice),
+    markPrice: Number(markPrice || 0) || undefined,
+    sector,
+    strategy,
+    updatedAt: new Date(),
+  };
+  openPositions.set(symbol, position);
+  if (db?.collection) {
+    const col = db.collection('live_positions');
+    await col.updateOne(
+      { symbol },
+      { $set: upsertLivePositionDoc(position) },
+      { upsert: true }
+    );
+  }
+}
+
+/**
  * Record exit of a position.
  * @param {string} symbol
+ * @param {Object} [opts]
+ * @param {number} [opts.exitPrice]
+ * @param {number} [opts.qty] - if omitted, assumes full exit of recorded qty
+ * @param {number} [opts.fees=0]
+ * @param {string} [opts.reason]
  */
-export function recordExit(symbol) {
+export async function recordExit(symbol, opts = {}) {
   lastExitTime.set(symbol, Date.now());
+  const pos = openPositions.get(symbol);
+  const { exitPrice, qty, fees = 0, reason = 'exit' } = opts;
+  if (pos && typeof exitPrice === 'number') {
+    const closeQty = Number(qty || pos.qty || 0);
+    const entryPx = Number(pos.entryPrice);
+    const dir = pos.side; // 'buy'|'sell'
+    if (Number.isFinite(closeQty) && Number.isFinite(entryPx)) {
+      const pnlPer = dir === 'buy' ? exitPrice - entryPx : entryPx - exitPrice;
+      const realized = pnlPer * closeQty - (Number(fees) || 0);
+      if (Number.isFinite(realized)) {
+        applyRealizedPnL(realized);
+      }
+      if (sendNotification && Number.isFinite(pnlPer)) {
+        sendNotification(
+          `[EXIT] ${symbol} ${closeQty}@${exitPrice} ${reason} | PnL: ${Number.isFinite(realized) ? realized.toFixed(2) : 'NA'}`
+        );
+      }
+    }
+  }
+  const qtyNum = Number(qty);
+  if (pos && Number.isFinite(qtyNum) && qtyNum < pos.qty) {
+    pos.qty = pos.qty - qtyNum;
+    openPositions.set(symbol, { ...pos, updatedAt: new Date() });
+    if (db?.collection) {
+      const col = db.collection('live_positions');
+      await col.updateOne(
+        { symbol },
+        { $set: upsertLivePositionDoc(openPositions.get(symbol)) }
+      );
+    }
+    return;
+  }
   openPositions.delete(symbol);
   if (db?.collection) {
     const col = db.collection('live_positions');
-    col.deleteOne({ symbol }).catch(() => {});
+    await col.deleteOne({ symbol }).catch(() => {});
   }
 }
 
@@ -204,7 +293,7 @@ const strategyRank = {
 export function resolveSignalConflicts(signal) {
   const existing = openPositions.get(signal.symbol);
   if (!existing) return true;
-  if (existing.side === signal.side) return true;
+  if (existing.side === normSide(signal.side)) return true;
   const newPr = strategyRank[signal.strategy?.toLowerCase()] || 0;
   const exPr = strategyRank[existing.strategy?.toLowerCase()] || 0;
   return newPr > exPr;
@@ -252,9 +341,10 @@ export function backtestPortfolioContext(signals = [], opts = {}) {
     ) {
       continue;
     }
+    const side = normSide(sig.side);
     openPositions.set(sig.symbol, {
       symbol: sig.symbol,
-      side: sig.side,
+      side,
       qty: sig.qty || 1,
       entryPrice: sig.entryPrice,
       sector: sig.sector || 'GEN',
@@ -263,10 +353,11 @@ export function backtestPortfolioContext(signals = [], opts = {}) {
     exposureTimeline.push(getGrossExposure());
     if (typeof sig.exitPrice === 'number') {
       const pnl =
-        (sig.exitPrice - sig.entryPrice) * (sig.qty || 1) *
-        (sig.side === 'short' ? -1 : 1);
+        (side === 'buy'
+          ? sig.exitPrice - sig.entryPrice
+          : sig.entryPrice - sig.exitPrice) * (sig.qty || 1);
       balance += pnl;
-      recordExit(sig.symbol);
+      recordExit(sig.symbol, { exitPrice: sig.exitPrice, qty: sig.qty || 1 }).catch(() => {});
     }
   }
   const finalExposure = getGrossExposure();
@@ -279,4 +370,21 @@ function getGrossExposure() {
     gross += p.entryPrice * p.qty;
   }
   return gross;
+}
+
+export { getGrossExposure };
+
+/**
+ * Optional: update a position's live price for mark-to-market exposure checks.
+ */
+export function updateMarkPrice(symbol, markPrice) {
+  const p = openPositions.get(symbol);
+  if (!p) return;
+  p.markPrice = Number(markPrice) || undefined;
+  p.updatedAt = new Date();
+  openPositions.set(symbol, p);
+  if (db?.collection) {
+    const col = db.collection('live_positions');
+    col.updateOne({ symbol }, { $set: upsertLivePositionDoc(p) }).catch(() => {});
+  }
 }
