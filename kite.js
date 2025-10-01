@@ -43,6 +43,7 @@ import {
 import { startExitMonitor, recordExit as logExit } from "./exitManager.js";
 import { logTrade as recordTrade, logOrderUpdate } from "./tradeLogger.js";
 import { getAccountBalance, initAccountBalance } from "./account.js";
+import { marketContext } from "./smartStrategySelector.js";
 dotenv.config();
 
 import db from "./db.js"; // 🧠 Import database module for future use
@@ -53,11 +54,18 @@ import {
   pushCandle,
   pushCandles,
   clearCandleHistory,
+  HISTORY_CAP,
 } from "./candleCache.js";
 
 const historicalStore = initHistoricalStore();
 
-const HISTORY_CAP = Number(process.env.HISTORY_CAP) || 300;
+const DEFAULT_SLIPPAGE_PCT = 0.0005;
+const MAX_SPREAD_SLIPPAGE = 0.003;
+
+const computeSlippagePct = (lastPrice, spread) =>
+  lastPrice > 0 && spread > 0
+    ? Math.min(spread / lastPrice, MAX_SPREAD_SLIPPAGE)
+    : DEFAULT_SLIPPAGE_PCT;
 
 // Collection name for aligned ticks stored in MongoDB
 const ALIGNED_COLLECTION = "aligned_ticks";
@@ -791,13 +799,11 @@ export async function processAlignedCandles(io) {
         : 0;
 
       const avgVol = (await getAverageVolume(tokenStr, 20)) ?? 1000;
-      incrementMetric("evalSymbols");
       const lastPrice =
         Number(lastTick?.last_price) || newCandle.close || newCandle.open || 0;
-      const slippagePct =
-        lastPrice > 0 && spread > 0
-          ? Math.min(spread / lastPrice, 0.003)
-          : 0.0005;
+      const slippagePct = computeSlippagePct(lastPrice, spread);
+      incrementMetric("evalSymbols");
+      // const lastPrice and slippagePct already declared above, so just use them here
       // cap at 0.30%; default 0.05%
       const signal = await analyzeCandles(
         candleHistory[tokenStr],
@@ -899,6 +905,8 @@ async function processBuffer(io) {
     }
 
     const avgVol = (await getAverageVolume(tokenStr, 20)) ?? 1000;
+    const lastPrice = Number(lastTick?.last_price) || close || open || 0;
+    const slippagePct = computeSlippagePct(lastPrice, spread);
 
     const newCandle = {
       open,
@@ -1039,6 +1047,7 @@ async function fetchFallbackOneMinuteCandles() {
 }
 
 async function logTrade(signal) {
+  const hasRisk = Number.isFinite(signal.riskPerUnit) && signal.riskPerUnit > 0;
   const tradeEntry = {
     time: new Date(),
     stock: signal.stock,
@@ -1048,9 +1057,13 @@ async function logTrade(signal) {
     stopLoss: signal.stopLoss,
     target1: signal.target1,
     target2: signal.target2,
-    rr: parseFloat(
-      Math.abs((signal.target2 - signal.entry) / signal.riskPerUnit).toFixed(2)
-    ),
+    rr: hasRisk
+      ? Number(
+          Math.abs(
+            (signal.target2 - signal.entry) / signal.riskPerUnit
+          ).toFixed(2)
+        )
+      : null,
     confidence: signal.confidence,
   };
   tradeLog.push(tradeEntry);
@@ -1210,10 +1223,11 @@ async function emitUnifiedSignal(signal, source, io = globalIO) {
   logTrade(signal);
   const persistInfo = await persistThenNotify(signal);
   incrementMetric("emitted");
+  const ctx = (typeof marketContext === "object" && marketContext) || {};
   logSignalCreated(signal, {
-    vix: marketContext.vix,
-    regime: marketContext.regime,
-    breadth: marketContext.breadth,
+    vix: ctx.vix ?? null,
+    regime: ctx.regime ?? null,
+    breadth: ctx.breadth ?? null,
   });
   const filter = persistInfo?.insertedId
     ? { _id: persistInfo.insertedId }
@@ -1358,8 +1372,7 @@ async function fetchHistoricalData(symbols) {
   if (!accessToken) return console.error("❌ Cannot fetch historical data");
   const startDate = new Date();
   startDate.setDate(startDate.getDate() - 90);
-  const startStr = startDate.toISOString().split("T")[0];
-  const endStr = new Date().toISOString().split("T")[0];
+  const endDate = new Date();
   const symbolList = symbols || (await getStockSymbols());
   const historicalCol = db.collection("historical_data");
   let updatedCount = 0;
@@ -1374,8 +1387,8 @@ async function fetchHistoricalData(symbols) {
       const candles = await kc.getHistoricalData(
         token,
         "day",
-        startStr,
-        endStr
+        startDate,
+        endDate
       );
       const tokenKey = String(token);
       const formattedCandles = candles.map((c) => ({
@@ -1589,7 +1602,7 @@ async function fetchSessionData() {
         volume: c.volume,
         timestamp: new Date(c.date),
       })),
-      60
+      HISTORY_CAP
     );
     await computeGapPercent(tokenStr);
   }
@@ -1773,25 +1786,21 @@ export async function rebuildThreeMinCandlesFromOneMin(token) {
   const docs = await db
     .collection(ALIGNED_COLLECTION)
     .find({ token: Number(token) })
+    .project({ minute: 1, open: 1, high: 1, low: 1, close: 1, volume: 1 })
+    .sort({ minute: 1 })
     .toArray();
-  const minutes = {};
-  for (const doc of docs) {
-    minutes[doc.minute] = doc.ticks || [];
-  }
-  const entries = Object.keys(minutes).sort();
+
   const result = [];
-  for (let i = 0; i < entries.length; i += 3) {
-    const slice = entries.slice(i, i + 3);
-    const ticks = slice.flatMap((m) => minutes[m] || []);
-    if (ticks.length < 2) continue;
-    const prices = ticks.map((t) => t.last_price);
+  for (let i = 0; i < docs.length; i += 3) {
+    const slice = docs.slice(i, i + 3);
+    if (slice.length === 0) continue;
     result.push({
-      date: new Date(slice[0]),
-      open: prices[0],
-      high: Math.max(...prices),
-      low: Math.min(...prices),
-      close: prices[prices.length - 1],
-      volume: ticks.reduce((s, t) => s + (t.last_traded_quantity || 0), 0),
+      date: slice[0].minute,
+      open: slice[0].open,
+      high: Math.max(...slice.map((d) => d.high)),
+      low: Math.min(...slice.map((d) => d.low)),
+      close: slice[slice.length - 1].close,
+      volume: slice.reduce((sum, d) => sum + (d.volume || 0), 0),
     });
   }
   return result;
