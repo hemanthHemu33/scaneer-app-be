@@ -8,12 +8,12 @@ export const openPositions = new Map(); // symbol -> position object
 const lastExitTime = new Map();
 
 // --- helpers ---
-const normSide = (side = 'buy') => {
-  const s = String(side).toLowerCase();
-  if (s === 'buy' || s === 'long') return 'buy';
-  if (s === 'sell' || s === 'short') return 'sell';
+function normSide(v) {
+  const s = String(v || '').toLowerCase();
+  if (s === 'buy' || s === 'long' || s === 'b' || s === '1') return 'buy';
+  if (s === 'sell' || s === 'short' || s === 's' || s === '-1') return 'sell';
   return 'buy';
-};
+}
 
 function upsertLivePositionDoc(p) {
   return { ...p, updatedAt: new Date() };
@@ -60,13 +60,16 @@ export async function trackOpenPositions(broker, cache = db) {
   for (const p of pos || []) {
     const symbol = p.symbol || p.tradingsymbol;
     if (!symbol) continue;
+    const qty = Number(p.qty ?? p.quantity ?? 0);
+    const entry = Number(p.entryPrice ?? p.average_price ?? 0);
+    const mark = Number(p.last_price ?? p.mark_price ?? p.ltp ?? p.close ?? 0);
     const position = {
       symbol,
       side: normSide(p.side || p.transaction_type || 'buy'),
       strategy: p.strategy || '',
-      qty: Number(p.qty ?? p.quantity ?? 0),
-      entryPrice: Number(p.entryPrice ?? p.average_price ?? 0),
-      markPrice: Number(p.last_price ?? p.mark_price ?? p.ltp ?? p.close ?? 0) || undefined,
+      qty: Number.isFinite(qty) ? qty : 0,
+      entryPrice: Number.isFinite(entry) ? entry : 0,
+      markPrice: Number.isFinite(mark) && mark > 0 ? mark : undefined,
       sector: p.sector || 'GEN',
       updatedAt: new Date(),
     };
@@ -206,26 +209,24 @@ export async function recordEntry({
   strategy = '',
   markPrice,
 }) {
-  if (!symbol || !qty || !entryPrice) return;
+  if (!symbol) return;
+  const qtyNum = Math.max(1, Number(qty || 0));
+  const entryNum = Number(entryPrice || 0);
+  const markNum = Number(markPrice ?? entryNum);
   const position = {
     symbol,
     side: normSide(side),
-    qty: Number(qty),
-    entryPrice: Number(entryPrice),
-    markPrice: Number(markPrice || 0) || undefined,
+    qty: Number.isFinite(qtyNum) ? qtyNum : 1,
+    entryPrice: Number.isFinite(entryNum) ? entryNum : 0,
     sector,
     strategy,
     updatedAt: new Date(),
   };
-  openPositions.set(symbol, position);
-  if (db?.collection) {
-    const col = db.collection('live_positions');
-    await col.updateOne(
-      { symbol },
-      { $set: upsertLivePositionDoc(position) },
-      { upsert: true }
-    );
+  if (Number.isFinite(markNum) && markNum > 0) {
+    position.markPrice = markNum;
   }
+  openPositions.set(symbol, position);
+  await saveLivePositions().catch(() => {});
 }
 
 /**
