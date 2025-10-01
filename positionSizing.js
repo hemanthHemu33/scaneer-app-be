@@ -17,31 +17,33 @@ let tradeCount = 0;
 
 export function fixedRupeeRiskModel({ riskAmount, slPoints }) {
   if (!riskAmount || !slPoints) return 0;
-  return riskAmount / slPoints;
+  return riskAmount / Math.max(slPoints, 1e-6);
 }
 
 export function fixedPercentRiskModel({ capital, riskPercent = 0.01, slPoints }) {
   if (!capital || !slPoints) return 0;
-  return (capital * riskPercent) / slPoints;
+  return (capital * riskPercent) / Math.max(slPoints, 1e-6);
 }
 
 export function kellyCriterionSize({ capital, winRate, winLossRatio, slPoints, fraction = 1 }) {
   if (!capital || !slPoints || !winRate || !winLossRatio) return 0;
   const k = winRate - (1 - winRate) / winLossRatio;
   if (k <= 0) return 0;
-  return ((capital * k * fraction) / slPoints);
+  return (capital * k * fraction) / Math.max(slPoints, 1e-6);
 }
 
 export function volatilityWeightedSize({
   capital,
   baseRisk = 0.01,
   volatility,
-  benchmarkVolatility = volatility,
+  benchmarkVolatility,
   slPoints,
 }) {
   if (!capital || !slPoints || !volatility) return 0;
-  const weight = benchmarkVolatility ? benchmarkVolatility / volatility : 1;
-  return ((capital * baseRisk * weight) / slPoints);
+  const vol = Math.max(volatility, 1e-6);
+  const bench = typeof benchmarkVolatility === 'number' ? benchmarkVolatility : vol;
+  const weight = bench / vol;
+  return (capital * baseRisk * weight) / Math.max(slPoints, 1e-6);
 }
 
 export function equalCapitalAllocation({ capital, numPositions = 1, price }) {
@@ -51,7 +53,7 @@ export function equalCapitalAllocation({ capital, numPositions = 1, price }) {
 
 export function equalRiskAllocation({ capital, numPositions = 1, slPoints }) {
   if (!capital || !slPoints || numPositions <= 0) return 0;
-  return (capital / numPositions) / slPoints;
+  return (capital / numPositions) / Math.max(slPoints, 1e-6);
 }
 
 export function confidenceBasedSizing({ baseQty, confidence = 1, maxConfidence = 1 }) {
@@ -138,12 +140,10 @@ export function calculatePositionSize({
 }) {
   if (!capital) return 0;
   const methodName = method || 'default';
-  if (!slPoints && !['equal-capital'].includes(methodName) && !['equal-risk'].includes(methodName)) return 0;
+  const noSLNeeded = ['equal-capital', 'atr', 'dollar-volatility'].includes(methodName);
+  if (!slPoints && !noSLNeeded) return 0;
 
   tradeCount += 1;
-  if (tradeCount === 1) {
-    utilizationCap = 1;
-  }
 
   // Determine base quantity using selected model
   let qty;
@@ -188,7 +188,7 @@ export function calculatePositionSize({
         riskAmount /= costBuffer;
       }
       if (riskAmount <= 0) return 0;
-      qty = riskAmount / slPoints;
+      qty = riskAmount / Math.max(slPoints, 1e-6);
     }
   }
 
@@ -235,7 +235,7 @@ export function calculatePositionSize({
     marginBuffer;
   if (effectiveMarginPerLot > 0) {
     const maxLots = Math.floor((capital * utilizationCap) / effectiveMarginPerLot);
-    qty = Math.min(qty, maxLots * lotSize);
+    qty = Math.max(0, Math.min(qty, maxLots * lotSize));
   }
 
   if (typeof drawdown === 'number') {
@@ -249,7 +249,7 @@ export function calculatePositionSize({
   if (typeof minLotSize === 'number' && qty < minLotSize) return 0;
   if (typeof maxQty === 'number' && qty > maxQty) qty = maxQty;
 
-  return qty > 0 ? qty : lotSize;
+  return qty > 0 ? qty : 0;
 }
 
 /**
@@ -269,6 +269,7 @@ export function calculatePositionSize({
  * @param {number} [opts.slippage]  Expected slippage per unit
  * @param {number} [opts.spread]    Current bid/ask spread
  * @param {number} [opts.costBuffer] Buffer for taxes and slippage
+ * @param {number} [opts.riskPercent=0.01] Risk per trade as a fraction of capital
  * @returns {Object} { stopLoss, qty, target1, target2 }
  */
 export function calculateTradeParameters({
@@ -283,6 +284,7 @@ export function calculateTradeParameters({
   slippage = 0,
   spread = 0,
   costBuffer = 1,
+  riskPercent = 0.01,
 }) {
   const dynamicSL = calculateDynamicStopLoss({ atr, entry, direction });
 
@@ -314,7 +316,7 @@ export function calculateTradeParameters({
   });
 
   const baseRisk = Math.abs(entry - finalSL) + slippage + spread;
-  const riskAmount = capital * 0.01;
+  const riskAmount = capital * riskPercent;
   let qty = calculatePositionSize({
     capital,
     risk: riskAmount,
@@ -333,7 +335,8 @@ export function calculateTradeParameters({
   qty = adjustRiskBasedOnDrawdown({ drawdown, lotSize: qty });
   qty = adjustRiskAfterLossStreak({ lossStreak: 0, lotSize: qty });
 
-  const rrMultiplier = atr > 2 ? RISK_REWARD_RATIO + 0.5 : RISK_REWARD_RATIO;
+  const atrPct = entry ? (atr / entry) * 100 : 0;
+  const rrMultiplier = atrPct > 2 ? RISK_REWARD_RATIO + 0.5 : RISK_REWARD_RATIO;
   const target1 =
     entry + (direction === 'Long' ? 1 : -1) * (rrMultiplier * 0.5) * baseRisk;
   const target2 =
