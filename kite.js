@@ -1799,25 +1799,21 @@ export async function rebuildThreeMinCandlesFromOneMin(token) {
   const docs = await db
     .collection(ALIGNED_COLLECTION)
     .find({ token: Number(token) })
+    .project({ minute: 1, open: 1, high: 1, low: 1, close: 1, volume: 1 })
+    .sort({ minute: 1 })
     .toArray();
-  const minutes = {};
-  for (const doc of docs) {
-    minutes[doc.minute] = doc.ticks || [];
-  }
-  const entries = Object.keys(minutes).sort();
+
   const result = [];
-  for (let i = 0; i < entries.length; i += 3) {
-    const slice = entries.slice(i, i + 3);
-    const ticks = slice.flatMap((m) => minutes[m] || []);
-    if (ticks.length < 2) continue;
-    const prices = ticks.map((t) => t.last_price);
+  for (let i = 0; i < docs.length; i += 3) {
+    const slice = docs.slice(i, i + 3);
+    if (slice.length === 0) continue;
     result.push({
-      date: new Date(slice[0]),
-      open: prices[0],
-      high: Math.max(...prices),
-      low: Math.min(...prices),
-      close: prices[prices.length - 1],
-      volume: ticks.reduce((s, t) => s + (t.last_traded_quantity || 0), 0),
+      date: slice[0].minute,
+      open: slice[0].open,
+      high: Math.max(...slice.map((d) => d.high)),
+      low: Math.min(...slice.map((d) => d.low)),
+      close: slice[slice.length - 1].close,
+      volume: slice.reduce((sum, d) => sum + (d.volume || 0), 0),
     });
   }
   return result;
