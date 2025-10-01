@@ -43,6 +43,7 @@ import {
 import { startExitMonitor, recordExit as logExit } from "./exitManager.js";
 import { logTrade as recordTrade, logOrderUpdate } from "./tradeLogger.js";
 import { getAccountBalance, initAccountBalance } from "./account.js";
+import { marketContext } from "./smartStrategySelector.js";
 dotenv.config();
 
 import db from "./db.js"; // 🧠 Import database module for future use
@@ -798,6 +799,12 @@ export async function processAlignedCandles(io) {
         : 0;
 
       const avgVol = (await getAverageVolume(tokenStr, 20)) ?? 1000;
+      const lastPrice =
+        Number(lastTick?.last_price) || newCandle.close || newCandle.open || 0;
+      const slippagePct =
+        lastPrice > 0 && spread > 0
+          ? Math.min(spread / lastPrice, 0.003)
+          : 0.0005;
       incrementMetric("evalSymbols");
       const signal = await analyzeCandles(
         candleHistory[tokenStr],
@@ -805,7 +812,7 @@ export async function processAlignedCandles(io) {
         depth,
         totalBuy,
         totalSell,
-        0.1,
+        slippagePct,
         spread,
         avgVol,
         lastTick
@@ -899,6 +906,11 @@ async function processBuffer(io) {
     }
 
     const avgVol = (await getAverageVolume(tokenStr, 20)) ?? 1000;
+    const lastPrice = Number(lastTick?.last_price) || close || open || 0;
+    const slippagePct =
+      lastPrice > 0 && spread > 0
+        ? Math.min(spread / lastPrice, 0.003)
+        : 0.0005;
 
     const newCandle = {
       open,
@@ -919,7 +931,7 @@ async function processBuffer(io) {
         depth,
         totalBuy,
         totalSell,
-        0.1,
+        slippagePct,
         spread,
         avgVol,
         lastTick
@@ -1039,6 +1051,8 @@ async function fetchFallbackOneMinuteCandles() {
 }
 
 async function logTrade(signal) {
+  const hasRisk =
+    Number.isFinite(signal.riskPerUnit) && signal.riskPerUnit > 0;
   const tradeEntry = {
     time: new Date(),
     stock: signal.stock,
@@ -1048,9 +1062,13 @@ async function logTrade(signal) {
     stopLoss: signal.stopLoss,
     target1: signal.target1,
     target2: signal.target2,
-    rr: parseFloat(
-      Math.abs((signal.target2 - signal.entry) / signal.riskPerUnit).toFixed(2)
-    ),
+    rr: hasRisk
+      ? Number(
+          Math.abs((signal.target2 - signal.entry) / signal.riskPerUnit).toFixed(
+            2
+          )
+        )
+      : null,
     confidence: signal.confidence,
   };
   tradeLog.push(tradeEntry);
@@ -1209,10 +1227,11 @@ async function emitUnifiedSignal(signal, source, io = globalIO) {
   logTrade(signal);
   const persistInfo = await persistThenNotify(signal);
   incrementMetric("emitted");
+  const ctx = (typeof marketContext === "object" && marketContext) || {};
   logSignalCreated(signal, {
-    vix: marketContext.vix,
-    regime: marketContext.regime,
-    breadth: marketContext.breadth,
+    vix: ctx.vix ?? null,
+    regime: ctx.regime ?? null,
+    breadth: ctx.breadth ?? null,
   });
   const filter = persistInfo?.insertedId
     ? { _id: persistInfo.insertedId }
@@ -1357,8 +1376,7 @@ async function fetchHistoricalData(symbols) {
   if (!accessToken) return console.error("❌ Cannot fetch historical data");
   const startDate = new Date();
   startDate.setDate(startDate.getDate() - 90);
-  const startStr = startDate.toISOString().split("T")[0];
-  const endStr = new Date().toISOString().split("T")[0];
+  const endDate = new Date();
   const symbolList = symbols || (await getStockSymbols());
   const historicalCol = db.collection("historical_data");
   let updatedCount = 0;
@@ -1373,8 +1391,8 @@ async function fetchHistoricalData(symbols) {
       const candles = await kc.getHistoricalData(
         token,
         "day",
-        startStr,
-        endStr
+        startDate,
+        endDate
       );
       const tokenKey = String(token);
       const formattedCandles = candles.map((c) => ({
@@ -1588,7 +1606,7 @@ async function fetchSessionData() {
         volume: c.volume,
         timestamp: new Date(c.date),
       })),
-      60
+      HISTORY_CAP
     );
     await computeGapPercent(tokenStr);
   }
