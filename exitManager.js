@@ -1,4 +1,5 @@
 import { logTrade } from './tradeLogger.js';
+import { applyRealizedPnL } from './account.js';
 
 let trailingPct = 0.5;
 
@@ -123,6 +124,9 @@ export async function recordExit(trade, reason, price) {
   const qty = trade.qty || 1;
   const factor = (trade.side || 'long').toLowerCase() === 'short' ? -1 : 1;
   const pnl = (exitPrice - trade.entryPrice) * qty * factor;
+  if (Number.isFinite(pnl) && pnl) {
+    applyRealizedPnL(pnl);
+  }
   await logTrade(
     {
       symbol: trade.symbol,

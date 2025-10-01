@@ -2,6 +2,7 @@
 // Provides portfolio context management utilities
 import db from './db.js';
 import { sendNotification } from './telegram.js';
+import { applyRealizedPnL } from './account.js';
 
 export const openPositions = new Map(); // symbol -> position object
 const lastExitTime = new Map();
@@ -180,7 +181,32 @@ export function preventReEntry(symbol, windowMs = 15 * 60 * 1000) {
  * Record exit of a position.
  * @param {string} symbol
  */
-export function recordExit(symbol) {
+export function recordExit(symbol, details = {}) {
+  const position = openPositions.get(symbol);
+  let realizedPnl = 0;
+  if (typeof details === 'number') {
+    realizedPnl = details;
+  } else if (details && typeof details === 'object') {
+    if (typeof details.realizedPnl === 'number') {
+      realizedPnl = details.realizedPnl;
+    } else {
+      const entry = position?.entryPrice;
+      const qty = details.qty ?? position?.qty;
+      const exitPrice = details.exitPrice;
+      const side = (details.side || position?.side || 'long').toLowerCase();
+      if (
+        Number.isFinite(entry) &&
+        Number.isFinite(exitPrice) &&
+        Number.isFinite(qty) &&
+        qty
+      ) {
+        const factor = side === 'short' ? -1 : 1;
+        realizedPnl = (exitPrice - entry) * qty * factor;
+      }
+    }
+  }
+  if (!Number.isFinite(realizedPnl)) realizedPnl = 0;
+  if (realizedPnl) applyRealizedPnL(realizedPnl);
   lastExitTime.set(symbol, Date.now());
   openPositions.delete(symbol);
   if (db?.collection) {
@@ -266,7 +292,7 @@ export function backtestPortfolioContext(signals = [], opts = {}) {
         (sig.exitPrice - sig.entryPrice) * (sig.qty || 1) *
         (sig.side === 'short' ? -1 : 1);
       balance += pnl;
-      recordExit(sig.symbol);
+      recordExit(sig.symbol, pnl);
     }
   }
   const finalExposure = getGrossExposure();
