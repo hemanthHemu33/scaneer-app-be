@@ -360,21 +360,26 @@ export async function analyzeCandles(
     const riskOk =
       typeof riskVerdict === "object" ? !!riskVerdict.ok : !!riskVerdict;
     if (!riskOk) {
-      const debugTrace = Array.isArray(riskCtx.debugTrace)
-        ? riskCtx.debugTrace
-        : Array.isArray(riskVerdict?.trace)
-        ? riskVerdict.trace
-        : [];
-      const reasonSummary =
-        (typeof riskVerdict === "object" && riskVerdict.reason) ||
-        debugTrace.map((d) => d.code).join(", ") ||
-        "riskValidationFail";
-      console.log(`[RISK] ${symbol} blocked: ${reasonSummary}`);
+      const reason =
+        typeof riskVerdict === "object" ? riskVerdict.reason : "riskValidationFail";
+      const debugTrace =
+        (typeof riskVerdict === "object" &&
+          Array.isArray(riskVerdict.trace) &&
+          riskVerdict.trace) ||
+        (Array.isArray(riskCtx.debugTrace) && riskCtx.debugTrace) ||
+        null;
+      if (debugTrace?.length) {
+        const reasonSummary = debugTrace.map((entry) => entry.code).join(", ");
+        console.log(`[RISK] ${symbol} blocked: ${reasonSummary}`);
+      }
       try {
+        const rejectionCtx = debugTrace?.length
+          ? { ...riskCtx, debugTrace: [...debugTrace] }
+          : riskCtx;
         await logSignalRejected(
           `${symbol}-${Date.now()}`,
-          reasonSummary,
-          { ...riskCtx, debugTrace },
+          reason,
+          rejectionCtx,
           preliminary
         );
       } catch (e) {

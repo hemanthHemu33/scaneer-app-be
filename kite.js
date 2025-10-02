@@ -7,7 +7,6 @@ import fs from "fs";
 import path from "path";
 import dotenv from "dotenv";
 import { fileURLToPath } from "url";
-import { ObjectId } from "mongodb";
 import { fetchAIData } from "./openAI.js";
 import { logSignalCreated, logSignalRejected } from "./auditLogger.js";
 import { logError, logWarnOncePerToken } from "./logger.js";
@@ -245,7 +244,9 @@ async function removeStockSymbol(symbol) {
       .collection("historical_data")
       .updateOne({}, { $unset: { [tokenStr]: "" } });
     // await db.collection('session_data').updateOne({}, { $unset: { [tokenStr]: '' } });
-    await db.collection("session_data").deleteOne({ token: Number(tokenStr) });
+    await db
+      .collection("session_data")
+      .deleteMany({ token: Number(tokenStr) });
     await db
       .collection("historical_session_data")
       .deleteMany({ token: Number(tokenStr) });
@@ -1196,7 +1197,7 @@ async function emitUnifiedSignal(signal, source, io = globalIO) {
   const exposureAllowed = checkExposureLimits(exposureOptions);
   const conflictAllowed = resolveSignalConflicts({
     symbol,
-    side: signal.direction === "Long" ? "long" : "short",
+    side: signal.direction === "Long" ? "buy" : "sell",
     strategy: signal.pattern,
   });
 
