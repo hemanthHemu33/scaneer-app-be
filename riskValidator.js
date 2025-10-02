@@ -3,8 +3,21 @@
 import { logSignalRejected } from './auditLogger.js';
 import { toISTDate } from './util.js';
 
+function resolveStrategyCategory(name = '') {
+  const s = String(name).toLowerCase();
+  if (s.includes('supertrend')) return 'trend';
+  if (s.includes('ema') && s.includes('reversal')) return 'mean-reversion';
+  if (s.includes('vwap')) return 'mean-reversion';
+  if (s.includes('triple top') || s.includes('double top') || s.includes('head & shoulders'))
+    return 'breakout';
+  if (s.includes('gap')) return 'breakout';
+  if (s.includes('scalp') || s.includes('fade')) return 'scalping';
+  if (s.includes('trend')) return 'trend';
+  return s;
+}
+
 export function getMinRRForStrategy(strategy, winrate = 0) {
-  const s = (strategy || '').toLowerCase();
+  const s = resolveStrategyCategory(strategy);
   switch (s) {
     case 'trend-following':
     case 'trend':
@@ -31,16 +44,18 @@ export function validateRR({ strategy, entry, stopLoss, target, winrate = 0 }) {
   const rr = Math.abs((target - entry) / risk);
   const minRR = getMinRRForStrategy(strategy, winrate);
   // extra rule: scalping/fade needs winrate > 0.65
-  const s = (strategy || '').toLowerCase();
+  const s = resolveStrategyCategory(strategy);
   if ((s === 'scalping' || s === 'fade') && winrate <= 0.65) {
     return { valid: false, rr, minRR, reason: 'winrateTooLowForScalping' };
   }
-  return { valid: rr >= minRR, rr, minRR };
+  if (rr < minRR) return { valid: false, rr, minRR, reason: 'rrBelowMin' };
+  return { valid: true, rr, minRR };
 }
 
 export function adjustStopLoss({ price, stopLoss, direction, atr, structureBreak = false }) {
   let newSL = stopLoss;
-  const thresh = atr * 0.5;
+  const safeAtr = Number.isFinite(atr) ? atr : price * 0.005;
+  const thresh = safeAtr * 0.5;
   if (structureBreak) {
     return direction === 'Long' ? Math.max(stopLoss, price) : Math.min(stopLoss, price);
   }
@@ -57,7 +72,7 @@ export function adjustStopLoss({ price, stopLoss, direction, atr, structureBreak
 }
 
 export function isSLInvalid({ price, stopLoss, atr, structureBreak = false }) {
-  if (structureBreak) return true;
+  // we don't auto-invalidate on structureBreak; SL is validated by distance
   const proximity = Math.abs(price - stopLoss);
   return proximity <= atr * 0.2;
 }
@@ -105,6 +120,15 @@ export function validateVolumeSpike({ volume, avgVolume, minSpike = 1.5 }) {
 }
 
 // Additional volatility and slippage checks
+function computeSpreadLimit({ price, maxSpread, maxSpreadPct }) {
+  if (typeof maxSpread === 'number') return maxSpread;
+  if (typeof maxSpreadPct === 'number') {
+    const p = Number(price);
+    if (Number.isFinite(p) && p > 0) return (maxSpreadPct / 100) * p;
+  }
+  return null;
+}
+
 export function validateVolatilitySlippage({
   atr,
   minATR,
@@ -147,18 +171,7 @@ export function validateVolatilitySlippage({
   )
     return false;
   {
-    // Spread limit handling (supports absolute or percentage thresholds)
-    let spreadLimit = null;
-    if (typeof maxSpread === 'number') {
-      spreadLimit = maxSpread;
-    } else if (typeof maxSpreadPct === 'number') {
-      if (typeof price === 'number' && price > 0) {
-        spreadLimit = (maxSpreadPct / 100) * price;
-      } else {
-        // Fallback: interpret maxSpreadPct as an absolute if price is unavailable
-        spreadLimit = maxSpreadPct;
-      }
-    }
+    const spreadLimit = computeSpreadLimit({ price, maxSpread, maxSpreadPct });
     if (typeof spread === 'number' && spreadLimit !== null && spread > spreadLimit)
       return false;
   }
@@ -183,16 +196,8 @@ export function checkMarketConditions({
   if (indexTrend && signalDirection && indexTrend !== signalDirection) return false;
   if (timeSinceSignal > 2 * 60 * 1000) return false;
   if (typeof spread === 'number') {
-    let spreadLimit = 0.3;
-    if (typeof maxSpread === 'number') {
-      spreadLimit = maxSpread;
-    } else if (typeof maxSpreadPct === 'number') {
-      if (typeof price === 'number' && price > 0) {
-        spreadLimit = (maxSpreadPct / 100) * price;
-      } else {
-        spreadLimit = maxSpreadPct;
-      }
-    }
+    let spreadLimit = computeSpreadLimit({ price, maxSpread, maxSpreadPct });
+    if (spreadLimit == null) spreadLimit = 0.3; // final fallback
     if (spread > spreadLimit) return false;
   }
   if (typeof volume === 'number' && volume <= 0) return false;
@@ -246,7 +251,7 @@ export function validatePreExecution(signal, market) {
     );
     logSignalRejected(
       signal.signalId || signal.algoSignal?.signalId,
-      'rRTooLow',
+      rrInfo.reason || 'rRTooLow',
       { rr: rrInfo.rr, minRR: rrInfo.minRR },
       signal
     );
@@ -280,6 +285,9 @@ export function validatePreExecution(signal, market) {
       timeSinceSignal: market.timeSinceSignal,
       volume: market.volume,
       spread: signal.spread,
+      price: market.currentPrice ?? signal.entry,
+      maxSpread: market.maxSpread,
+      maxSpreadPct: market.maxSpreadPct,
       newsImpact: market.newsImpact,
       eventActive: market.eventActive,
     })
