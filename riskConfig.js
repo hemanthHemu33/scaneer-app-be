@@ -1,28 +1,49 @@
-export const riskDefaults = Object.freeze({
-  maxDailyLoss: Number(process.env.MAX_DAILY_LOSS) || 5000,
-  maxDailyRisk: Number(process.env.MAX_DAILY_RISK) || 10000,
-  maxTradesPerDay: Number(process.env.MAX_TRADES_PER_DAY) || 20,
-  maxTradesPerInstrument: Number(process.env.MAX_TRADES_PER_INSTRUMENT) || 3,
-  maxTradesPerSector: Number(process.env.MAX_TRADES_PER_SECTOR) || 10,
-  maxLossStreak: Number(process.env.MAX_LOSS_STREAK) || 3,
+const num = (v) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : undefined; // preserves 0
+};
+
+const configuredDefaults = {
+  // Core loss/risk caps
+  maxDailyLoss: num(process.env.MAX_DAILY_LOSS),
+  maxDailyRisk: num(process.env.MAX_DAILY_RISK),
+  maxTradesPerDay: num(process.env.MAX_TRADES_PER_DAY),
+  maxTradesPerInstrument: num(process.env.MAX_TRADES_PER_INSTRUMENT),
+  maxTradesPerSector: num(process.env.MAX_TRADES_PER_SECTOR),
+  maxLossStreak: num(process.env.MAX_LOSS_STREAK),
+  maxOpenPositions: num(process.env.MAX_OPEN_POSITIONS),
+
   // Signals & throttles
-  maxSignalsPerDay: isFinite(Number(process.env.MAX_SIGNALS_PER_DAY))
-    ? Number(process.env.MAX_SIGNALS_PER_DAY)
-    : 300,
-  signalFloodThreshold: Number(process.env.SIGNAL_FLOOD_THRESHOLD) || 0,
-  volatilityThrottleMs: Number(process.env.VOLATILITY_THROTTLE_MS) || 0,
-  maxSimultaneousSignals: Number(process.env.MAX_SIMULTANEOUS_SIGNALS) || 0,
+  maxSignalsPerDay: num(process.env.MAX_SIGNALS_PER_DAY),
+  signalFloodThreshold: num(process.env.SIGNAL_FLOOD_THRESHOLD),
+  signalFloodThrottleMs: num(process.env.SIGNAL_FLOOD_THROTTLE_MS),
+  volatilityThrottleMs: num(process.env.VOLATILITY_THROTTLE_MS),
+  maxSimultaneousSignals: num(process.env.MAX_SIMULTANEOUS_SIGNALS),
 
   // Optional drawdown controls (0 disables)
-  drawdownReduce25Pct: Number(process.env.DD_REDUCE_25_PCT) || 0.05,
-  drawdownReduce50Pct: Number(process.env.DD_REDUCE_50_PCT) || 0.1,
-  drawdownHaltPct: Number(process.env.DD_HALT_PCT) || 0.15,
-  equityDrawdownLimitPct: Number(process.env.EQUITY_DRAWDOWN_LIMIT_PCT) || 0,
-  maxDailyLossPct: Number(process.env.MAX_DAILY_LOSS_PCT) || 0,
-  maxCumulativeLoss: Number(process.env.MAX_CUMULATIVE_LOSS) || 0,
-  maxWeeklyDrawdown: Number(process.env.MAX_WEEKLY_DRAWDOWN) || 0,
-  maxMonthlyDrawdown: Number(process.env.MAX_MONTHLY_DRAWDOWN) || 0,
-  maxLossPerTradePct: Number(process.env.MAX_LOSS_PER_TRADE_PCT) || 0,
-  maxOpenPositions: Number(process.env.MAX_OPEN_POSITIONS) || 0,
-});
+  drawdownReduce25Pct: num(process.env.DD_REDUCE_25_PCT),
+  drawdownReduce50Pct: num(process.env.DD_REDUCE_50_PCT),
+  drawdownHaltPct: num(process.env.DD_HALT_PCT),
+  equityDrawdownLimitPct: num(process.env.EQUITY_DRAWDOWN_LIMIT_PCT),
+  maxDailyLossPct: num(process.env.MAX_DAILY_LOSS_PCT),
+  maxCumulativeLoss: num(process.env.MAX_CUMULATIVE_LOSS),
+  maxWeeklyDrawdown: num(process.env.MAX_WEEKLY_DRAWDOWN),
+  maxMonthlyDrawdown: num(process.env.MAX_MONTHLY_DRAWDOWN),
+  maxLossPerTradePct: num(process.env.MAX_LOSS_PER_TRADE_PCT),
+
+  // Advanced (optional) – used by riskEngine if present
+  duplicateWindowMs: num(process.env.DUPLICATE_WINDOW_MS),
+  correlationWindowMs: num(process.env.CORRELATION_WINDOW_MS),
+  timeBucketMs: num(process.env.TIME_BUCKET_MS),
+  highVolatilityThresh: num(process.env.HIGH_VOLATILITY_THRESH),
+  maxSpreadSLRatio: num(process.env.MAX_SPREAD_SL_RATIO),
+  maxSLATR: num(process.env.MAX_SL_ATR),
+  minRR: num(process.env.MIN_RR),
+};
+
+export const riskDefaults = Object.freeze(
+  Object.fromEntries(
+    Object.entries(configuredDefaults).filter(([, value]) => value !== undefined)
+  )
+);
 
