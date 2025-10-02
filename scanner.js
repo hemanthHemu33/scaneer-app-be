@@ -534,11 +534,25 @@ export function getSignalHistory() {
 // Rank signals and send top one to execution
 export async function rankAndExecute(signals = []) {
   const { selectTopSignal } = await import("./signalRanker.js");
+  const { validatePreExecution } = await import("./riskValidator.js");
   const top = selectTopSignal(signals);
   if (top) {
     const { refreshAccountBalance } = await import("./account.js");
     await refreshAccountBalance();
     accountBalance = getAccountBalance();
+    // final pre-exec gate (uses robust spread% logic)
+    const ok = validatePreExecution(top, {
+      avgAtr: top.atr,
+      indexTrend: top.isUptrend ? "up" : top.isDowntrend ? "down" : "sideways",
+      timeSinceSignal: 0,
+      volume: top.liquidity ?? 0,
+      currentPrice: top.entry,
+      maxSpread: FILTERS.maxSpread,
+      maxSpreadPct: FILTERS.maxSpreadPct,
+      winrate:
+        marketContext?.strategyWinrates?.[top.strategy] ?? marketContext?.winrate ?? 0,
+    });
+    if (!ok) return null;
     const requiredMargin = calculateRequiredMargin({
       price: top.entry,
       qty: top.qty,
