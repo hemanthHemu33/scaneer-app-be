@@ -30,9 +30,17 @@ const defaultConfig = {
   maxSimultaneousSignals: 0,
   maxSignalsPerDay: Number.POSITIVE_INFINITY,
   signalFloodThreshold: Number.POSITIVE_INFINITY,
+  signalFloodThrottleMs: 60_000,
   volatilityThrottleMs: 60_000,
+  timeBucketMs: 60 * 1000,
+  duplicateWindowMs: 5 * 60 * 1000,
+  correlationWindowMs: 5 * 60 * 1000,
   equityDrawdownLimitPct: 0.1,
   maxOpenPositions: 0,
+  highVolatilityThresh: Number.POSITIVE_INFINITY,
+  maxSpreadSLRatio: 0.3,
+  maxSLATR: 2,
+  minRR: 2,
 };
 
 const riskDebug = process.env.RISK_DEBUG === "true";
@@ -194,7 +202,11 @@ export function isSignalValid(signal, ctx = {}) {
 
   riskState.signalCount += 1;
   if (riskState.systemPaused) return recordRejection("systemPaused");
-  const bucketMs = ctx.timeBucketMs || 60 * 1000;
+  const bucketMs = Number.isFinite(ctx.timeBucketMs)
+    ? ctx.timeBucketMs
+    : Number.isFinite(riskState.config.timeBucketMs)
+    ? riskState.config.timeBucketMs
+    : 60 * 1000;
   const bucket = Math.floor(now / bucketMs);
   const count = riskState.timeBuckets.get(bucket) || 0;
   const maxSimul = Number.isFinite(ctx.maxSimultaneousSignals)
@@ -216,24 +228,41 @@ export function isSignalValid(signal, ctx = {}) {
       max: maxSignals,
       count: riskState.signalCount,
     });
+  const highVolThresh = Number.isFinite(ctx.highVolatilityThresh)
+    ? ctx.highVolatilityThresh
+    : Number.isFinite(riskState.config.highVolatilityThresh)
+    ? riskState.config.highVolatilityThresh
+    : undefined;
   if (
-    typeof ctx.highVolatilityThresh === "number" &&
+    Number.isFinite(highVolThresh) &&
     typeof ctx.volatility === "number" &&
-    ctx.volatility > ctx.highVolatilityThresh
+    ctx.volatility > highVolThresh
   ) {
-    const interval =
-      (ctx.throttleMs ?? riskState.volatilityThrottleMs) || 60000;
+    const interval = Number.isFinite(ctx.throttleMs)
+      ? ctx.throttleMs
+      : Number.isFinite(riskState.volatilityThrottleMs)
+      ? riskState.volatilityThrottleMs
+      : 60000;
     if (now - riskState.lastTradeTime < interval)
       return recordRejection("volatilityThrottle", {
         interval,
         lastTradeTime: riskState.lastTradeTime,
       });
   }
+  const floodThreshold = Number.isFinite(ctx.signalFloodThreshold)
+    ? ctx.signalFloodThreshold
+    : Number.isFinite(riskState.config.signalFloodThreshold)
+    ? riskState.config.signalFloodThreshold
+    : undefined;
   if (
-    typeof ctx.signalFloodThreshold === "number" &&
-    riskState.signalCount > ctx.signalFloodThreshold
+    Number.isFinite(floodThreshold) &&
+    riskState.signalCount > floodThreshold
   ) {
-    const interval = ctx.signalFloodThrottleMs || 60000;
+    const interval = Number.isFinite(ctx.signalFloodThrottleMs)
+      ? ctx.signalFloodThrottleMs
+      : Number.isFinite(riskState.config.signalFloodThrottleMs)
+      ? riskState.config.signalFloodThrottleMs
+      : 60000;
     if (now - riskState.lastTradeTime < interval)
       return recordRejection("signalFloodThrottle", {
         interval,
@@ -569,19 +598,28 @@ export function isSignalValid(signal, ctx = {}) {
       rr: rr.rr,
       min: rr.minRR,
     });
-  const minRR = ctx.minRR ?? 2;
+  const minRR = Number.isFinite(ctx.minRR)
+    ? ctx.minRR
+    : Number.isFinite(riskState.config.minRR)
+    ? riskState.config.minRR
+    : 2;
   if (rr.rr < minRR)
     return recordRejection("rrBelowThreshold", { rr: rr.rr, minRR });
 
+  const maxSLATR = Number.isFinite(ctx.maxSLATR)
+    ? ctx.maxSLATR
+    : Number.isFinite(riskState.config.maxSLATR)
+    ? riskState.config.maxSLATR
+    : 2;
   if (
     Number.isFinite(signal.atr) &&
     signal.atr > 0 &&
-    Math.abs(signal.entry - signal.stopLoss) > (ctx.maxSLATR ?? 2) * signal.atr
+    Math.abs(signal.entry - signal.stopLoss) > maxSLATR * signal.atr
   )
     return recordRejection("slAtrTooWide", {
       atr: signal.atr,
       slDistance: Math.abs(signal.entry - signal.stopLoss),
-      maxMultiplier: ctx.maxSLATR ?? 2,
+      maxMultiplier: maxSLATR,
     });
 
   if (
@@ -778,15 +816,20 @@ export function isSignalValid(signal, ctx = {}) {
       lossPct,
       maxPct: maxPerTrade,
     });
+  const maxSpreadSLRatio = Number.isFinite(ctx.maxSpreadSLRatio)
+    ? ctx.maxSpreadSLRatio
+    : Number.isFinite(riskState.config.maxSpreadSLRatio)
+    ? riskState.config.maxSpreadSLRatio
+    : 0.3;
   if (
     typeof signal.spread === "number" &&
     slDist > 0 &&
-    signal.spread / slDist > (ctx.maxSpreadSLRatio ?? 0.3)
+    signal.spread / slDist > maxSpreadSLRatio
   )
     return recordRejection("spreadVsSl", {
       spread: signal.spread,
       slDist,
-      maxRatio: ctx.maxSpreadSLRatio ?? 0.3,
+      maxRatio: maxSpreadSLRatio,
     });
 
   const marketOk = checkMarketConditions({
@@ -822,7 +865,11 @@ export function isSignalValid(signal, ctx = {}) {
   const key = `${signal.stock || signal.symbol}-${signal.direction}-${
     signal.pattern || signal.algoSignal?.strategy || signal.strategy || "unknown"
   }`;
-  const dupWindow = ctx.duplicateWindowMs || 5 * 60 * 1000;
+  const dupWindow = Number.isFinite(ctx.duplicateWindowMs)
+    ? ctx.duplicateWindowMs
+    : Number.isFinite(riskState.config.duplicateWindowMs)
+    ? riskState.config.duplicateWindowMs
+    : 5 * 60 * 1000;
   if (
     riskState.duplicateMap.has(key) &&
     now - riskState.duplicateMap.get(key) < dupWindow
@@ -838,7 +885,11 @@ export function isSignalValid(signal, ctx = {}) {
   }
 
   const group = signal.correlationGroup || signal.sector;
-  const corrWindow = ctx.correlationWindowMs || 5 * 60 * 1000;
+  const corrWindow = Number.isFinite(ctx.correlationWindowMs)
+    ? ctx.correlationWindowMs
+    : Number.isFinite(riskState.config.correlationWindowMs)
+    ? riskState.config.correlationWindowMs
+    : 5 * 60 * 1000;
   if (group) {
     if (
       riskState.correlationMap.has(group) &&
