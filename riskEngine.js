@@ -14,6 +14,27 @@ import { calculateStdDev, calculateZScore } from "./util.js";
 import { resolveSignalConflicts } from "./portfolioContext.js";
 import { riskDefaults } from "./riskConfig.js";
 
+// Safe defaults if riskDefaults is partial or missing keys
+const defaultConfig = {
+  maxDailyLoss: 50000,
+  maxDailyLossPct: 0,
+  maxCumulativeLoss: 0,
+  maxWeeklyDrawdown: 0,
+  maxMonthlyDrawdown: 0,
+  maxLossPerTradePct: 0.03,
+  maxDailyRisk: Number.POSITIVE_INFINITY,
+  maxTradesPerDay: 999,
+  maxTradesPerInstrument: 5,
+  maxTradesPerSector: 10,
+  maxLossStreak: 3,
+  maxSimultaneousSignals: 0,
+  maxSignalsPerDay: Number.POSITIVE_INFINITY,
+  signalFloodThreshold: Number.POSITIVE_INFINITY,
+  volatilityThrottleMs: 60_000,
+  equityDrawdownLimitPct: 0.1,
+  maxOpenPositions: 0,
+};
+
 const riskDebug = process.env.RISK_DEBUG === "true";
 
 function getWeekNumber(d = new Date()) {
@@ -23,7 +44,7 @@ function getWeekNumber(d = new Date()) {
 
 class RiskState {
   constructor(config = {}) {
-    this.config = config;
+    this.config = { ...defaultConfig, ...config };
     this.duplicateMap = new Map();
     this.correlationMap = new Map();
     this.watchList = new Set();
@@ -176,10 +197,9 @@ export function isSignalValid(signal, ctx = {}) {
   const bucketMs = ctx.timeBucketMs || 60 * 1000;
   const bucket = Math.floor(now / bucketMs);
   const count = riskState.timeBuckets.get(bucket) || 0;
-  const maxSimul =
-    (typeof ctx.maxSimultaneousSignals === "number"
-      ? ctx.maxSimultaneousSignals
-      : riskState.config.maxSimultaneousSignals) || 0;
+  const maxSimul = Number.isFinite(ctx.maxSimultaneousSignals)
+    ? ctx.maxSimultaneousSignals
+    : riskState.config.maxSimultaneousSignals;
   if (maxSimul && count >= maxSimul)
     return recordRejection("tooManySimultaneousSignals", {
       max: maxSimul,
@@ -323,10 +343,9 @@ export function isSignalValid(signal, ctx = {}) {
     });
   if (ctx.cooloffAfterLoss && riskState.lastTradeWasLoss)
     return recordRejection("cooloffAfterLoss");
-  const maxOpen =
-    (typeof ctx.maxOpenPositions === "number"
-      ? ctx.maxOpenPositions
-      : riskState.config.maxOpenPositions) || 0;
+  const maxOpen = Number.isFinite(ctx.maxOpenPositions)
+    ? ctx.maxOpenPositions
+    : riskState.config.maxOpenPositions;
   if (
     maxOpen &&
     typeof ctx.openPositionsCount === "number" &&
@@ -546,7 +565,7 @@ export function isSignalValid(signal, ctx = {}) {
     winrate: ctx.winrate || 0,
   });
   if (!rr.valid)
-    return recordRejection(rr.reason || "rrBelowMinimum", {
+    return recordRejection(rr.reason ?? "rrBelowMinimum", {
       rr: rr.rr,
       min: rr.minRR,
     });
@@ -555,7 +574,8 @@ export function isSignalValid(signal, ctx = {}) {
     return recordRejection("rrBelowThreshold", { rr: rr.rr, minRR });
 
   if (
-    signal.atr &&
+    Number.isFinite(signal.atr) &&
+    signal.atr > 0 &&
     Math.abs(signal.entry - signal.stopLoss) > (ctx.maxSLATR ?? 2) * signal.atr
   )
     return recordRejection("slAtrTooWide", {
@@ -568,21 +588,25 @@ export function isSignalValid(signal, ctx = {}) {
     !validateATRStopLoss({
       entry: signal.entry,
       stopLoss: signal.stopLoss,
-      atr: signal.atr,
+      atr: Number.isFinite(signal.atr) ? signal.atr : undefined,
     })
   )
     return recordRejection("atrStopLossInvalid");
 
+  const refPrice = Number.isFinite(ctx.currentPrice)
+    ? ctx.currentPrice
+    : signal.entry;
+
   if (
     isSLInvalid({
-      price: ctx.currentPrice ?? signal.entry,
+      price: refPrice,
       stopLoss: signal.stopLoss,
-      atr: signal.atr,
+      atr: Number.isFinite(signal.atr) ? signal.atr : undefined,
       structureBreak: ctx.structureBreak,
     })
   )
     return recordRejection("slInvalid", {
-      price: ctx.currentPrice ?? signal.entry,
+      price: refPrice,
       stopLoss: signal.stopLoss,
     });
 
@@ -600,26 +624,35 @@ export function isSignalValid(signal, ctx = {}) {
       resistance: signal.resistance,
     });
 
-  if (
-    !validateVolumeSpike({
-      volume: signal.volume ?? ctx.volume,
-      avgVolume: ctx.avgVolume,
-    })
-  )
+  const volNow = Number.isFinite(signal.volume)
+    ? signal.volume
+    : Number.isFinite(signal.liquidity)
+    ? signal.liquidity
+    : ctx.volume;
+  const volAvg = Number.isFinite(ctx.avgVolume) ? ctx.avgVolume : undefined;
+  if (!validateVolumeSpike({ volume: volNow, avgVolume: volAvg }))
     return recordRejection("volumeSpikeFail", {
-      volume: signal.volume ?? ctx.volume,
-      avgVolume: ctx.avgVolume,
+      volume: volNow,
+      avgVolume: volAvg,
     });
   if (
     ctx.requireMomentum &&
     typeof ctx.rsi === "number" &&
-    ((signal.direction === "Long" && ctx.rsi < (ctx.minRsi ?? 55)) ||
-      (signal.direction === "Short" && ctx.rsi > (ctx.maxRsi ?? 45)))
+    ((
+      signal.direction === "Long" &&
+      ctx.minRsi != null &&
+      ctx.rsi < ctx.minRsi
+    ) ||
+      (
+        signal.direction === "Short" &&
+        ctx.maxRsi != null &&
+        ctx.rsi > ctx.maxRsi
+      ))
   )
     return recordRejection("momentumRsi", {
       rsi: ctx.rsi,
-      minRsi: ctx.minRsi ?? 55,
-      maxRsi: ctx.maxRsi ?? 45,
+      minRsi: ctx.minRsi,
+      maxRsi: ctx.maxRsi,
       direction: signal.direction,
     });
   if (
@@ -689,7 +722,7 @@ export function isSignalValid(signal, ctx = {}) {
       spread: signal.spread,
       maxSpreadPct: ctx.maxSpreadPct,
       maxSpread: ctx.maxSpread,
-      price: ctx.currentPrice ?? signal.entry,
+      price: refPrice,
     })
   )
     return recordRejection("volatilitySlippage", {
@@ -766,7 +799,7 @@ export function isSignalValid(signal, ctx = {}) {
     spread: signal.spread,
     maxSpread: ctx.maxSpread,
     maxSpreadPct: ctx.maxSpreadPct,
-    price: ctx.currentPrice ?? signal.entry,
+    price: refPrice,
     newsImpact: ctx.newsImpact,
     eventActive: ctx.eventActive,
   });
@@ -787,7 +820,7 @@ export function isSignalValid(signal, ctx = {}) {
   if (!timingOk) return recordRejection("timingFilters");
 
   const key = `${signal.stock || signal.symbol}-${signal.direction}-${
-    signal.pattern || signal.algoSignal?.strategy || signal.strategy
+    signal.pattern || signal.algoSignal?.strategy || signal.strategy || "unknown"
   }`;
   const dupWindow = ctx.duplicateWindowMs || 5 * 60 * 1000;
   if (
@@ -820,4 +853,20 @@ export function isSignalValid(signal, ctx = {}) {
 
   if (ctx.addToWatchlist) riskState.watchList.add(inst);
   return debugTrace ? { ok: true, trace: debugTrace } : true;
+}
+
+export function getRiskStateSnapshot() {
+  const s = riskState;
+  return {
+    dailyLoss: s.dailyLoss,
+    weeklyLoss: s.weeklyLoss,
+    monthlyLoss: s.monthlyLoss,
+    dailyRisk: s.dailyRisk,
+    equity: s.equity,
+    equityPeak: s.equityPeak,
+    consecutiveLosses: s.consecutiveLosses,
+    tradeCount: s.tradeCount,
+    signalCount: s.signalCount,
+    systemPaused: s.systemPaused,
+  };
 }
