@@ -3,6 +3,18 @@ import { detectAllPatterns, sanitizeCandles } from './util.js';
 import { detectGapUpOrDown } from './strategies.js';
 import { RISK_REWARD_RATIO, calculatePositionSize } from './positionSizing.js';
 
+const DEFAULT_SUPERTREND_SETTINGS = { atrLength: 10, multiplier: 3 };
+
+function buildSeriesKey(ctx = {}, fallback = 'strategy') {
+  if (!ctx || typeof ctx !== 'object') return null;
+  const symbol = ctx.symbol ?? null;
+  const timeframe = ctx.timeframe ?? ctx.interval ?? null;
+  const suffix = fallback || 'strategy';
+  if (symbol) return `${symbol}:${timeframe || suffix}`;
+  if (timeframe) return `${timeframe}:${suffix}`;
+  return null;
+}
+
 export function strategySupertrend(context = {}) {
   const {
     candles = [],
@@ -21,7 +33,13 @@ export function strategySupertrend(context = {}) {
     : [];
   if (cleanCandles.length < 20) return null;
 
-  const features = providedFeatures ?? computeFeatures(cleanCandles);
+  const seriesKey = buildSeriesKey(context, 'supertrend');
+  const features =
+    providedFeatures ??
+    computeFeatures(cleanCandles, {
+      seriesKey,
+      supertrendSettings: DEFAULT_SUPERTREND_SETTINGS,
+    });
   const { rsi, supertrend } = features || {};
   const atr = contextAtr ?? features?.atr ?? getATR(cleanCandles, 14);
   const last = cleanCandles[cleanCandles.length - 1];
@@ -117,7 +135,13 @@ export function strategyEMAReversal(context = {}) {
     : [];
   if (cleanCandles.length < 20) return null;
 
-  const features = providedFeatures ?? computeFeatures(cleanCandles);
+  const seriesKey = buildSeriesKey(context, 'ema');
+  const features =
+    providedFeatures ??
+    computeFeatures(cleanCandles, {
+      seriesKey,
+      supertrendSettings: DEFAULT_SUPERTREND_SETTINGS,
+    });
 
   const closes = cleanCandles.map(c => c.close);
   const ema20 = calculateEMA(closes, 20);
@@ -215,7 +239,13 @@ export function strategyTripleTop(context = {}) {
     : [];
   if (!Array.isArray(cleanCandles) || cleanCandles.length < 7) return null;
 
-  const featureSet = features ?? computeFeatures(cleanCandles);
+  const seriesKey = buildSeriesKey(context, 'tripleTop');
+  const featureSet =
+    features ??
+    computeFeatures(cleanCandles, {
+      seriesKey,
+      supertrendSettings: DEFAULT_SUPERTREND_SETTINGS,
+    });
   if (!featureSet) return null;
 
   const atr = (contextAtr ?? featureSet?.atr ?? getATR(cleanCandles, 14)) ?? 0;
@@ -276,7 +306,13 @@ export function strategyVWAPReversal(context = {}) {
     : [];
   if (!Array.isArray(cleanCandles) || cleanCandles.length < 5) return null;
 
-  const featureSet = features ?? computeFeatures(cleanCandles);
+  const seriesKey = buildSeriesKey(context, 'vwap');
+  const featureSet =
+    features ??
+    computeFeatures(cleanCandles, {
+      seriesKey,
+      supertrendSettings: DEFAULT_SUPERTREND_SETTINGS,
+    });
   if (!featureSet) return null;
 
   const atr = (contextAtr ?? featureSet?.atr ?? getATR(cleanCandles, 14)) ?? 0;
@@ -341,7 +377,13 @@ export function patternBasedStrategy(context = {}) {
     : [];
   if (!Array.isArray(cleanCandles) || cleanCandles.length < 5) return null;
 
-  const featureSet = features ?? computeFeatures(cleanCandles);
+  const seriesKey = buildSeriesKey(context, 'pattern');
+  const featureSet =
+    features ??
+    computeFeatures(cleanCandles, {
+      seriesKey,
+      supertrendSettings: DEFAULT_SUPERTREND_SETTINGS,
+    });
   if (!featureSet) return null;
 
   const atr = (contextAtr ?? featureSet?.atr ?? getATR(cleanCandles, 14)) ?? 0;
@@ -472,7 +514,13 @@ export function evaluateAllStrategies(context = {}) {
     const cleanCandles = sanitizeCandles(base.candles);
     base.candles = cleanCandles;
     base.__sanitizedCandles = true;
-    base.features = base.features ?? computeFeatures(cleanCandles);
+    const seriesKey = buildSeriesKey(base, 'strategy');
+    base.features =
+      base.features ??
+      computeFeatures(cleanCandles, {
+        seriesKey,
+        supertrendSettings: DEFAULT_SUPERTREND_SETTINGS,
+      });
     base.atr = base.atr ?? base.features?.atr ?? getATR(cleanCandles, 14);
   }
   const strategies = [

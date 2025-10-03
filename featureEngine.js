@@ -23,57 +23,141 @@ export function calculateEMA(prices, length, key) {
   return ema;
 }
 
-export function calculateRSI(prices, length) {
-  if (!prices || prices.length < 2) return null;
-  const lookback = Math.min(length, prices.length - 1);
-  let gains = 0,
-    losses = 0;
-  for (let i = prices.length - lookback - 1; i < prices.length - 1; i++) {
-    const diff = prices[i + 1] - prices[i];
-    if (diff >= 0) gains += diff;
-    else losses -= diff;
+export function calculateRSI(prices, length = 14) {
+  const period = Math.max(1, Math.floor(length));
+  if (!prices || prices.length < period + 1) return null;
+  let gain = 0,
+    loss = 0;
+  for (let i = 1; i <= period; i++) {
+    const diff = prices[i] - prices[i - 1];
+    if (diff > 0) gain += diff;
+    else loss -= diff;
   }
-  const rs = gains / (losses || 1);
+  gain /= period;
+  loss /= period;
+  for (let i = period + 1; i < prices.length; i++) {
+    const diff = prices[i] - prices[i - 1];
+    const up = diff > 0 ? diff : 0;
+    const down = diff < 0 ? -diff : 0;
+    gain = (gain * (period - 1) + up) / period;
+    loss = (loss * (period - 1) + down) / period;
+  }
+  const rs = loss === 0 ? Infinity : gain / loss;
   return 100 - 100 / (1 + rs);
 }
 
-export function calculateSupertrend(candles, atrLength = 14) {
-  const lastCandle = candles[candles.length - 1];
+export function calculateSupertrend(candles, atrLength = 10, multiplier = 3) {
+  const period = Math.max(1, Math.floor(atrLength));
+  const mult = Number.isFinite(multiplier) ? multiplier : 3;
+  if (!candles || candles.length < period + 1) return null;
+  const n = candles.length;
+  const trs = [];
+  for (let i = 1; i < n; i++) {
+    const h = candles[i].high,
+      l = candles[i].low,
+      pc = candles[i - 1].close;
+    trs.push(Math.max(h - l, Math.abs(h - pc), Math.abs(l - pc)));
+  }
+  if (trs.length < period) return null;
+  let atr = trs.slice(0, period).reduce((a, b) => a + b, 0) / period;
+  const atrSeries = new Array(n).fill(null);
+  atrSeries[period] = atr;
+  for (let i = period + 1; i < n; i++) {
+    atr = (atr * (period - 1) + trs[i - 1]) / period;
+    atrSeries[i] = atr;
+  }
+
+  const hl2 = candles.map((c) => (c.high + c.low) / 2);
+  let finalUpper = 0;
+  let finalLower = 0;
+  let supertrend = 0;
+  let trendUp = true;
+
+  for (let i = period; i < n; i++) {
+    const atrValue = atrSeries[i];
+    if (atrValue == null) continue;
+    const basicUpper = hl2[i] + mult * atrValue;
+    const basicLower = hl2[i] - mult * atrValue;
+
+    if (i === period) {
+      finalUpper = basicUpper;
+      finalLower = basicLower;
+      trendUp = candles[i].close >= basicLower;
+      supertrend = trendUp ? finalLower : finalUpper;
+      continue;
+    }
+
+    const prevFinalUpper = finalUpper;
+    const prevFinalLower = finalLower;
+    const prevSupertrend = supertrend;
+    const prevClose = candles[i - 1].close;
+
+    finalUpper =
+      basicUpper < prevFinalUpper || prevClose > prevFinalUpper
+        ? basicUpper
+        : prevFinalUpper;
+    finalLower =
+      basicLower > prevFinalLower || prevClose < prevFinalLower
+        ? basicLower
+        : prevFinalLower;
+
+    if (prevSupertrend === prevFinalUpper) {
+      if (candles[i].close <= finalUpper) {
+        supertrend = finalUpper;
+        trendUp = false;
+      } else {
+        supertrend = finalLower;
+        trendUp = true;
+      }
+    } else {
+      if (candles[i].close >= finalLower) {
+        supertrend = finalLower;
+        trendUp = true;
+      } else {
+        supertrend = finalUpper;
+        trendUp = false;
+      }
+    }
+  }
+
   return {
-    signal: lastCandle.close > lastCandle.open ? "Buy" : "Sell",
-    level: lastCandle.close,
+    signal: trendUp ? "Buy" : "Sell",
+    level: supertrend,
+    upperBand: finalUpper,
+    lowerBand: finalLower,
+    trend: trendUp ? "up" : "down",
   };
 }
 
 export function getATR(data, period = 14) {
-  if (!data || data.length < 2) return null;
-  const len = Math.min(Math.floor(period), data.length - 1);
-  let trSum = 0;
-  for (let i = data.length - len; i < data.length; i++) {
-    const high = data[i].high,
-      low = data[i].low,
-      prevClose = data[i - 1].close;
-    const tr = Math.max(
-      high - low,
-      Math.abs(high - prevClose),
-      Math.abs(low - prevClose)
-    );
-    trSum += tr;
+  const len = Math.max(1, Math.floor(period));
+  if (!data || data.length < len + 1) return null;
+  const trs = [];
+  for (let i = 1; i < data.length; i++) {
+    const h = data[i].high,
+      l = data[i].low,
+      pc = data[i - 1].close;
+    trs.push(Math.max(h - l, Math.abs(h - pc), Math.abs(l - pc)));
   }
-  return trSum / len;
+  if (trs.length < len) return null;
+  let atr = trs.slice(0, len).reduce((a, b) => a + b, 0) / len;
+  for (let i = len; i < trs.length; i++) {
+    atr = (atr * (len - 1) + trs[i]) / len;
+  }
+  return atr;
 }
 
 export function calculateVWAP(candles) {
   if (!candles || candles.length === 0) return null;
   const last = candles[candles.length - 1];
-  const refDate = new Date(last.timestamp || last.date);
+  const refDate = new Date(last.ts ?? last.timestamp ?? last.date);
   refDate.setHours(0, 0, 0, 0);
   const fallbackTP = (last.high + last.low + last.close) / 3;
   let totalPV = 0,
     totalVolume = 0,
     count = 0;
   candles.forEach((c) => {
-    const ts = new Date(c.timestamp || c.date);
+    const ts = new Date(c.ts ?? c.timestamp ?? c.date);
     if (ts < refDate) return;
     const typicalPrice = (c.high + c.low + c.close) / 3;
     if (c.volume && c.volume > 0) {
@@ -310,7 +394,8 @@ export function calculateWilliamsR(candles, length = 14) {
   const hh = Math.max(...highs.slice(-length));
   const ll = Math.min(...lows.slice(-length));
   const close = candles.at(-1).close;
-  return ((hh - close) / (hh - ll)) * -100;
+  const denom = hh - ll || 1;
+  return ((hh - close) / denom) * -100;
 }
 
 export function calculateTRIX(prices, length = 15) {
@@ -1097,7 +1182,11 @@ export function classifyVolatility(atr, price) {
   return 'Medium';
 }
 
-export function computeFeatures(candles = []) {
+export function computeFeatures(candles = [], opts = {}) {
+  const {
+    seriesKey = null,
+    supertrendSettings = { atrLength: 10, multiplier: 3 },
+  } = opts;
   if (!Array.isArray(candles) || candles.length === 0) return null;
 
   const valid = candles.filter(
@@ -1110,16 +1199,48 @@ export function computeFeatures(candles = []) {
   );
 
   if (valid.length === 0) return null;
+  const getTime = (c) => {
+    if (c == null) return null;
+    if (Number.isFinite(c.ts)) return +c.ts;
+    const raw = c.timestamp ?? c.date;
+    if (!raw) return null;
+    if (raw instanceof Date) {
+      const t = raw.getTime();
+      return Number.isFinite(t) ? t : null;
+    }
+    const parsed = new Date(raw).getTime();
+    return Number.isFinite(parsed) ? parsed : null;
+  };
+  if (valid.some((c) => getTime(c) != null)) {
+    valid.sort((a, b) => {
+      const ta = getTime(a);
+      const tb = getTime(b);
+      if (ta == null || tb == null) return 0;
+      return ta - tb;
+    });
+  }
 
   const closes = valid.map((c) => c.close);
   const highs = valid.map((c) => c.high);
   const lows = valid.map((c) => c.low);
   const volumes = valid.map((c) => c.volume || 0);
 
-  const ema9 = calculateEMA(closes, 9);
-  const ema21 = calculateEMA(closes, 21);
-  const ema50 = calculateEMA(closes, 50);
-  const ema200 = calculateEMA(closes, 200);
+  const ema9 = calculateEMA(closes, 9, seriesKey ? `${seriesKey}:ema9` : undefined);
+  const ema21 = calculateEMA(
+    closes,
+    21,
+    seriesKey ? `${seriesKey}:ema21` : undefined
+  );
+  const ema50 = calculateEMA(
+    closes,
+    50,
+    seriesKey ? `${seriesKey}:ema50` : undefined
+  );
+  const ema200 = calculateEMA(
+    closes,
+    200,
+    seriesKey ? `${seriesKey}:ema200` : undefined
+  );
   const sma50 = calculateSMA(closes, 50);
   const wma50 = calculateWMA(closes, 50);
   const hma50 = calculateHMA(closes, 50);
@@ -1157,7 +1278,11 @@ export function computeFeatures(candles = []) {
   const emaSlope = calculateEMASlope(closes, 21);
   const trendStrength = adx ?? Math.abs((emaSlope / (ema21 || 1)) * 100);
   const volatilityClass = classifyVolatility(atr, closes.at(-1));
-  const supertrend = calculateSupertrend(valid, 50);
+  const supertrend = calculateSupertrend(
+    valid,
+    supertrendSettings.atrLength ?? 10,
+    supertrendSettings.multiplier ?? 3
+  );
   const vwap = calculateVWAP(valid);
   const pivot = calculatePivotPoints(valid);
   const fibRetracements = calculateFibonacciRetracements(Math.max(...highs), Math.min(...lows));
@@ -1197,7 +1322,7 @@ export function computeFeatures(candles = []) {
   const rsiLaguerre = calculateRSILaguerre(closes);
   const trendIntensity = calculateTrendIntensityIndex(closes);
   const bollingerPB = calculateBollingerPB(closes);
-  const macdHist = calculateMACDHistogram(closes);
+  const macdHist = macd ? macd.histogram : null;
   const coppock = calculateCoppockCurve(closes);
   const priceOsc = calculatePriceOscillator(closes);
   const mcGinley = calculateMcGinleyDynamic(closes);

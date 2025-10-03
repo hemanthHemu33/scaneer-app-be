@@ -63,6 +63,17 @@ function avg(arr) {
   return arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
 }
 
+function seriesKeyFor(ctx, fallback = "strategy") {
+  if (!ctx || typeof ctx !== "object") return null;
+  const symbol =
+    ctx.symbol ?? ctx.stock ?? ctx.instrument ?? ctx.ticker ?? ctx.asset ?? null;
+  const timeframe = ctx.timeframe ?? ctx.interval ?? ctx.tf ?? null;
+  const suffix = fallback || "strategy";
+  if (symbol) return `${symbol}:${timeframe || suffix}`;
+  if (timeframe) return `${timeframe}:${suffix}`;
+  return null;
+}
+
 function highest(candles, count) {
   if (!candles.length) return null;
   const slice = candles.slice(-count);
@@ -210,7 +221,7 @@ function detectSupertrendRsi(candles, _ctx = {}, config = DEFAULT_CONFIG) {
   if (candles.length < 20) return null;
   const closes = candles.map((c) => c.close);
   const rsi = calculateRSI(closes, 14);
-  const st = calculateSupertrend(candles, 10);
+  const st = calculateSupertrend(candles, 10, 3);
   const last = candles.at(-1);
   if (last.close > st.level && rsi > config.rsiOB) {
     return { name: "Supertrend + RSI Filter", confidence: 0.65 };
@@ -413,7 +424,12 @@ export function detectAndScorePattern(
   const cleanCandles = sanitizeCandles(candles);
   if (!Array.isArray(cleanCandles) || cleanCandles.length < 5) return null;
 
-  const featureSet = features ?? computeFeatures(cleanCandles);
+  const featureSet =
+    features ??
+    computeFeatures(cleanCandles, {
+      seriesKey: seriesKeyFor(context, "pattern"),
+      supertrendSettings: { atrLength: 10, multiplier: 3 },
+    });
   if (!featureSet) return null;
 
   const { ema9, ema21, ema200, rsi } = featureSet;
@@ -1054,7 +1070,13 @@ function detectGapUpRsiMacdBullish(candles, ctx = {}) {
   const prev = candles.at(-2);
   const last = candles.at(-1);
   const gap = (last.open - prev.close) / prev.close;
-  const { features = computeFeatures(candles) } = ctx;
+  const providedFeatures = ctx?.features;
+  const features =
+    providedFeatures ??
+    computeFeatures(candles, {
+      seriesKey: seriesKeyFor(ctx, "gapUp"),
+      supertrendSettings: { atrLength: 10, multiplier: 3 },
+    });
   const rsiOk = features?.rsi > 50;
   const macdOk = features?.macd?.histogram > 0;
   if (gap > 0.015 && rsiOk && macdOk) {
@@ -1237,7 +1259,13 @@ function detectGapDownRsiMacdBearish(candles, ctx = {}) {
   const prev = candles.at(-2);
   const last = candles.at(-1);
   const gap = (last.open - prev.close) / prev.close;
-  const { features = computeFeatures(candles) } = ctx;
+  const providedFeatures = ctx?.features;
+  const features =
+    providedFeatures ??
+    computeFeatures(candles, {
+      seriesKey: seriesKeyFor(ctx, "gapDown"),
+      supertrendSettings: { atrLength: 10, multiplier: 3 },
+    });
   const rsiOk = features?.rsi < 50;
   const macdOk = features?.macd?.histogram < 0;
   if (gap < -0.015 && rsiOk && macdOk) {
@@ -1527,7 +1555,13 @@ function detectMarketSentimentReversal(candles) {
 }
 
 function detectTtmSqueezeBreakout(candles, ctx = {}) {
-  const { features = computeFeatures(candles) } = ctx;
+  const providedFeatures = ctx?.features;
+  const features =
+    providedFeatures ??
+    computeFeatures(candles, {
+      seriesKey: seriesKeyFor(ctx, "ttm"),
+      supertrendSettings: { atrLength: 10, multiplier: 3 },
+    });
   const squeeze = features?.ttmSqueeze;
   const hist = features?.macdHist;
   if (squeeze && !squeeze.squeezeOn && hist > 0) {
@@ -1831,7 +1865,11 @@ export function evaluateStrategies(
     MARKET_OPEN,
     MARKET_OPEN + cfg.openRangeMins
   );
-  const computedFeatures = computeFeatures(clean) || {};
+  const computedFeatures =
+    computeFeatures(clean, {
+      seriesKey: seriesKeyFor(context, "strategy"),
+      supertrendSettings: { atrLength: 10, multiplier: 3 },
+    }) || {};
   const atrCandidate =
     options?.atr ??
     context?.atr ??

@@ -1777,7 +1777,7 @@ export async function getHigherTimeframeData(symbol, timeframe = "15minute") {
 
     const closes = candles.map((c) => c.close);
     const ema50 = calculateEMA(closes, 50);
-    const supertrend = calculateSupertrend(candles, 50);
+    const supertrend = calculateSupertrend(candles, 50, 3);
 
     return { ema50, supertrend };
   } catch (err) {
