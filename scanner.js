@@ -11,6 +11,7 @@ import {
   isAtrStable,
   isAwayFromConsolidation,
   sanitizeCandles,
+  toSpreadPct,
 } from "./util.js";
 
 import {
@@ -146,6 +147,7 @@ export async function analyzeCandles(
     const last = cleanCandles.at(-1);
     const lastVol = (last && (last.volume ?? last.v ?? last.qty)) ?? 0;
     const effectiveLiquidity = liquidity || avgVolume || lastVol || 0;
+    const spreadPct = toSpreadPct(spread, last?.close);
     const context = {
       symbol,
       candles: cleanCandles,
@@ -153,6 +155,7 @@ export async function analyzeCandles(
       depth,
       tick: liveTick,
       spread,
+      spreadPct,
       liquidity: effectiveLiquidity,
       totalBuy,
       totalSell,
@@ -223,11 +226,15 @@ export async function analyzeCandles(
     });
     const altStrategies = evaluateStrategies(
       cleanCandles,
-      {},
       {
-        topN: 1,
         atr: atrValue,
-      }
+        rvol,
+        avgVolume,
+        regime: marketContext?.regime,
+        spreadPct,
+        features,
+      },
+      { topN: 1, atr: atrValue }
     );
     const filtered = filterStrategiesByRegime(stratResults, marketContext);
     const basePick = (filtered.length ? filtered : stratResults)[0];
