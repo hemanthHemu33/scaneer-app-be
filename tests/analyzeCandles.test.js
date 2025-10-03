@@ -84,7 +84,8 @@ const utilMock = test.mock.module('../util.js', {
     patternConfluenceAcrossTimeframes: () => true,
     DEFAULT_MARGIN_PERCENT: 0.2,
     calculateRequiredMargin: () => 100,
-    sanitizeCandles: (candles) => candles
+    sanitizeCandles: (candles) => candles,
+    toSpreadPct: () => 0
   }
 });
 
