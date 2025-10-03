@@ -91,7 +91,7 @@ const MARKET_CLOSE = 15 * 60 + 30;
 
 function rangeBetween(candles, startMin, endMin) {
   const window = candles.filter(
-    (c) => typeof c.timestamp === "number" && inIstRange(c.timestamp, startMin, endMin)
+    (c) => c.timestamp != null && inIstRange(c.timestamp, startMin, endMin)
   );
   if (!window.length) return null;
   return {
@@ -361,7 +361,7 @@ function detectVWReversalZone(candles, _ctx = {}, config = DEFAULT_CONFIG) {
 
 function detectGapOpeningRangeBreakout(candles) {
   const opening = candles.filter((c) =>
-    typeof c.timestamp === 'number' && inIstRange(c.timestamp, MARKET_OPEN, MARKET_OPEN + 15)
+    c.timestamp != null && inIstRange(c.timestamp, MARKET_OPEN, MARKET_OPEN + 15)
   );
   if (!opening.length) return null;
   const first = opening[0];
@@ -507,16 +507,12 @@ function detectFlatBaseBreakout(candles) {
 
 function detectPreMarketBreakout(candles) {
   const pre = candles.filter((c) =>
-    typeof c.timestamp === 'number' && inIstRange(c.timestamp, PREOPEN_START, PREOPEN_END)
+    c.timestamp != null && inIstRange(c.timestamp, PREOPEN_START, PREOPEN_END)
   );
   if (!pre.length) return null;
   const rangeHigh = Math.max(...pre.map((c) => c.high));
   const last = candles.at(-1);
-  if (
-    typeof last.timestamp === 'number' &&
-    istMinutes(last.timestamp) >= MARKET_OPEN &&
-    last.close > rangeHigh
-  ) {
+  if (last?.timestamp != null && istMinutes(last.timestamp) >= MARKET_OPEN && last.close > rangeHigh) {
     return { name: "Pre-Market High/Low Breakout", confidence: 0.55 };
   }
   return null;
@@ -651,13 +647,13 @@ function detectCompressionBreakout(candles) {
 
 function detectOpeningRangeFakeout(candles) {
   const opening = candles.filter((c) =>
-    typeof c.timestamp === 'number' && inIstRange(c.timestamp, MARKET_OPEN, MARKET_OPEN + 15)
+    c.timestamp != null && inIstRange(c.timestamp, MARKET_OPEN, MARKET_OPEN + 15)
   );
   if (!opening.length) return null;
   const rangeHigh = Math.max(...opening.map((c) => c.high));
   const last = candles.at(-1);
   if (
-    typeof last.timestamp === 'number' &&
+    last?.timestamp != null &&
     istMinutes(last.timestamp) >= MARKET_OPEN + 15 &&
     last.high > rangeHigh &&
     last.close < rangeHigh
@@ -1431,13 +1427,13 @@ function detectEventVolatilityTrap(candles) {
 
 function detectOpeningRangeReversal(candles) {
   const opening = candles.filter((c) =>
-    typeof c.timestamp === 'number' && inIstRange(c.timestamp, MARKET_OPEN, MARKET_OPEN + 30)
+    c.timestamp != null && inIstRange(c.timestamp, MARKET_OPEN, MARKET_OPEN + 30)
   );
   if (!opening.length) return null;
   const rangeHigh = Math.max(...opening.map((c) => c.high));
   const rangeLow = Math.min(...opening.map((c) => c.low));
   const last = candles.at(-1);
-  if (typeof last.timestamp !== 'number') return null;
+  if (last?.timestamp == null) return null;
   const m = istMinutes(last.timestamp);
   if (m >= MARKET_OPEN + 30 && last.high > rangeHigh && last.close < rangeHigh) {
     return { name: "Opening Range Reversal (ORR)", confidence: 0.55 };
@@ -1683,7 +1679,7 @@ function computeRegimeFit(type = "", regime) {
 }
 
 function computeTimeOfDayScore(ts) {
-  if (typeof ts !== "number") return 0.8;
+  if (ts == null) return 0.8;
   const m = istMinutes(ts);
   if (m >= MARKET_OPEN + 15 && m <= MARKET_OPEN + 90) return 1;
   if (m <= MARKET_CLOSE - 60 && m > MARKET_OPEN + 90) return 0.8;
@@ -1711,12 +1707,19 @@ function computeDetectorScore(raw, candles, features, context, entry, stopLoss, 
     rsScore * 0.1;
 
   let penalty = 0;
-  if (context.spreadPct && context.spreadPct > config.maxSpreadPct) penalty += 0.1;
+  if (context.spreadPct != null && context.spreadPct > config.maxSpreadPct) penalty += 0.1;
   if (context.newsImpact || context.badNews) penalty += 0.2;
   if (raw.meta?.missingRetest) penalty += 0.05;
   const rsi = features.rsi14 ?? features.rsi;
-  if (typeof rsi === "number" && (rsi > config.rsiExhaustion || rsi < config.rsiOS)) penalty += 0.05;
+  if (typeof rsi === "number" && (rsi > config.rsiExhaustion || rsi < config.rsiOS)) penalty += 0.1;
   return Math.max(0, Math.min(base - penalty, 1));
+}
+
+function inferDirectionByName(n) {
+  if (!n) return "Long";
+  const s = n.toLowerCase();
+  if (s.includes("bear") || s.includes("short") || s.includes("breakdown") || s.includes("down")) return "Short";
+  return "Long";
 }
 
 function normalizeResult(
@@ -1728,9 +1731,9 @@ function normalizeResult(
   config = DEFAULT_CONFIG
 ) {
   if (!raw || typeof raw !== "object") return null;
-  const closes = features.closes || candles.map(c => c.close);
+  const closes = features.closes || candles.map((c) => c.close);
   const price = raw.entry ?? closes.at(-1);
-  const dir = raw.direction || "Long";
+  const dir = raw.direction || inferDirectionByName(raw.name || raw.type) || "Long";
   const usedAtr = Math.min(
     atr || 0,
     (context.avgAtr || atr || 0) * config.riskAtrMaxMultiple
@@ -1789,7 +1792,8 @@ export function evaluateStrategies(
   context = {},
   options = { topN: 1, filters: null, config: DEFAULT_CONFIG }
 ) {
-  if (!Array.isArray(candles) || candles.length < 5) return [];
+  const clean = sanitizeCandles(candles || []);
+  if (!Array.isArray(clean) || clean.length < 5) return [];
   let cfg = { ...(options.config || DEFAULT_CONFIG) };
   if (context.isRestricted) return [];
   const isEvent = context.isEventDay || context.isWeeklyExpiry;
@@ -1801,7 +1805,7 @@ export function evaluateStrategies(
       return [];
     if (!isEvent && context.rvol < cfg.rvolMin) return [];
   }
-  if (context.spreadPct && context.spreadPct > cfg.maxSpreadPct) return [];
+  if (context.spreadPct != null && context.spreadPct > cfg.maxSpreadPct) return [];
   if (context.avgVolume && context.avgVolume < cfg.minAvgVolume) return [];
   if (isEvent) {
     cfg = {
@@ -1809,8 +1813,8 @@ export function evaluateStrategies(
       slAtrMultiple: cfg.slAtrMultiple * (cfg.eventSlAtrMultiplier || 1),
     };
   }
-  const lastTs = candles.at(-1)?.timestamp;
-  if (typeof lastTs === "number") {
+  const lastTs = clean.at(-1)?.timestamp;
+  if (lastTs != null) {
     const m = istMinutes(lastTs);
     if (m < MARKET_OPEN) {
       if (!cfg.allowPreOpenEntries) return [];
@@ -1821,13 +1825,13 @@ export function evaluateStrategies(
       return [];
     }
   }
-  const preRange = rangeBetween(candles, PREOPEN_START, PREOPEN_END);
+  const preRange = rangeBetween(clean, PREOPEN_START, PREOPEN_END);
   const openRange = rangeBetween(
-    candles,
+    clean,
     MARKET_OPEN,
     MARKET_OPEN + cfg.openRangeMins
   );
-  const computedFeatures = computeFeatures(candles) || {};
+  const computedFeatures = computeFeatures(clean) || {};
   const atrCandidate =
     options?.atr ??
     context?.atr ??
@@ -1836,7 +1840,7 @@ export function evaluateStrategies(
   const atr =
     Number.isFinite(atrCandidate) && atrCandidate > 0
       ? atrCandidate
-      : getATR(candles, 14) || 0;
+      : getATR(clean, 14) || 0;
   const features = { ...computedFeatures, atr };
   const ctx = { ...context, atr };
   if (preRange) ctx.preMarketRange = preRange;
@@ -1850,12 +1854,12 @@ export function evaluateStrategies(
         ? "high"
         : "normal";
   }
-  let results = DETECTORS.map((fn) => fn(candles, { ...ctx, features }, cfg))
+  let results = DETECTORS.map((fn) => fn(clean, { ...ctx, features }, cfg))
     .filter(Boolean)
     .map((r) =>
       normalizeResult(
         { ...(STRATEGY_CATALOG[r.name] || {}), ...r },
-        candles,
+        clean,
         features,
         atr,
         ctx,
@@ -1877,8 +1881,9 @@ export function evaluateStrategies(
       merged[key] = { ...r };
     }
   }
-  const deduped = Object.values(merged);
+  let deduped = Object.values(merged);
   deduped.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+  if (options?.topN && options.topN > 0) deduped = deduped.slice(0, options.topN);
   return deduped;
 }
 

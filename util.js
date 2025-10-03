@@ -32,6 +32,11 @@ export function sanitizeCandles(candles = []) {
     .filter((c) => c.high >= c.low);
 }
 
+export const toSpreadPct = (spread, price) =>
+  Number.isFinite(spread) && Number.isFinite(price) && price > 0
+    ? (spread / price) * 100
+    : 0;
+
 // Default margin percentage used when broker margin or leverage is not supplied
 export const DEFAULT_MARGIN_PERCENT = 0.2;
 import {
