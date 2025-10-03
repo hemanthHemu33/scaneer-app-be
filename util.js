@@ -204,7 +204,7 @@ export function analyzeHigherTimeframe(
   if (!candles || candles.length < emaLength) return null;
   const closes = candles.map((c) => c.close);
   const ema = calculateEMA(closes, emaLength);
-  const supertrend = calculateSupertrend(candles, atrLength);
+  const supertrend = calculateSupertrend(candles, atrLength, 3);
   return { ema, supertrend };
 }
 
