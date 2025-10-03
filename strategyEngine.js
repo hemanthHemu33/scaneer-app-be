@@ -1,5 +1,5 @@
 import { calculateEMA, getATR, computeFeatures } from './featureEngine.js';
-import { detectAllPatterns } from './util.js';
+import { detectAllPatterns, sanitizeCandles } from './util.js';
 import { detectGapUpOrDown } from './strategies.js';
 import { RISK_REWARD_RATIO, calculatePositionSize } from './positionSizing.js';
 
@@ -176,21 +176,25 @@ export function strategyEMAReversal(context = {}) {
 export function strategyTripleTop(context = {}) {
   const {
     candles = [],
-    features = computeFeatures(candles),
+    features = null,
     symbol,
     accountBalance = 0,
     riskPerTradePercentage = 0.01,
     spread = 0,
     liquidity = 0,
   } = context;
-  if (!Array.isArray(candles) || candles.length < 7) return null;
+  const cleanCandles = sanitizeCandles(candles);
+  if (!Array.isArray(cleanCandles) || cleanCandles.length < 7) return null;
 
-  const atr = features?.atr ?? getATR(candles, 14);
-  const patterns = detectAllPatterns(candles, atr, 5);
+  const featureSet = features ?? computeFeatures(cleanCandles);
+  if (!featureSet) return null;
+
+  const atr = (featureSet?.atr ?? getATR(cleanCandles, 14)) ?? 0;
+  const patterns = detectAllPatterns(cleanCandles, atr, 5);
   const tripleTop = patterns.find(p => p.type === 'Triple Top');
   if (!tripleTop) return null;
 
-  if (features?.rsi > 60) return null;
+  if (featureSet?.rsi > 60) return null;
 
   const entry = tripleTop.breakout;
   const stopLoss = tripleTop.stopLoss;
@@ -226,17 +230,21 @@ export function strategyTripleTop(context = {}) {
 export function strategyVWAPReversal(context = {}) {
   const {
     candles = [],
-    features = computeFeatures(candles),
+    features = null,
     symbol,
     accountBalance = 0,
     riskPerTradePercentage = 0.01,
     spread = 0,
     liquidity = 0,
   } = context;
-  if (!Array.isArray(candles) || candles.length < 5) return null;
+  const cleanCandles = sanitizeCandles(candles);
+  if (!Array.isArray(cleanCandles) || cleanCandles.length < 5) return null;
 
-  const atr = features?.atr ?? getATR(candles, 14);
-  const patterns = detectAllPatterns(candles, atr, 5);
+  const featureSet = features ?? computeFeatures(cleanCandles);
+  if (!featureSet) return null;
+
+  const atr = (featureSet?.atr ?? getATR(cleanCandles, 14)) ?? 0;
+  const patterns = detectAllPatterns(cleanCandles, atr, 5);
   const pattern = patterns.find(p => p.type === 'VWAP Reversal');
   if (!pattern) return null;
 
@@ -280,17 +288,21 @@ export function strategyVWAPReversal(context = {}) {
 export function patternBasedStrategy(context = {}) {
   const {
     candles = [],
-    features = computeFeatures(candles),
+    features = null,
     symbol,
     accountBalance = 0,
     riskPerTradePercentage = 0.01,
     spread = 0,
     liquidity = 0,
   } = context;
-  if (!Array.isArray(candles) || candles.length < 5) return null;
+  const cleanCandles = sanitizeCandles(candles);
+  if (!Array.isArray(cleanCandles) || cleanCandles.length < 5) return null;
 
-  const atr = features?.atr ?? getATR(candles, 14);
-  const patterns = detectAllPatterns(candles, atr, 5);
+  const featureSet = features ?? computeFeatures(cleanCandles);
+  if (!featureSet) return null;
+
+  const atr = (featureSet?.atr ?? getATR(cleanCandles, 14)) ?? 0;
+  const patterns = detectAllPatterns(cleanCandles, atr, 5);
   if (!patterns || patterns.length === 0) return null;
 
   let best = null;

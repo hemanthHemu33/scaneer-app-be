@@ -6,6 +6,24 @@ import timezone from "dayjs/plugin/timezone.js";
 dayjs.extend(utc);
 dayjs.extend(timezone);
 
+// --- helpers ---------------------------------------------------------------
+const toNum = (v) => (Number.isFinite(v) ? v : NaN);
+export function sanitizeCandles(candles = []) {
+  return candles
+    .map((c) => ({
+      open: toNum(c?.open),
+      high: toNum(c?.high),
+      low: toNum(c?.low),
+      close: toNum(c?.close),
+      volume: Number.isFinite(c?.volume) ? c.volume : 0,
+      timestamp: c?.timestamp ?? c?.date ?? undefined,
+    }))
+    .filter(
+      (c) =>
+        [c.open, c.high, c.low, c.close].every(Number.isFinite) && c.high >= c.low
+    );
+}
+
 // Default margin percentage used when broker margin or leverage is not supplied
 export const DEFAULT_MARGIN_PERCENT = 0.2;
 import {
@@ -113,6 +131,7 @@ export {
   calculateIchimokuConversionLine,
   calculateAnchoredMomentum,
   calculateATRBands,
+  // DEPRECATED: use calculateDynamicStopLoss from dynamicRiskModel.js instead
   calcDynamicStopLoss,
   calculateATRTrailingStop,
   calculateLaguerreRSI,
@@ -156,9 +175,11 @@ export function toISTDate(date = new Date()) {
 
 export function convertTickTimestampsToIST(tick = {}) {
   const t = { ...tick };
-  if (t.last_trade_time) t.last_trade_time = toISTISOString(t.last_trade_time);
+  const toDate = (v) => (typeof v === "number" ? new Date(v) : v);
+  if (t.last_trade_time)
+    t.last_trade_time = toISTISOString(toDate(t.last_trade_time));
   if (t.exchange_timestamp)
-    t.exchange_timestamp = toISTISOString(t.exchange_timestamp);
+    t.exchange_timestamp = toISTISOString(toDate(t.exchange_timestamp));
   return t;
 }
 
@@ -202,16 +223,19 @@ export function calculateExpiryMinutes({ atr, rvol }) {
 }
 
 export function detectAllPatterns(candles, atrValue, lookback = 5) {
+  const data = sanitizeCandles(candles);
   const patterns = [];
-  if (candles.length < lookback) return [];
+  if (data.length < lookback) return [];
 
+  candles = data;
   const last = candles[candles.length - 1];
   const lastN = candles.slice(-lookback);
   const highs = lastN.map((c) => c.high);
   const lows = lastN.map((c) => c.low);
   const recentHigh = Math.max(...highs);
   const recentLow = Math.min(...lows);
-  const epsilon = 0.1;
+  const px = Number.isFinite(last?.close) ? last.close : last?.open ?? 0;
+  const epsilon = Math.max(px * 0.001, atrValue ? atrValue * 0.05 : 0.1);
   const vwapPeriod = Math.min(candles.length, 20);
   const vwap = calculateVWAP(candles.slice(-vwapPeriod));
   const prevVWAP =
@@ -394,11 +418,15 @@ export function detectAllPatterns(candles, atrValue, lookback = 5) {
   }
 
   // Harami
-  const prev = candles[candles.length - 2];
+  const prevCandle = candles[candles.length - 2];
   const haramiBullish =
-    last.open > last.close && last.high < prev.high && last.low > prev.low;
+    last.open > last.close &&
+    last.high < prevCandle.high &&
+    last.low > prevCandle.low;
   const haramiBearish =
-    last.open < last.close && last.high < prev.high && last.low > prev.low;
+    last.open < last.close &&
+    last.high < prevCandle.high &&
+    last.low > prevCandle.low;
   if (haramiBullish)
     patterns.push({
       type: "Bullish Harami",
@@ -408,9 +436,9 @@ export function detectAllPatterns(candles, atrValue, lookback = 5) {
     });
   const haramiCrossBullish =
     isDoji &&
-    prev.open > prev.close &&
-    last.high <= prev.open &&
-    last.low >= prev.close;
+    prevCandle.open > prevCandle.close &&
+    last.high <= prevCandle.open &&
+    last.low >= prevCandle.close;
   if (haramiCrossBullish)
     patterns.push({
       type: "Bullish Harami Cross",
@@ -420,9 +448,9 @@ export function detectAllPatterns(candles, atrValue, lookback = 5) {
     });
   const haramiCrossBearish =
     isDoji &&
-    prev.open < prev.close &&
-    last.high <= prev.close &&
-    last.low >= prev.open;
+    prevCandle.open < prevCandle.close &&
+    last.high <= prevCandle.close &&
+    last.low >= prevCandle.open;
   if (haramiCrossBearish)
     patterns.push({
       type: "Bearish Harami Cross",
@@ -1229,9 +1257,9 @@ export function detectAllPatterns(candles, atrValue, lookback = 5) {
   }
 
   if (candles.length >= 2) {
-    const prev = candles[candles.length - 2];
-    if (last.high > prev.high && last.low < prev.low) {
-      if (last.close > prev.open) {
+    const prevBar = candles[candles.length - 2];
+    if (last.high > prevBar.high && last.low < prevBar.low) {
+      if (last.close > prevBar.open) {
         patterns.push({
           type: "Outside Bar Bullish Reversal",
           direction: "Long",
@@ -1239,7 +1267,7 @@ export function detectAllPatterns(candles, atrValue, lookback = 5) {
           confidence: "Medium",
         });
       }
-      if (last.close < prev.open) {
+      if (last.close < prevBar.open) {
         patterns.push({
           type: "Outside Bar Bearish Reversal",
           direction: "Short",
@@ -1654,10 +1682,14 @@ export function detectAllPatterns(candles, atrValue, lookback = 5) {
   }
 
   if (candles.length >= 2) {
-    const prev = candles[candles.length - 2];
-    const last = candles[candles.length - 1];
-    const gap = (last.open - prev.close) / prev.close;
-    if (gap > 0.015 && last.close < prev.close && last.close < last.open) {
+    const prevGapCandle = candles[candles.length - 2];
+    const lastGapCandle = candles[candles.length - 1];
+    const gap = (lastGapCandle.open - prevGapCandle.close) / prevGapCandle.close;
+    if (
+      gap > 0.015 &&
+      lastGapCandle.close < prevGapCandle.close &&
+      lastGapCandle.close < lastGapCandle.open
+    ) {
       patterns.push({
         type: "Gap Fill Reversal (Bearish)",
         direction: "Short",
@@ -1665,7 +1697,11 @@ export function detectAllPatterns(candles, atrValue, lookback = 5) {
         confidence: "Medium",
       });
     }
-    if (gap < -0.015 && last.close > prev.close && last.close > last.open) {
+    if (
+      gap < -0.015 &&
+      lastGapCandle.close > prevGapCandle.close &&
+      lastGapCandle.close > lastGapCandle.open
+    ) {
       patterns.push({
         type: "Gap Fill Reversal (Bullish)",
         direction: "Long",
@@ -1700,11 +1736,21 @@ export function detectAllPatterns(candles, atrValue, lookback = 5) {
   return patterns;
 }
 
-export function confirmRetest(candles, breakout, direction = "Long") {
+export function confirmRetest(
+  candles,
+  breakout,
+  direction = "Long",
+  opts = {}
+) {
+  const { atr, pct = 0.2 } = opts;
   if (!Array.isArray(candles) || candles.length < 2 || !breakout) return false;
-  const test = candles[candles.length - 2];
-  const confirm = candles[candles.length - 1];
-  const thresh = breakout * 0.002;
+  const data = sanitizeCandles(candles);
+  if (data.length < 2) return false;
+  const test = data[data.length - 2];
+  const confirm = data[data.length - 1];
+  const thresh = atr
+    ? Math.max(atr * 0.25, breakout * 0.001)
+    : breakout * (pct / 100);
   const touched =
     direction === "Long"
       ? test.low <= breakout + thresh && test.high >= breakout - thresh
@@ -1805,10 +1851,12 @@ export function isAwayFromConsolidation(candles = [], entry, lookback = 10) {
 
 export function aggregateCandles(candles = [], interval = 5) {
   if (!Array.isArray(candles) || candles.length === 0) return [];
-  if (interval <= 1) return candles.slice();
+  const data = sanitizeCandles(candles);
+  if (!data.length) return [];
+  if (interval <= 1) return data.slice();
   const grouped = [];
-  for (let i = 0; i < candles.length; i += interval) {
-    const chunk = candles.slice(i, i + interval);
+  for (let i = 0; i < data.length; i += interval) {
+    const chunk = data.slice(i, i + interval);
     if (chunk.length === 0) continue;
     const open = chunk[0].open;
     const close = chunk[chunk.length - 1].close;
@@ -1822,9 +1870,13 @@ export function aggregateCandles(candles = [], interval = 5) {
 
 export function patternConfluenceAcrossTimeframes(candles = [], patternType) {
   if (!Array.isArray(candles) || candles.length < 10) return false;
-  const lowerPatterns = detectAllPatterns(candles, 1, 5);
-  if (!lowerPatterns.find(p => p.type === patternType)) return false;
-  const agg5 = aggregateCandles(candles, 5);
-  const aggPatterns = detectAllPatterns(agg5, 1, 5);
-  return aggPatterns.some(p => p.type === patternType);
+  const clean = sanitizeCandles(candles);
+  if (clean.length < 10) return false;
+  const atrLo = getATR(clean, 14) || 1;
+  const lowerPatterns = detectAllPatterns(clean, atrLo, 5);
+  if (!lowerPatterns.find((p) => p.type === patternType)) return false;
+  const agg5 = aggregateCandles(clean, 5);
+  const atrAgg = getATR(agg5, 14) || atrLo;
+  const aggPatterns = detectAllPatterns(agg5, atrAgg, 5);
+  return aggPatterns.some((p) => p.type === patternType);
 }

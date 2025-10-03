@@ -10,6 +10,7 @@ import {
   getWickNoise,
   isAtrStable,
   isAwayFromConsolidation,
+  sanitizeCandles,
 } from "./util.js";
 
 import {
@@ -104,28 +105,16 @@ export async function analyzeCandles(
       return null;
     }
 
-    // Filter out malformed candle objects
-    const validCandles = candles.filter(
-      (c) =>
-        c &&
-        typeof c.open === "number" &&
-        !isNaN(c.open) &&
-        typeof c.high === "number" &&
-        !isNaN(c.high) &&
-        typeof c.low === "number" &&
-        !isNaN(c.low) &&
-        typeof c.close === "number" &&
-        !isNaN(c.close)
-    );
-    if (validCandles.length < 5) return null;
-    const features = computeFeatures(validCandles);
+    const cleanCandles = sanitizeCandles(candles);
+    if (cleanCandles.length < 5) return null;
+    const features = computeFeatures(cleanCandles);
     if (!features) return null;
 
     const tokenNum = await getTokenForSymbol(symbol);
     const tokenStr =
       tokenNum !== undefined && tokenNum !== null ? String(tokenNum) : null;
     const dailyHistory = tokenStr ? await getHistoricalData(tokenStr) : [];
-    const sessionData = candles;
+    const sessionData = cleanCandles;
 
     const {
       ema9,
@@ -143,12 +132,12 @@ export async function analyzeCandles(
       trendStrength,
       volatilityClass,
     } = features;
-    const last = validCandles.at(-1);
+    const last = cleanCandles.at(-1);
     const lastVol = (last && (last.volume ?? last.v ?? last.qty)) ?? 0;
     const effectiveLiquidity = liquidity || avgVolume || lastVol || 0;
     const context = {
       symbol,
-      candles: validCandles,
+      candles: cleanCandles,
       features,
       depth,
       tick: liveTick,
@@ -171,8 +160,8 @@ export async function analyzeCandles(
     }
 
     const wickPct = last ? getWickNoise(last) : 0;
-    const strongPriceAction = isStrongPriceAction(validCandles);
-    const atrStable = isAtrStable(validCandles);
+    const strongPriceAction = isStrongPriceAction(cleanCandles);
+    const atrStable = isAtrStable(cleanCandles);
     const expiryMinutesRaw = calculateExpiryMinutes({ atr: atrValue, rvol });
     const expiryMinutes =
       Number.isFinite(expiryMinutesRaw) && expiryMinutesRaw > 0
@@ -212,7 +201,7 @@ export async function analyzeCandles(
       accountBalance,
       riskPerTradePercentage,
     });
-    const altStrategies = evaluateStrategies(validCandles, {
+    const altStrategies = evaluateStrategies(cleanCandles, {
       topN: 1,
     });
     const filtered = filterStrategiesByRegime(stratResults, marketContext);
@@ -401,7 +390,7 @@ export async function analyzeCandles(
       ? Math.abs((base.target2 ?? base.target1) - base.entry)
       : 0;
     const riskReward = baseRisk > 0 ? rrNumerator / baseRisk : 0;
-    const consolidationOk = isAwayFromConsolidation(validCandles, base.entry);
+    const consolidationOk = isAwayFromConsolidation(cleanCandles, base.entry);
     const { getDrawdown } = await import("./account.js");
     const dd = typeof getDrawdown === "function" ? getDrawdown() : 0;
     let qty = calculatePositionSize({

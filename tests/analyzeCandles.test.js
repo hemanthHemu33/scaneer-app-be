@@ -83,8 +83,21 @@ const utilMock = test.mock.module('../util.js', {
     calculateZScore: () => 0,
     patternConfluenceAcrossTimeframes: () => true,
     DEFAULT_MARGIN_PERCENT: 0.2,
-    calculateRequiredMargin: () => 100
+    calculateRequiredMargin: () => 100,
+    sanitizeCandles: (candles) => candles
   }
+});
+
+const riskMock = test.mock.module('../riskEngine.js', {
+  namedExports: {
+    isSignalValid: () => true,
+    riskState: {
+      dailyLoss: 0,
+      consecutiveLosses: 0,
+      lastResetDay: new Date().getDate(),
+      signalCount: 0,
+    },
+  },
 });
 
 const dbMock = test.mock.module('../db.js', {
@@ -122,6 +135,7 @@ test('analyzeCandles returns a signal for valid data', async () => {
   kiteMock.restore();
   featureMock.restore();
   utilMock.restore();
+  riskMock.restore();
   auditMock.restore();
   dbMock.restore();
 });

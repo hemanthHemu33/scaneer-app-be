@@ -9,7 +9,7 @@ import {
   getATR,
   computeFeatures,
 } from "./featureEngine.js";
-import { confirmRetest, detectAllPatterns } from "./util.js";
+import { confirmRetest, detectAllPatterns, sanitizeCandles } from "./util.js";
 
 // Indicator helpers imported above return only the latest scalar value.
 // Any indicator series needed by strategies should be generated locally
@@ -123,9 +123,13 @@ function detectEmaCrossover(candles, _ctx = {}, config = DEFAULT_CONFIG) {
 }
 
 function detectBreakoutRetest(candles) {
-  if (candles.length < 7) return null;
-  const breakout = Math.max(...candles.slice(-7, -2).map((c) => c.high));
-  if (confirmRetest(candles.slice(-2), breakout, "Long")) {
+  const cleanCandles = sanitizeCandles(candles);
+  if (cleanCandles.length < 7) return null;
+  const breakout = Math.max(...cleanCandles.slice(-7, -2).map((c) => c.high));
+  const atr = getATR(cleanCandles, 14) || 0;
+  if (
+    confirmRetest(cleanCandles.slice(-2), breakout, "Long", { atr })
+  ) {
     return { name: "Breakout + Retest", confidence: 0.7 };
   }
   return null;
@@ -401,11 +405,16 @@ export function detectAndScorePattern(
   context = {},
   config = DEFAULT_CONFIG
 ) {
-  const { candles = [], features = computeFeatures(candles) } = context;
-  if (!Array.isArray(candles) || candles.length < 5) return null;
+  const { candles = [], features = null } = context;
+  const cleanCandles = sanitizeCandles(candles);
+  if (!Array.isArray(cleanCandles) || cleanCandles.length < 5) return null;
 
-  const { ema9, ema21, ema200, rsi } = features;
-  const patterns = detectAllPatterns(candles, features.atr, 5);
+  const featureSet = features ?? computeFeatures(cleanCandles);
+  if (!featureSet) return null;
+
+  const { ema9, ema21, ema200, rsi } = featureSet;
+  const atr = (featureSet?.atr ?? getATR(cleanCandles, 14)) ?? 0;
+  const patterns = detectAllPatterns(cleanCandles, atr, 5);
   if (!patterns || patterns.length === 0) return null;
 
   let best = null;
@@ -420,7 +429,7 @@ export function detectAndScorePattern(
   }
   if (!best) return null;
 
-  const last = candles.at(-1);
+  const last = cleanCandles.at(-1);
   if (typeof best.breakout !== 'number' || isNaN(best.breakout)) {
     best.breakout = last.close;
   }
@@ -431,9 +440,10 @@ export function detectAndScorePattern(
 
   if (best.type === 'Breakout') {
     const retested = confirmRetest(
-      candles.slice(-2),
+      cleanCandles.slice(-2),
       best.breakout,
-      best.direction
+      best.direction,
+      { atr }
     );
     if (config.requireBreakoutRetest === 'hard' && !retested) return null;
   }
@@ -909,7 +919,10 @@ function detectPrebreakoutConsolidation(candles) {
 }
 
 function detectCupHandleBreakout(candles) {
-  const patterns = detectAllPatterns(candles, 1, 5);
+  const cleanCandles = sanitizeCandles(candles);
+  if (cleanCandles.length < 5) return null;
+  const atr = getATR(cleanCandles, 14) || 0;
+  const patterns = detectAllPatterns(cleanCandles, atr, 5);
   const cup = patterns.find((p) => p.type === "Cup & Handle");
   if (cup) {
     return { name: "Cup & Handle Breakout", confidence: 0.6 };
