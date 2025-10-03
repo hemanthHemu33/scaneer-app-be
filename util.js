@@ -474,9 +474,9 @@ export function detectAllPatterns(candles, atrValue, lookback = 5) {
       confidence: "Medium",
     });
   const tweezerBottom =
-    prev.close < prev.open &&
+    prevCandle.close < prevCandle.open &&
     last.close > last.open &&
-    Math.abs(prev.low - last.low) < epsilon;
+    Math.abs(prevCandle.low - last.low) < epsilon;
   if (tweezerBottom)
     patterns.push({
       type: "Tweezer Bottom",
@@ -485,9 +485,9 @@ export function detectAllPatterns(candles, atrValue, lookback = 5) {
       confidence: "Medium",
     });
   const tweezerTop =
-    prev.close > prev.open &&
+    prevCandle.close > prevCandle.open &&
     last.close < last.open &&
-    Math.abs(prev.high - last.high) < epsilon;
+    Math.abs(prevCandle.high - last.high) < epsilon;
   if (tweezerTop)
     patterns.push({
       type: "Tweezer Top",
