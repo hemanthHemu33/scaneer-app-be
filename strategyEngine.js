@@ -1,9 +1,11 @@
 import { calculateEMA, getATR, computeFeatures } from './featureEngine.js';
-import { detectAllPatterns, sanitizeCandles } from './util.js';
+import { detectAllPatterns, sanitizeCandles, toSpreadPct, confirmRetest } from './util.js';
 import { detectGapUpOrDown } from './strategies.js';
 import { RISK_REWARD_RATIO, calculatePositionSize } from './positionSizing.js';
 
 const DEFAULT_SUPERTREND_SETTINGS = { atrLength: 10, multiplier: 3 };
+const MAX_SPREAD_PCT = 0.5; // reject signals when quoted spread > 0.5% of price
+const MIN_LIQUIDITY = 0;    // keep 0 if you don’t have a liquidity scale yet
 
 function buildSeriesKey(ctx = {}, fallback = 'strategy') {
   if (!ctx || typeof ctx !== 'object') return null;
@@ -43,10 +45,18 @@ export function strategySupertrend(context = {}) {
   const { rsi, supertrend } = features || {};
   const atr = contextAtr ?? features?.atr ?? getATR(cleanCandles, 14);
   const last = cleanCandles[cleanCandles.length - 1];
+  if (!supertrend) return null;
 
-  if (supertrend?.signal === 'Buy' && rsi > 55) {
+  // reject low-quality markets (excessive spread) before sizing
+  const spct = toSpreadPct(spread ?? 0, last?.close ?? 0);
+  if (spct > MAX_SPREAD_PCT || (liquidity ?? 0) < MIN_LIQUIDITY) return null;
+
+  if (supertrend.signal === 'Buy' && rsi > 55) {
     const entry = last.close;
-    const stopLoss = last.low;
+    const stopLoss = Math.min(
+      last.low ?? entry,
+      supertrend.lowerBand ?? supertrend.level ?? entry
+    );
     const risk = Math.abs(entry - stopLoss);
     if (!Number.isFinite(risk) || risk <= 0) return null;
     const rr = Math.max(RISK_REWARD_RATIO, 2);
@@ -79,9 +89,12 @@ export function strategySupertrend(context = {}) {
     };
   }
 
-  if (supertrend?.signal === 'Sell' && rsi < 45) {
+  if (supertrend.signal === 'Sell' && rsi < 45) {
     const entry = last.close;
-    const stopLoss = last.high;
+    const stopLoss = Math.max(
+      last.high ?? entry,
+      supertrend.upperBand ?? supertrend.level ?? entry
+    );
     const risk = Math.abs(stopLoss - entry);
     if (!Number.isFinite(risk) || risk <= 0) return null;
     const rr = Math.max(RISK_REWARD_RATIO, 2);
@@ -144,11 +157,13 @@ export function strategyEMAReversal(context = {}) {
     });
 
   const closes = cleanCandles.map(c => c.close);
-  const ema20 = calculateEMA(closes, 20);
-  const ema50 = calculateEMA(closes, 50);
+  const ema20 = calculateEMA(closes, 20, seriesKey ? `${seriesKey}:ema20` : undefined);
+  const ema50 = calculateEMA(closes, 50, seriesKey ? `${seriesKey}:ema50` : undefined);
   const last = cleanCandles[cleanCandles.length - 1];
   const prev = cleanCandles[cleanCandles.length - 2];
   const atr = contextAtr ?? features?.atr ?? getATR(cleanCandles, 14);
+  const spct = toSpreadPct(spread ?? 0, last?.close ?? 0);
+  if (spct > MAX_SPREAD_PCT || (liquidity ?? 0) < MIN_LIQUIDITY) return null;
 
   if (prev.close < ema20 && last.close > ema20 && ema20 > ema50) {
     const entry = last.close;
@@ -256,6 +271,8 @@ export function strategyTripleTop(context = {}) {
   if (featureSet?.rsi > 60) return null;
 
   const entry = tripleTop.breakout;
+  const spct = toSpreadPct(spread ?? 0, entry ?? 0);
+  if (spct > MAX_SPREAD_PCT || (liquidity ?? 0) < MIN_LIQUIDITY) return null;
   const stopLoss = tripleTop.stopLoss;
   const risk = Math.abs(stopLoss - entry);
   if (!Number.isFinite(risk) || risk <= 0) return null;
@@ -321,6 +338,8 @@ export function strategyVWAPReversal(context = {}) {
   if (!pattern) return null;
 
   const entry = pattern.breakout;
+  const spct = toSpreadPct(spread ?? 0, entry ?? 0);
+  if (spct > MAX_SPREAD_PCT || (liquidity ?? 0) < MIN_LIQUIDITY) return null;
   const stopLoss = pattern.stopLoss;
   const risk = Math.abs(entry - stopLoss);
   if (!Number.isFinite(risk) || risk <= 0) return null;
@@ -407,6 +426,10 @@ export function patternBasedStrategy(context = {}) {
   const direction = best.direction;
   const risk = Math.abs(entry - stopLoss);
   if (!Number.isFinite(risk) || risk <= 0) return null;
+  const spct = toSpreadPct(spread ?? 0, entry ?? 0);
+  if (spct > MAX_SPREAD_PCT || (liquidity ?? 0) < MIN_LIQUIDITY) return null;
+  // optional retest confirmation boost
+  const retested = confirmRetest(cleanCandles, entry, direction, { atr });
   let qty = calculatePositionSize({
     capital: accountBalance,
     risk: accountBalance * riskPerTradePercentage,
@@ -421,12 +444,13 @@ export function patternBasedStrategy(context = {}) {
   const strategyCategory = /breakout|flag|triangle|channel|bos/i.test(best.type)
     ? 'breakout'
     : 'mean-reversion';
-  const confidence =
+  let confidence =
     best.confidence === 'High'
       ? 0.7
       : best.confidence === 'Medium'
         ? 0.55
         : 0.4;
+  if (retested) confidence = Math.min(confidence + 0.05, 0.85);
 
   return {
     stock: symbol,
@@ -461,15 +485,19 @@ export function strategyGapUpDown(context = {}) {
     atr: contextAtr,
   } = context;
 
-  const pattern = detectGapUpOrDown({ dailyHistory, sessionCandles });
+  const daily = Array.isArray(dailyHistory) ? sanitizeCandles(dailyHistory) : [];
+  const session = Array.isArray(sessionCandles) ? sanitizeCandles(sessionCandles) : [];
+  const pattern = detectGapUpOrDown({ dailyHistory: daily, sessionCandles: session });
   if (!pattern) return null;
   const atr =
     contextAtr ??
-    getATR(sessionCandles, 14) ??
-    getATR(dailyHistory, 14) ??
+    getATR(session, 14) ??
+    getATR(daily, 14) ??
     0;
 
   const entry = pattern.breakout;
+  const spct = toSpreadPct(spread ?? 0, entry ?? 0);
+  if (spct > MAX_SPREAD_PCT || (liquidity ?? 0) < MIN_LIQUIDITY) return null;
   const stopLoss = pattern.stopLoss;
   const risk = Math.abs(entry - stopLoss);
   if (!Number.isFinite(risk) || risk <= 0) return null;
@@ -522,6 +550,12 @@ export function evaluateAllStrategies(context = {}) {
         supertrendSettings: DEFAULT_SUPERTREND_SETTINGS,
       });
     base.atr = base.atr ?? base.features?.atr ?? getATR(cleanCandles, 14);
+  }
+  if (Array.isArray(base.dailyHistory)) {
+    base.dailyHistory = sanitizeCandles(base.dailyHistory);
+  }
+  if (Array.isArray(base.sessionCandles)) {
+    base.sessionCandles = sanitizeCandles(base.sessionCandles);
   }
   const strategies = [
     patternBasedStrategy,
