@@ -118,7 +118,10 @@ export async function analyzeCandles(
 
     const cleanCandles = sanitizeCandles(candles);
     if (cleanCandles.length < 5) return null;
-    const features = computeFeatures(cleanCandles);
+    const features = computeFeatures(cleanCandles, {
+      seriesKey: symbol ? `${symbol}:primary` : null,
+      supertrendSettings: { atrLength: 10, multiplier: 3 },
+    });
     if (!features) return null;
 
     const tokenNum = await getTokenForSymbol(symbol);
