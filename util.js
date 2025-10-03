@@ -7,21 +7,29 @@ dayjs.extend(utc);
 dayjs.extend(timezone);
 
 // --- helpers ---------------------------------------------------------------
-const toNum = (v) => (Number.isFinite(v) ? v : NaN);
 export function sanitizeCandles(candles = []) {
   return candles
-    .map((c) => ({
-      open: toNum(c?.open),
-      high: toNum(c?.high),
-      low: toNum(c?.low),
-      close: toNum(c?.close),
-      volume: Number.isFinite(c?.volume) ? c.volume : 0,
-      timestamp: c?.timestamp ?? c?.date ?? undefined,
-    }))
     .filter(
       (c) =>
-        [c.open, c.high, c.low, c.close].every(Number.isFinite) && c.high >= c.low
-    );
+        c &&
+        Number.isFinite(+c.open) &&
+        Number.isFinite(+c.high) &&
+        Number.isFinite(+c.low) &&
+        Number.isFinite(+c.close)
+    )
+    .map((c) => ({
+      open: +c.open,
+      high: +c.high,
+      low: +c.low,
+      close: +c.close,
+      volume: Number.isFinite(+c.volume) ? +c.volume : 0,
+      timestamp: c.timestamp
+        ? new Date(c.timestamp)
+        : c.date
+          ? new Date(c.date)
+          : undefined,
+    }))
+    .filter((c) => c.high >= c.low);
 }
 
 // Default margin percentage used when broker margin or leverage is not supplied
