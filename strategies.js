@@ -122,11 +122,15 @@ function detectEmaCrossover(candles, _ctx = {}, config = DEFAULT_CONFIG) {
   return null;
 }
 
-function detectBreakoutRetest(candles) {
+function detectBreakoutRetest(candles, ctx = {}) {
   const cleanCandles = sanitizeCandles(candles);
   if (cleanCandles.length < 7) return null;
   const breakout = Math.max(...cleanCandles.slice(-7, -2).map((c) => c.high));
-  const atr = getATR(cleanCandles, 14) || 0;
+  const atrCandidate = ctx.atr;
+  const atr =
+    Number.isFinite(atrCandidate) && atrCandidate > 0
+      ? atrCandidate
+      : getATR(cleanCandles, 14) || 0;
   if (
     confirmRetest(cleanCandles.slice(-2), breakout, "Long", { atr })
   ) {
@@ -918,10 +922,14 @@ function detectPrebreakoutConsolidation(candles) {
   return null;
 }
 
-function detectCupHandleBreakout(candles) {
+function detectCupHandleBreakout(candles, ctx = {}) {
   const cleanCandles = sanitizeCandles(candles);
   if (cleanCandles.length < 5) return null;
-  const atr = getATR(cleanCandles, 14) || 0;
+  const atrCandidate = ctx.atr;
+  const atr =
+    Number.isFinite(atrCandidate) && atrCandidate > 0
+      ? atrCandidate
+      : getATR(cleanCandles, 14) || 0;
   const patterns = detectAllPatterns(cleanCandles, atr, 5);
   const cup = patterns.find((p) => p.type === "Cup & Handle");
   if (cup) {
@@ -1819,11 +1827,20 @@ export function evaluateStrategies(
     MARKET_OPEN,
     MARKET_OPEN + cfg.openRangeMins
   );
-  const ctx = { ...context };
+  const computedFeatures = computeFeatures(candles) || {};
+  const atrCandidate =
+    options?.atr ??
+    context?.atr ??
+    computedFeatures?.atr ??
+    computedFeatures?.atr14;
+  const atr =
+    Number.isFinite(atrCandidate) && atrCandidate > 0
+      ? atrCandidate
+      : getATR(candles, 14) || 0;
+  const features = { ...computedFeatures, atr };
+  const ctx = { ...context, atr };
   if (preRange) ctx.preMarketRange = preRange;
   if (openRange) ctx.openRange = openRange;
-  const features = computeFeatures(candles) || {};
-  const atr = features.atr14 || getATR(candles, 14) || 0;
   if (typeof features.zScore === "number") {
     const bins = cfg.regimeAtrZScoreBins || {};
     ctx.regime =

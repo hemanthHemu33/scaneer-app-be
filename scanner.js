@@ -22,6 +22,7 @@ import { evaluateAllStrategies } from "./strategyEngine.js";
 import { evaluateStrategies } from "./strategies.js";
 import { RISK_REWARD_RATIO, calculatePositionSize } from "./positionSizing.js";
 import { isSignalValid, riskState } from "./riskEngine.js";
+import { riskDefaults } from "./riskConfig.js";
 import {
   openPositions,
   recordExit,
@@ -100,7 +101,17 @@ export async function analyzeCandles(
       riskState.lastResetDay = today;
     }
 
-    if (riskState.dailyLoss >= 500 || riskState.consecutiveLosses >= 3) {
+    const dailyLossLimit = Number.isFinite(riskDefaults.maxDailyLoss)
+      ? riskDefaults.maxDailyLoss
+      : 500;
+    const lossStreakLimit = Number.isFinite(riskDefaults.maxLossStreak)
+      ? riskDefaults.maxLossStreak
+      : 3;
+    if (
+      (dailyLossLimit > 0 && riskState.dailyLoss >= dailyLossLimit) ||
+      (lossStreakLimit > 0 &&
+        riskState.consecutiveLosses >= lossStreakLimit)
+    ) {
       console.log(`[RISK BLOCK] Skipping ${symbol}`);
       return null;
     }
@@ -167,9 +178,10 @@ export async function analyzeCandles(
       Number.isFinite(expiryMinutesRaw) && expiryMinutesRaw > 0
         ? expiryMinutesRaw
         : 5;
-    const expiresAt = new Date(
+    const expiresAtDate = new Date(
       Date.now() + expiryMinutes * 60 * 1000
-    ).toISOString();
+    );
+    const expiresAt = expiresAtDate.toISOString();
 
     const isUptrend = ema9 > ema21 && ema21 > ema50;
     const isDowntrend = ema9 < ema21 && ema21 < ema50;
@@ -197,18 +209,26 @@ export async function analyzeCandles(
     }
 
     const { support, resistance } = await getSupportResistanceLevels(symbol);
+    const upperCircuit = liveTick?.upper_circuit_limit;
+    const lowerCircuit = liveTick?.lower_circuit_limit;
 
     const stratResults = evaluateAllStrategies({
       ...context,
       expiresAt,
       support,
       resistance,
+      atr: atrValue,
       accountBalance,
       riskPerTradePercentage,
     });
-    const altStrategies = evaluateStrategies(cleanCandles, {
-      topN: 1,
-    });
+    const altStrategies = evaluateStrategies(
+      cleanCandles,
+      {},
+      {
+        topN: 1,
+        atr: atrValue,
+      }
+    );
     const filtered = filterStrategiesByRegime(stratResults, marketContext);
     const basePick = (filtered.length ? filtered : stratResults)[0];
     if (!basePick) return null;
@@ -247,13 +267,16 @@ export async function analyzeCandles(
       entry: base.entry,
       stopLoss: base.stopLoss,
       target2: base.target2,
+      target: base.target2 ?? base.target1,
       atr: atrValue,
       spread,
       liquidity: effectiveLiquidity,
       support,
       resistance,
+      upperCircuit,
+      lowerCircuit,
       // let the risk validator use our category mapping
-      algoSignal: riskStrategyKey ? { strategy: riskStrategyKey } : undefined,
+      algoSignal: { strategy: riskStrategyKey || displayStrategy },
     };
 
     const momentumThresholds = {
@@ -274,13 +297,17 @@ export async function analyzeCandles(
       : 0;
     const safeRegime = marketContext?.regime ?? "neutral";
 
-    const diagBaseRisk =
+    const baseRisk =
       Number.isFinite(base.entry) && Number.isFinite(base.stopLoss)
         ? Math.abs(base.entry - base.stopLoss)
         : null;
-    const diagRrNumerator = Number.isFinite(base.target2 ?? base.target1)
+    const rrNumerator = Number.isFinite(base.target2 ?? base.target1)
       ? Math.abs((base.target2 ?? base.target1) - base.entry)
       : null;
+    const riskReward =
+      baseRisk && baseRisk > 0 && rrNumerator !== null
+        ? rrNumerator / baseRisk
+        : 0;
     console.log(`[DIAG] ${symbol}`, {
       lastClose: last?.close,
       rsi,
@@ -300,10 +327,46 @@ export async function analyzeCandles(
       spread,
       slippage,
       rr:
-        diagBaseRisk && diagBaseRisk > 0 && diagRrNumerator !== null
-          ? (diagRrNumerator / diagBaseRisk).toFixed(2)
+        baseRisk && baseRisk > 0 && rrNumerator !== null
+          ? (rrNumerator / baseRisk).toFixed(2)
           : null,
     });
+
+    if (!Number.isFinite(baseRisk) || baseRisk <= 0) {
+      console.log(`[SKIP] ${symbol} - invalid baseRisk`, {
+        entry: base.entry,
+        sl: base.stopLoss,
+      });
+      return null;
+    }
+
+    const consolidationOk = isAwayFromConsolidation(cleanCandles, base.entry);
+    const { getDrawdown } = await import("./account.js");
+    const dd = typeof getDrawdown === "function" ? getDrawdown() : 0;
+    let qty = calculatePositionSize({
+      capital: accountBalance,
+      risk: accountBalance * riskPerTradePercentage,
+      slPoints: baseRisk,
+      price: base.entry,
+      volatility: atrValue,
+      drawdown: dd,
+    });
+    if (riskReward > 2) qty = Math.floor(qty * 1.1);
+    else if (riskReward < 1.2) qty = Math.floor(qty * 0.9);
+    qty = Math.max(1, qty || 0);
+    const tradeValue =
+      Number.isFinite(base.entry) && qty ? base.entry * qty : undefined;
+    if (tradeValue !== undefined) preliminary.tradeValue = tradeValue;
+
+    const now = new Date();
+    const priceSeries = cleanCandles
+      .map((c) => (Number.isFinite(c?.close) ? c.close : null))
+      .filter((v) => Number.isFinite(v));
+    const maxOpenPositions = Number.isFinite(riskDefaults.maxOpenPositions)
+      ? riskDefaults.maxOpenPositions
+      : MAX_OPEN_TRADES;
+    const maxSpreadSlRatio =
+      riskDefaults.maxSpreadSLRatio ?? riskDefaults.maxSpreadSlRatio ?? 0.3;
 
     const riskCtx = {
       // Provide win-rate so RR validator can adjust for scalping/fade setups
@@ -334,6 +397,7 @@ export async function analyzeCandles(
       maxSlippage: FILTERS.maxSlippage,
       maxSpread: FILTERS.maxSpread,
       maxSpreadPct: FILTERS.maxSpreadPct,
+      maxSpreadSLRatio: maxSpreadSlRatio,
       minRR: RISK_REWARD_RATIO,
       minLiquidity: effectiveLiquidity ? FILTERS.minLiquidity : 0,
       minVolumeRatio: 0.4,
@@ -341,6 +405,18 @@ export async function analyzeCandles(
       maxIndexVolatility: 20,
       blockWatchlist: false,
       addToWatchlist: false,
+      now,
+      tradeValue,
+      openPositionsCount: openPositions.size,
+      openPositionsMap: openPositions,
+      openSymbols: Array.from(openPositions.keys()),
+      hasPositionForSymbol: openPositions.has(symbol),
+      maxOpenPositions,
+      preventOverlap: true,
+      resolveConflicts: true,
+      prices: priceSeries,
+      stdLookback: 5,
+      zLookback: 20,
       maxSignalAgeMinutes: 5,
       strategyFailWindowMs: 15 * 60 * 1000,
       minSLDistancePct: 0.0005,
@@ -384,34 +460,7 @@ export async function analyzeCandles(
       return null;
     }
 
-    // Step 6: Position sizing after risk filter
-    const baseRisk = Math.abs(base.entry - base.stopLoss);
-    if (!Number.isFinite(baseRisk) || baseRisk <= 0) {
-      console.log(`[SKIP] ${symbol} - invalid baseRisk`, {
-        entry: base.entry,
-        sl: base.stopLoss,
-      });
-      return null;
-    }
-    const rrNumerator = Number.isFinite(base.target2 ?? base.target1)
-      ? Math.abs((base.target2 ?? base.target1) - base.entry)
-      : 0;
-    const riskReward = baseRisk > 0 ? rrNumerator / baseRisk : 0;
-    const consolidationOk = isAwayFromConsolidation(cleanCandles, base.entry);
-    const { getDrawdown } = await import("./account.js");
-    const dd = typeof getDrawdown === "function" ? getDrawdown() : 0;
-    let qty = calculatePositionSize({
-      capital: accountBalance,
-      risk: accountBalance * riskPerTradePercentage,
-      slPoints: baseRisk,
-      price: base.entry,
-      volatility: atrValue,
-      drawdown: dd,
-    });
-    if (riskReward > 2) qty = Math.floor(qty * 1.1);
-    else if (riskReward < 1.2) qty = Math.floor(qty * 0.9);
-    qty = Math.max(1, qty || 0);
-
+    // Step 6: Position sizing already computed above; package for builders
     const tradeParams = {
       entry: base.entry,
       stopLoss: base.stopLoss,
@@ -468,7 +517,7 @@ export async function analyzeCandles(
       expiresAt,
       riskAmount: accountBalance * riskPerTradePercentage,
       accountBalance,
-      baseRisk: Math.abs(base.entry - base.stopLoss),
+      baseRisk,
     };
 
     // Step 7: Append meta information and build final signal
@@ -483,7 +532,10 @@ export async function analyzeCandles(
       base.confidence
     );
 
-    signal.expiresAt = toISTISOString(expiresAt);
+    signal.expiresAt = toISTISOString(expiresAtDate);
+    signal.algoSignal = { strategy: displayStrategy };
+    signal.upperCircuit = upperCircuit;
+    signal.lowerCircuit = lowerCircuit;
     signal.ai = null; // Step 8: final enrichment placeholder
 
     const penaltyAdjusted = applyPenaltyConditions(signal.confidenceScore, {

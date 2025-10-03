@@ -12,10 +12,12 @@ export function strategySupertrend(context = {}) {
     riskPerTradePercentage = 0.01,
     spread = 0,
     liquidity = 0,
+    atr: contextAtr,
   } = context;
   if (!Array.isArray(candles) || candles.length < 20) return null;
 
-  const { rsi, supertrend, atr = getATR(candles, 14) } = features || {};
+  const { rsi, supertrend } = features || {};
+  const atr = contextAtr ?? features?.atr ?? getATR(candles, 14);
   const last = candles[candles.length - 1];
 
   if (supertrend?.signal === 'Buy' && rsi > 55) {
@@ -96,6 +98,7 @@ export function strategyEMAReversal(context = {}) {
     riskPerTradePercentage = 0.01,
     spread = 0,
     liquidity = 0,
+    atr: contextAtr,
   } = context;
   if (!Array.isArray(candles) || candles.length < 20) return null;
 
@@ -104,7 +107,7 @@ export function strategyEMAReversal(context = {}) {
   const ema50 = calculateEMA(closes, 50);
   const last = candles[candles.length - 1];
   const prev = candles[candles.length - 2];
-  const atr = features?.atr ?? getATR(candles, 14);
+  const atr = contextAtr ?? features?.atr ?? getATR(candles, 14);
 
   if (prev.close < ema20 && last.close > ema20 && ema20 > ema50) {
     const entry = last.close;
@@ -182,6 +185,7 @@ export function strategyTripleTop(context = {}) {
     riskPerTradePercentage = 0.01,
     spread = 0,
     liquidity = 0,
+    atr: contextAtr,
   } = context;
   const cleanCandles = sanitizeCandles(candles);
   if (!Array.isArray(cleanCandles) || cleanCandles.length < 7) return null;
@@ -189,7 +193,7 @@ export function strategyTripleTop(context = {}) {
   const featureSet = features ?? computeFeatures(cleanCandles);
   if (!featureSet) return null;
 
-  const atr = (featureSet?.atr ?? getATR(cleanCandles, 14)) ?? 0;
+  const atr = (contextAtr ?? featureSet?.atr ?? getATR(cleanCandles, 14)) ?? 0;
   const patterns = detectAllPatterns(cleanCandles, atr, 5);
   const tripleTop = patterns.find(p => p.type === 'Triple Top');
   if (!tripleTop) return null;
@@ -236,6 +240,7 @@ export function strategyVWAPReversal(context = {}) {
     riskPerTradePercentage = 0.01,
     spread = 0,
     liquidity = 0,
+    atr: contextAtr,
   } = context;
   const cleanCandles = sanitizeCandles(candles);
   if (!Array.isArray(cleanCandles) || cleanCandles.length < 5) return null;
@@ -243,7 +248,7 @@ export function strategyVWAPReversal(context = {}) {
   const featureSet = features ?? computeFeatures(cleanCandles);
   if (!featureSet) return null;
 
-  const atr = (featureSet?.atr ?? getATR(cleanCandles, 14)) ?? 0;
+  const atr = (contextAtr ?? featureSet?.atr ?? getATR(cleanCandles, 14)) ?? 0;
   const patterns = detectAllPatterns(cleanCandles, atr, 5);
   const pattern = patterns.find(p => p.type === 'VWAP Reversal');
   if (!pattern) return null;
@@ -294,6 +299,7 @@ export function patternBasedStrategy(context = {}) {
     riskPerTradePercentage = 0.01,
     spread = 0,
     liquidity = 0,
+    atr: contextAtr,
   } = context;
   const cleanCandles = sanitizeCandles(candles);
   if (!Array.isArray(cleanCandles) || cleanCandles.length < 5) return null;
@@ -301,7 +307,7 @@ export function patternBasedStrategy(context = {}) {
   const featureSet = features ?? computeFeatures(cleanCandles);
   if (!featureSet) return null;
 
-  const atr = (featureSet?.atr ?? getATR(cleanCandles, 14)) ?? 0;
+  const atr = (contextAtr ?? featureSet?.atr ?? getATR(cleanCandles, 14)) ?? 0;
   const patterns = detectAllPatterns(cleanCandles, atr, 5);
   if (!patterns || patterns.length === 0) return null;
 
