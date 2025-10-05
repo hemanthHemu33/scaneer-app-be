@@ -353,13 +353,46 @@ export async function analyzeCandles(
     const consolidationOk = isAwayFromConsolidation(cleanCandles, base.entry);
     const { getDrawdown } = await import("./account.js");
     const dd = typeof getDrawdown === "function" ? getDrawdown() : 0;
+    const sizingOverrides = {};
+    const setIfDefined = (key, value) => {
+      if (value !== undefined) sizingOverrides[key] = value;
+    };
+    setIfDefined('lotSize', base.lotSize ?? riskDefaults.lotSize);
+    setIfDefined('minLotSize', base.minLotSize ?? riskDefaults.minLotSize);
+    setIfDefined('minQty', base.minQty ?? riskDefaults.minQty);
+    setIfDefined('maxQty', base.maxQty ?? riskDefaults.maxQty);
+    setIfDefined(
+      'leverage',
+      base.leverage ?? riskDefaults.leverage ?? marketContext?.leverage
+    );
+    setIfDefined(
+      'marginPercent',
+      base.marginPercent ?? riskDefaults.marginPercent ?? marketContext?.marginPercent
+    );
+    setIfDefined('marginPerLot', base.marginPerLot ?? riskDefaults.marginPerLot);
+    setIfDefined(
+      'utilizationCap',
+      base.utilizationCap ?? riskDefaults.utilizationCap ?? marketContext?.utilizationCap
+    );
+    setIfDefined('marginBuffer', base.marginBuffer ?? riskDefaults.marginBuffer);
+    setIfDefined(
+      'exchangeMarginMultiplier',
+      base.exchangeMarginMultiplier ?? riskDefaults.exchangeMarginMultiplier
+    );
+    setIfDefined(
+      'costBuffer',
+      base.costBuffer ?? riskDefaults.costBuffer ?? marketContext?.costBuffer
+    );
+    setIfDefined('drawdown', dd);
+    setIfDefined('lossStreak', riskState?.consecutiveLosses ?? base.lossStreak);
+
     let qty = calculatePositionSize({
       capital: accountBalance,
       risk: accountBalance * riskPerTradePercentage,
       slPoints: baseRisk,
       price: base.entry,
       volatility: atrValue,
-      drawdown: dd,
+      ...sizingOverrides,
     });
     if (riskReward > 2) qty = Math.floor(qty * 1.1);
     else if (riskReward < 1.2) qty = Math.floor(qty * 0.9);

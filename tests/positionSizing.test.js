@@ -18,6 +18,7 @@ const {
   calculatePositionSize,
   kellyCriterionSize,
   equalCapitalAllocation,
+  estimateRequiredMarginPerLot,
 } = await import('../positionSizing.js');
 const { atrStopLossDistance, calculateRequiredMargin } = await import('../util.js');
 
@@ -82,7 +83,7 @@ test('marginBuffer reduces allowed quantity', () => {
   assert.equal(qty, 83);
 });
 
-test('costBuffer scales risk amount', () => {
+test('costBuffer inflates stop distance before sizing', () => {
   const qty = calculatePositionSize({
     capital: 10000,
     risk: 1000,
@@ -90,6 +91,17 @@ test('costBuffer scales risk amount', () => {
     costBuffer: 1.1,
   });
   assert.equal(qty, 90);
+});
+
+test('estimateRequiredMarginPerLot applies buffers consistently', () => {
+  const margin = estimateRequiredMarginPerLot({
+    price: 100,
+    lotSize: 10,
+    marginPercent: 0.2,
+    exchangeMarginMultiplier: 1.5,
+    marginBuffer: 1.1,
+  });
+  assert.equal(margin, 100 * 10 * 0.2 * 1.5 * 1.1);
 });
 
 test('kellyCriterionSize computes fraction', () => {

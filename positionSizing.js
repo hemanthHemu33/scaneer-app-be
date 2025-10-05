@@ -13,6 +13,31 @@ export const RISK_REWARD_RATIO = 1.5;
 
 let tradeCount = 0;
 
+export function estimateRequiredMarginPerLot({
+  price,
+  lotSize = 1,
+  marginPercent,
+  leverage = 0,
+  exchangeMarginMultiplier = 1,
+  marginBuffer = 1,
+  fallbackPercent = DEFAULT_MARGIN_PERCENT,
+}) {
+  if (!price) return 0;
+  const pct =
+    typeof marginPercent === 'number'
+      ? marginPercent
+      : leverage > 0
+      ? 1 / leverage
+      : fallbackPercent;
+  return (
+    price *
+    lotSize *
+    pct *
+    (exchangeMarginMultiplier || 1) *
+    (marginBuffer || 1)
+  );
+}
+
 // --- Position Sizing Models ---
 
 export function fixedRupeeRiskModel({ riskAmount, slPoints }) {
@@ -145,17 +170,25 @@ export function calculatePositionSize({
 
   tradeCount += 1;
 
+  const sl = Math.max((slPoints || 0) * (costBuffer || 1), 1e-6);
+
   // Determine base quantity using selected model
   let qty;
   switch (methodName) {
     case 'fixed-rupee':
-      qty = fixedRupeeRiskModel({ riskAmount: risk, slPoints });
+      qty = fixedRupeeRiskModel({ riskAmount: risk, slPoints: sl });
       break;
     case 'fixed-percent':
-      qty = fixedPercentRiskModel({ capital, riskPercent: risk, slPoints });
+      qty = fixedPercentRiskModel({ capital, riskPercent: risk, slPoints: sl });
       break;
     case 'kelly':
-      qty = kellyCriterionSize({ capital, winRate, winLossRatio, slPoints, fraction });
+      qty = kellyCriterionSize({
+        capital,
+        winRate,
+        winLossRatio,
+        slPoints: sl,
+        fraction,
+      });
       break;
     case 'volatility-weighted':
       qty = volatilityWeightedSize({
@@ -163,17 +196,21 @@ export function calculatePositionSize({
         baseRisk: risk,
         volatility,
         benchmarkVolatility,
-        slPoints,
+        slPoints: sl,
       });
       break;
     case 'equal-capital':
       qty = equalCapitalAllocation({ capital, numPositions, price });
       break;
     case 'equal-risk':
-      qty = equalRiskAllocation({ capital, numPositions, slPoints });
+      qty = equalRiskAllocation({ capital, numPositions, slPoints: sl });
       break;
     case 'confidence':
-      const baseQty = fixedPercentRiskModel({ capital, riskPercent: risk, slPoints });
+      const baseQty = fixedPercentRiskModel({
+        capital,
+        riskPercent: risk,
+        slPoints: sl,
+      });
       qty = confidenceBasedSizing({ baseQty, confidence });
       break;
     case 'atr':
@@ -183,12 +220,9 @@ export function calculatePositionSize({
       qty = dollarVolatilitySizing({ capital, atr: volatility, price, riskPercent: risk });
       break;
     default: {
-      let riskAmount = risk <= 1 ? capital * risk : risk;
-      if (costBuffer > 1) {
-        riskAmount /= costBuffer;
-      }
+      const riskAmount = risk <= 1 ? capital * risk : risk;
       if (riskAmount <= 0) return 0;
-      qty = riskAmount / Math.max(slPoints, 1e-6);
+      qty = riskAmount / sl;
     }
   }
 
@@ -217,24 +251,26 @@ export function calculatePositionSize({
     else if (ratio > 1.5) qty *= 1.1;
   }
 
-  qty = Math.floor(qty);
+  qty = Math.floor(Number.isFinite(qty) ? qty : 0);
 
   if (roundToLot && lotSize > 1) {
     qty = Math.floor(qty / lotSize) * lotSize;
   }
 
-  const marginPct =
-    typeof marginPercent === 'number'
-      ? marginPercent
-      : leverage > 0
-      ? 1 / leverage
-      : DEFAULT_MARGIN_PERCENT;
   const effectiveMarginPerLot =
-    (marginPerLot || (price ? price * lotSize * marginPct : 0)) *
-    exchangeMarginMultiplier *
-    marginBuffer;
+    (typeof marginPerLot === 'number' && marginPerLot > 0
+      ? marginPerLot * (exchangeMarginMultiplier || 1) * (marginBuffer || 1)
+      : estimateRequiredMarginPerLot({
+          price,
+          lotSize,
+          marginPercent,
+          leverage,
+          exchangeMarginMultiplier,
+          marginBuffer,
+        }));
   if (effectiveMarginPerLot > 0) {
-    const maxLots = Math.floor((capital * utilizationCap) / effectiveMarginPerLot);
+    const cap = Number.isFinite(utilizationCap) ? utilizationCap : 1;
+    const maxLots = Math.floor(((capital || 0) * cap) / effectiveMarginPerLot);
     qty = Math.max(0, Math.min(qty, maxLots * lotSize));
   }
 
@@ -332,8 +368,7 @@ export function calculateTradeParameters({
     costBuffer,
   });
 
-  qty = adjustRiskBasedOnDrawdown({ drawdown, lotSize: qty });
-  qty = adjustRiskAfterLossStreak({ lossStreak: 0, lotSize: qty });
+  // drawdown/loss-streak throttling already applied inside calculatePositionSize
 
   const atrPct = entry ? (atr / entry) * 100 : 0;
   const rrMultiplier = atrPct > 2 ? RISK_REWARD_RATIO + 0.5 : RISK_REWARD_RATIO;

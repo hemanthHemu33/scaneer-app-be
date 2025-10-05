@@ -71,8 +71,19 @@ export async function executeSignal(signal, opts = {}) {
       risk: opts.risk || 0.01,
       slPoints: Math.abs(signal.entry - signal.stopLoss),
       price: signal.entry,
+      lotSize: opts.lotSize,
+      minLotSize: opts.minLotSize,
       minQty: opts.minQty,
       maxQty: opts.maxQty,
+      leverage: opts.leverage,
+      marginPercent: opts.marginPercent,
+      marginPerLot: opts.marginPerLot,
+      utilizationCap: opts.utilizationCap,
+      marginBuffer: opts.marginBuffer,
+      exchangeMarginMultiplier: opts.exchangeMarginMultiplier,
+      costBuffer: opts.costBuffer,
+      drawdown: opts.drawdown,
+      lossStreak: opts.lossStreak,
     });
   if (qty <= 0) return null;
   const tradeValue = signal.entry * qty;
