@@ -93,6 +93,17 @@ test('costBuffer inflates stop distance before sizing', () => {
   assert.equal(qty, 90);
 });
 
+test('slippage and spread reduce position size', () => {
+  const qty = calculatePositionSize({
+    capital: 10000,
+    risk: 1000,
+    slPoints: 10,
+    slippage: 1,
+    spread: 1,
+  });
+  assert.equal(qty, 83);
+});
+
 test('estimateRequiredMarginPerLot applies buffers consistently', () => {
   const margin = estimateRequiredMarginPerLot({
     price: 100,

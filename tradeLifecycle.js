@@ -82,6 +82,8 @@ export async function executeSignal(signal, opts = {}) {
       marginBuffer: opts.marginBuffer,
       exchangeMarginMultiplier: opts.exchangeMarginMultiplier,
       costBuffer: opts.costBuffer,
+      slippage: opts.slippage,
+      spread: opts.spread,
       drawdown: opts.drawdown,
       lossStreak: opts.lossStreak,
     });

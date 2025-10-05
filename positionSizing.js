@@ -122,12 +122,15 @@ export function dollarVolatilitySizing({ capital, atr, price, riskPercent = 0.01
  * @param {number} [opts.marginBuffer=1]   Safety buffer on required margin.
  * @param {number} [opts.exchangeMarginMultiplier=1] Exchange specified margin multiplier.
  * @param {number} [opts.costBuffer=1]     Buffer for taxes and slippage.
+ * @param {number} [opts.slippage=0]       Expected slippage per unit.
+ * @param {number} [opts.spread=0]         Spread cost per unit.
  * @param {number} [opts.volatilityGuard]  ATR/VIX threshold beyond which position size is scaled down.
  * @param {Object} [opts.marketDepth]      Current market depth { buy, sell }.
  * @param {number} [opts.priceMovement]    Recent price movement for dynamic scaling.
  * @param {string} [opts.method]           Optional sizing method ('fixed-rupee', 'fixed-percent', 'kelly',
  *                                         'volatility-weighted', 'equal-capital', 'equal-risk',
  *                                         'confidence', 'atr', 'dollar-volatility').
+ * @param {Object} [opts.debug]            Optional object populated with sizing diagnostics.
  * Additional fields may be required based on the chosen method (e.g. winRate).
  */
 export function calculatePositionSize({
@@ -149,6 +152,8 @@ export function calculatePositionSize({
   marginBuffer = 1,
   exchangeMarginMultiplier = 1,
   costBuffer = 1,
+  slippage = 0,
+  spread = 0,
   volatilityGuard,
   marketDepth,
   priceMovement,
@@ -162,15 +167,33 @@ export function calculatePositionSize({
   numPositions,
   confidence,
   atrMult = 1,
+  debug,
 }) {
   if (!capital) return 0;
   const methodName = method || 'default';
   const noSLNeeded = ['equal-capital', 'atr', 'dollar-volatility'].includes(methodName);
-  if (!slPoints && !noSLNeeded) return 0;
+
+  const baseDistance = Number.isFinite(slPoints) ? Math.max(slPoints, 0) : 0;
+  const slip = Number.isFinite(slippage) ? Math.max(slippage, 0) : 0;
+  const spr = Number.isFinite(spread) ? Math.max(spread, 0) : 0;
+  const buffer = Number.isFinite(costBuffer) && costBuffer > 0 ? costBuffer : 1;
+  const effectiveDistance = Math.max((baseDistance + slip + spr) * buffer, 0);
+  if (!noSLNeeded && effectiveDistance <= 0) return 0;
+
+  const debugInfo = debug && typeof debug === 'object' ? debug : null;
+  if (debugInfo) {
+    debugInfo.rawDistance = baseDistance;
+    debugInfo.slippage = slip;
+    debugInfo.spread = spr;
+    debugInfo.costBuffer = buffer;
+    debugInfo.effectiveDistance = effectiveDistance;
+  }
 
   tradeCount += 1;
 
-  const sl = Math.max((slPoints || 0) * (costBuffer || 1), 1e-6);
+  const sl = noSLNeeded
+    ? Math.max((slPoints || 0) * buffer, 1e-6)
+    : Math.max(effectiveDistance, 1e-6);
 
   // Determine base quantity using selected model
   let qty;
@@ -205,7 +228,7 @@ export function calculatePositionSize({
     case 'equal-risk':
       qty = equalRiskAllocation({ capital, numPositions, slPoints: sl });
       break;
-    case 'confidence':
+    case 'confidence': {
       const baseQty = fixedPercentRiskModel({
         capital,
         riskPercent: risk,
@@ -213,6 +236,7 @@ export function calculatePositionSize({
       });
       qty = confidenceBasedSizing({ baseQty, confidence });
       break;
+    }
     case 'atr':
       qty = atrBasedSizing({ capital, atr: volatility, atrMult, riskPercent: risk });
       break;
@@ -227,6 +251,10 @@ export function calculatePositionSize({
   }
 
   if (!qty || qty <= 0) return 0;
+
+  if (debugInfo) {
+    debugInfo.requestedQty = qty;
+  }
 
   if (volatility && volatilityGuard && volatility > volatilityGuard) {
     const factor = volatility / volatilityGuard;
@@ -251,10 +279,26 @@ export function calculatePositionSize({
     else if (ratio > 1.5) qty *= 1.1;
   }
 
+  if (debugInfo) {
+    debugInfo.modelAdjustedQty = qty;
+  }
+
   qty = Math.floor(Number.isFinite(qty) ? qty : 0);
 
+  if (debugInfo) {
+    debugInfo.roundedQty = qty;
+  }
+
   if (roundToLot && lotSize > 1) {
+    const beforeLotRound = qty;
     qty = Math.floor(qty / lotSize) * lotSize;
+    if (debugInfo) {
+      debugInfo.roundToLot = {
+        before: beforeLotRound,
+        after: qty,
+        lotSize,
+      };
+    }
   }
 
   const effectiveMarginPerLot =
@@ -271,7 +315,19 @@ export function calculatePositionSize({
   if (effectiveMarginPerLot > 0) {
     const cap = Number.isFinite(utilizationCap) ? utilizationCap : 1;
     const maxLots = Math.floor(((capital || 0) * cap) / effectiveMarginPerLot);
-    qty = Math.max(0, Math.min(qty, maxLots * lotSize));
+    const capQty = maxLots * lotSize;
+    if (debugInfo) {
+      debugInfo.marginCap = {
+        maxLots,
+        capQty,
+      };
+    }
+    const beforeCapQty = qty;
+    qty = Math.max(0, Math.min(qty, capQty));
+    if (debugInfo) {
+      debugInfo.marginCapped = capQty > 0 && qty < beforeCapQty;
+      debugInfo.qtyAfterMargin = qty;
+    }
   }
 
   if (typeof drawdown === 'number') {
@@ -281,9 +337,30 @@ export function calculatePositionSize({
     qty = adjustRiskAfterLossStreak({ lossStreak, lotSize: qty });
   }
 
-  if (typeof minQty === 'number' && qty < minQty) return 0;
-  if (typeof minLotSize === 'number' && qty < minLotSize) return 0;
-  if (typeof maxQty === 'number' && qty > maxQty) qty = maxQty;
+  if (typeof minQty === 'number' && qty < minQty) {
+    if (debugInfo) {
+      debugInfo.rejectedByMinQty = true;
+      debugInfo.finalQty = 0;
+    }
+    return 0;
+  }
+  if (typeof minLotSize === 'number' && qty < minLotSize) {
+    if (debugInfo) {
+      debugInfo.rejectedByMinLot = true;
+      debugInfo.finalQty = 0;
+    }
+    return 0;
+  }
+  if (typeof maxQty === 'number' && qty > maxQty) {
+    if (debugInfo) {
+      debugInfo.cappedByMaxQty = maxQty;
+    }
+    qty = maxQty;
+  }
+
+  if (debugInfo) {
+    debugInfo.finalQty = qty;
+  }
 
   return qty > 0 ? qty : 0;
 }
@@ -351,12 +428,13 @@ export function calculateTradeParameters({
     atr,
   });
 
-  const baseRisk = Math.abs(entry - finalSL) + slippage + spread;
+  const rawRisk = Math.abs(entry - finalSL);
+  const effectiveRisk = rawRisk + slippage + spread;
   const riskAmount = capital * riskPercent;
   let qty = calculatePositionSize({
     capital,
     risk: riskAmount,
-    slPoints: baseRisk,
+    slPoints: rawRisk,
     price: entry,
     volatility: atr,
     drawdown,
@@ -366,6 +444,8 @@ export function calculateTradeParameters({
     leverage,
     marginPercent,
     costBuffer,
+    slippage,
+    spread,
   });
 
   // drawdown/loss-streak throttling already applied inside calculatePositionSize
@@ -373,9 +453,9 @@ export function calculateTradeParameters({
   const atrPct = entry ? (atr / entry) * 100 : 0;
   const rrMultiplier = atrPct > 2 ? RISK_REWARD_RATIO + 0.5 : RISK_REWARD_RATIO;
   const target1 =
-    entry + (direction === 'Long' ? 1 : -1) * (rrMultiplier * 0.5) * baseRisk;
+    entry + (direction === 'Long' ? 1 : -1) * (rrMultiplier * 0.5) * effectiveRisk;
   const target2 =
-    entry + (direction === 'Long' ? 1 : -1) * rrMultiplier * baseRisk;
+    entry + (direction === 'Long' ? 1 : -1) * rrMultiplier * effectiveRisk;
 
   return { stopLoss: finalSL, qty, target1, target2 };
 }

@@ -17,8 +17,8 @@ export function buildSignal(context = {}, pattern = {}, tradeParams = {}, confid
     rsi,
     supertrend,
     atrValue,
-    slippage,
-    spread,
+    slippage = 0,
+    spread = 0,
     liquidity,
     liveTick,
     depth,
@@ -41,9 +41,70 @@ export function buildSignal(context = {}, pattern = {}, tradeParams = {}, confid
     riskAmount,
     accountBalance,
     baseRisk,
+    rawStopDistance,
+    effectiveStopDistance,
+    costBufferApplied,
+    sizingDebug = {},
   } = context;
 
   const { entry, stopLoss, target1, target2, qty } = tradeParams;
+
+  const sanitizeNumber = (value, precision) => {
+    if (!Number.isFinite(value)) return null;
+    return typeof precision === 'number' ? parseFloat(value.toFixed(precision)) : Number(value);
+  };
+
+  const sanitizedRawStop = sanitizeNumber(
+    rawStopDistance !== undefined ? rawStopDistance : baseRisk,
+    4
+  );
+  const sanitizedEffectiveStop = sanitizeNumber(
+    effectiveStopDistance !== undefined
+      ? effectiveStopDistance
+      : sizingDebug.effectiveDistance,
+    4
+  );
+  const sanitizedCostBuffer = sanitizeNumber(
+    costBufferApplied !== undefined ? costBufferApplied : sizingDebug.costBuffer,
+    4
+  );
+
+  let sizingDiagnostics;
+  if (sizingDebug && typeof sizingDebug === 'object' && Object.keys(sizingDebug).length) {
+    sizingDiagnostics = {
+      rawDistance: sanitizeNumber(sizingDebug.rawDistance, 4),
+      effectiveDistance: sanitizeNumber(sizingDebug.effectiveDistance, 4),
+      requestedQty: sanitizeNumber(sizingDebug.requestedQty, 4),
+      modelAdjustedQty: sanitizeNumber(sizingDebug.modelAdjustedQty, 4),
+      roundedQty: sanitizeNumber(sizingDebug.roundedQty),
+      roundToLot: sizingDebug.roundToLot
+        ? {
+            before: sanitizeNumber(sizingDebug.roundToLot.before),
+            after: sanitizeNumber(sizingDebug.roundToLot.after),
+            lotSize: sanitizeNumber(sizingDebug.roundToLot.lotSize),
+          }
+        : null,
+      marginCap: sizingDebug.marginCap
+        ? {
+            maxLots: sanitizeNumber(sizingDebug.marginCap.maxLots),
+            capQty: sanitizeNumber(sizingDebug.marginCap.capQty),
+          }
+        : null,
+      marginCapped: Boolean(sizingDebug.marginCapped),
+      qtyAfterMargin: sanitizeNumber(sizingDebug.qtyAfterMargin),
+      finalQty: sanitizeNumber(sizingDebug.finalQty),
+      signalQty: sanitizeNumber(sizingDebug.signalQty),
+    };
+    const hasMeaningfulSizing = Object.entries(sizingDiagnostics).some(([key, value]) => {
+      if (value === null || value === undefined) return false;
+      if (typeof value === 'object') {
+        return value !== null && Object.values(value).some((nested) => nested !== null && nested !== undefined);
+      }
+      if (key === 'marginCapped') return value === true;
+      return true;
+    });
+    if (!hasMeaningfulSizing) sizingDiagnostics = undefined;
+  }
 
   const generatedAt = toISTISOString();
   const tickIST = convertTickTimestampsToIST(liveTick);
@@ -71,6 +132,9 @@ export function buildSignal(context = {}, pattern = {}, tradeParams = {}, confid
     target2: target2 !== undefined ? parseFloat(target2.toFixed(2)) : null,
     qty,
     riskPerUnit: baseRisk !== undefined ? parseFloat(baseRisk.toFixed(2)) : null,
+    rawStopDistance: sanitizedRawStop,
+    effectiveStopDistance: sanitizedEffectiveStop,
+    costBuffer: sanitizedCostBuffer,
     riskAmount: riskAmount !== undefined ? parseFloat(riskAmount.toFixed(2)) : null,
     accountBalance: accountBalance !== undefined ? parseFloat(accountBalance.toFixed(2)) : null,
     rsi: rsi !== undefined ? parseFloat(rsi.toFixed(2)) : null,
@@ -105,6 +169,7 @@ export function buildSignal(context = {}, pattern = {}, tradeParams = {}, confid
     strategy: strategyName,
     generatedAt,
     source: 'analyzeCandles',
+    sizing: sizingDiagnostics,
   };
 
   const advancedSignal = {

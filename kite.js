@@ -1226,6 +1226,17 @@ async function emitUnifiedSignal(signal, source, io = globalIO) {
     );
     return;
   }
+  const sizingInfo = signal.sizing || {};
+  const sizingLog = {
+    rawSL: signal.rawStopDistance ?? sizingInfo.rawDistance ?? null,
+    effectiveSL: signal.effectiveStopDistance ?? sizingInfo.effectiveDistance ?? null,
+    requestedQty: sizingInfo.requestedQty ?? sizingInfo.roundedQty ?? null,
+    finalQty: signal.qty,
+    marginCapQty: sizingInfo.marginCap?.capQty ?? null,
+    marginCapLots: sizingInfo.marginCap?.maxLots ?? null,
+    marginCapped: Boolean(sizingInfo.marginCapped),
+  };
+  console.log(`[SIZING] ${symbol}`, sizingLog);
   console.log(`🚀 Emitting ${source} Signal:`, signal);
   // Guard against missing socket instance which previously threw and prevented
   // signal propagation
