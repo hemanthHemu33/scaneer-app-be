@@ -184,8 +184,13 @@ export function checkExposureCap({
   totalCapital,
   caps = {},
 }) {
-  const instCap = (caps.instrument || 0.1) * totalCapital;
-  const secCaps = { default: 0.25, ...(caps.sector || {}) };
+  const exposureDefaults = riskDefaults.exposure || {};
+  const instCapPct = caps.instrument ?? exposureDefaults.instrumentCapPct ?? 0.1;
+  const sectorOverrides = caps.sector ? { ...caps.sector } : {};
+  const sectorDefault =
+    sectorOverrides.default ?? exposureDefaults.sectorDefaultCapPct ?? 0.25;
+  const secCaps = { default: sectorDefault, ...sectorOverrides };
+  const instCap = instCapPct * totalCapital;
   const secCap = (secCaps[sector] ?? secCaps.default) * totalCapital;
 
   const getAll = () =>
@@ -273,10 +278,18 @@ export function realTimeRiskController({
   utilizationCap,
   lotSize,
   tickSize,
-  slippage = 0,
-  spread = 0,
-  costBuffer = 1,
+  slippage,
+  spread,
+  costBuffer,
 }) {
+  const fr = riskDefaults.frictions || {};
+  const sizingDefaults = riskDefaults.sizing || {};
+  const effectiveRisk =
+    typeof risk === 'number' ? risk : sizingDefaults.defaultRiskPercent ?? 0.01;
+  const effectiveCostBuffer = costBuffer ?? fr.costBuffer ?? 1;
+  const effectiveSlippage = slippage ?? fr.defaultSlippage ?? 0;
+  const effectiveSpread = spread ?? 0;
+
   let stopLoss = calculateDynamicStopLoss({ atr, entry, direction });
   stopLoss = adjustStopLoss({
     price: entry,
@@ -284,10 +297,12 @@ export function realTimeRiskController({
     direction,
     atr,
     tickSize,
+    minAtrMult: riskDefaults?.sl?.minAtrMult ?? 0.5,
+    maxAtrMult: riskDefaults?.sl?.maxAtrMult ?? 3,
   });
   const qty = calculateLotSize({
     capital,
-    riskAmount: risk,
+    riskAmount: effectiveRisk,
     entry,
     stopLoss,
     volatility,
@@ -299,9 +314,9 @@ export function realTimeRiskController({
     marginBuffer,
     exchangeMarginMultiplier,
     utilizationCap,
-    slippage,
-    spread,
-    costBuffer,
+    slippage: effectiveSlippage,
+    spread: effectiveSpread,
+    costBuffer: effectiveCostBuffer,
   });
   return { stopLoss, qty };
 }

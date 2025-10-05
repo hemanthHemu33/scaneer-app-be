@@ -167,7 +167,10 @@ function computeSpreadLimit({ price, maxSpread, maxSpreadPct }) {
   if (typeof maxSpread === 'number') return maxSpread;
   if (typeof maxSpreadPct === 'number') {
     const p = Number(price);
-    if (Number.isFinite(p) && p > 0) return (maxSpreadPct / 100) * p;
+    if (Number.isFinite(p) && p > 0) {
+      const pct = maxSpreadPct > 1 ? maxSpreadPct / 100 : maxSpreadPct;
+      return pct * p;
+    }
   }
   return null;
 }
@@ -283,15 +286,24 @@ export function checkTimingFilters({
 
 export function validatePreExecution(signal, market) {
   const { strategy } = signal.algoSignal || { strategy: signal.pattern };
+  const mc = riskDefaults.market || {};
+  const fr = riskDefaults.frictions || {};
+
+  if (market && typeof market === 'object') {
+    if (!('maxSpread' in market) && mc.maxSpread != null) market.maxSpread = mc.maxSpread;
+    if (!('maxSpreadPct' in market) && mc.maxSpreadPct != null)
+      market.maxSpreadPct = mc.maxSpreadPct;
+  }
+
   const rrInfo = validateRR({
     strategy,
     entry: signal.entry,
     stopLoss: signal.stopLoss,
     target: signal.target2,
     winrate: market.winrate || 0,
-    slippage: signal.slippage || market.slippage || 0,
+    slippage: signal.slippage ?? market.slippage ?? fr.defaultSlippage ?? 0,
     spread: signal.spread ?? market.spread ?? 0,
-    costBuffer: market.costBuffer || 1,
+    costBuffer: market.costBuffer ?? fr.costBuffer ?? 1,
   });
   if (!rrInfo.valid) {
     console.log(
