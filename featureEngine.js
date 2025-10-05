@@ -4,6 +4,11 @@
 // Simple in-memory cache for EMA values keyed by optional id
 const emaCache = new Map();
 
+function clamp01(x) {
+  if (!Number.isFinite(x)) return 0.5;
+  return Math.max(0, Math.min(1, x));
+}
+
 export function calculateEMA(prices, length, key) {
   if (!prices || prices.length === 0) return null;
   const k = 2 / (length + 1);
@@ -1186,8 +1191,16 @@ export function computeFeatures(candles = [], opts = {}) {
   const {
     seriesKey = null,
     supertrendSettings = { atrLength: 10, multiplier: 3 },
+    benchmarkCloses = null,
+    rsLookback = 20,
+    only = null,
   } = opts;
   if (!Array.isArray(candles) || candles.length === 0) return null;
+
+  const want = (name) =>
+    !only ||
+    only === "ALL" ||
+    (Array.isArray(only) && only.includes(name));
 
   const valid = candles.filter(
     (c) =>
@@ -1225,34 +1238,30 @@ export function computeFeatures(candles = [], opts = {}) {
   const lows = valid.map((c) => c.low);
   const volumes = valid.map((c) => c.volume || 0);
 
-  const ema9 = calculateEMA(closes, 9, seriesKey ? `${seriesKey}:ema9` : undefined);
-  const ema21 = calculateEMA(
-    closes,
-    21,
-    seriesKey ? `${seriesKey}:ema21` : undefined
-  );
-  const ema50 = calculateEMA(
-    closes,
-    50,
-    seriesKey ? `${seriesKey}:ema50` : undefined
-  );
-  const ema200 = calculateEMA(
-    closes,
-    200,
-    seriesKey ? `${seriesKey}:ema200` : undefined
-  );
+  const ema9 = want("ema9")
+    ? calculateEMA(closes, 9, seriesKey ? `${seriesKey}:ema9` : undefined)
+    : null;
+  const ema21 = want("ema21")
+    ? calculateEMA(closes, 21, seriesKey ? `${seriesKey}:ema21` : undefined)
+    : null;
+  const ema50 = want("ema50")
+    ? calculateEMA(closes, 50, seriesKey ? `${seriesKey}:ema50` : undefined)
+    : null;
+  const ema200 = want("ema200")
+    ? calculateEMA(closes, 200, seriesKey ? `${seriesKey}:ema200` : undefined)
+    : null;
   const sma50 = calculateSMA(closes, 50);
   const wma50 = calculateWMA(closes, 50);
   const hma50 = calculateHMA(closes, 50);
   const dema50 = calculateDEMA(closes, 50);
   const tema50 = calculateTEMA(closes, 50);
-  const macd = calculateMACD(closes);
+  const macd = want("macd") || want("macdHist") ? calculateMACD(closes) : null;
   const { adx, plusDI, minusDI } = calculateADX(valid, 14) || {};
-  const vortex = calculateVortex(valid, 14);
-  const ichimoku = calculateIchimoku(valid);
+  const vortex = want("vortex") ? calculateVortex(valid, 14) : null;
+  const ichimoku = want("ichimoku") ? calculateIchimoku(valid) : null;
   const maEnv = calculateMAEnvelopes(closes, 20);
   const linearReg = calculateLinearRegression(closes, 20);
-  const rsi = calculateRSI(closes, 14);
+  const rsi = want("rsi") ? calculateRSI(closes, 14) : null;
   const stochastic = calculateStochastic(valid);
   const cci = calculateCCI(valid);
   const roc = calculateROC(closes);
@@ -1266,24 +1275,26 @@ export function computeFeatures(candles = [], opts = {}) {
   const klinger = calculateKlinger(valid);
   const stc = calculateSTC(closes);
   const tsi = calculateTSI(closes);
-  const bollinger = calculateBollingerBands(closes);
-  const keltner = calculateKeltnerChannels(valid);
-  const donchian = calculateDonchianChannels(valid);
+  const bollinger = want("bollinger") ? calculateBollingerBands(closes) : null;
+  const keltner = want("keltner") ? calculateKeltnerChannels(valid) : null;
+  const donchian = want("donchian") ? calculateDonchianChannels(valid) : null;
   const chaikinVol = calculateChaikinVolatility(valid);
   const stdDev = calculateStdDev(closes, 20);
   const histVol = calculateHistoricalVolatility(closes);
   const fractalChaos = calculateFractalChaosBands(valid);
   const envelopes = calculateEnvelopes(closes);
-  const atr = getATR(valid, 14);
+  const atr = want("atr") ? getATR(valid, 14) : null;
   const emaSlope = calculateEMASlope(closes, 21);
   const trendStrength = adx ?? Math.abs((emaSlope / (ema21 || 1)) * 100);
   const volatilityClass = classifyVolatility(atr, closes.at(-1));
-  const supertrend = calculateSupertrend(
-    valid,
-    supertrendSettings.atrLength ?? 10,
-    supertrendSettings.multiplier ?? 3
-  );
-  const vwap = calculateVWAP(valid);
+  const supertrend = want("supertrend")
+    ? calculateSupertrend(
+        valid,
+        supertrendSettings.atrLength ?? 10,
+        supertrendSettings.multiplier ?? 3
+      )
+    : null;
+  const vwap = want("vwap") ? calculateVWAP(valid) : null;
   const pivot = calculatePivotPoints(valid);
   const fibRetracements = calculateFibonacciRetracements(Math.max(...highs), Math.min(...lows));
   const fibExtensions = calculateFibonacciExtensions(Math.max(...highs), Math.min(...lows));
@@ -1306,10 +1317,10 @@ export function computeFeatures(candles = [], opts = {}) {
   const volOsc = calculateVolumeOscillator(volumes);
   const emv = calculateEMV(valid);
   const vpt = calculateVPT(valid);
-  const volumeProfile = calculateVolumeProfile(valid);
+  const volumeProfile = want("volumeProfile") ? calculateVolumeProfile(valid) : null;
 
-  const ttmSqueeze = calculateTTMSqueeze(valid);
-  const zScore = calculateZScore(closes);
+  const ttmSqueeze = want("ttmSqueeze") ? calculateTTMSqueeze(valid) : null;
+  const zScore = want("zScore") ? calculateZScore(closes) : null;
   const elderImpulse = calculateElderImpulse(valid);
   const donchianWidth = calculateDonchianWidth(valid);
   const ichimokuBase = calculateIchimokuBaseLine(valid);
@@ -1332,6 +1343,24 @@ export function computeFeatures(candles = [], opts = {}) {
       ? volumes.slice(0, -1).reduce((a, b) => a + b, 0) / (volumes.length - 1)
       : volumes[0] || 0;
   const rvol = avgVolume ? volumes.at(-1) / avgVolume : 1;
+
+  let rsScore = undefined;
+  if (Array.isArray(benchmarkCloses) && benchmarkCloses.length >= rsLookback + 1) {
+    const n = Math.min(
+      rsLookback,
+      Math.min(benchmarkCloses.length, closes.length) - 1
+    );
+    if (n > 0) {
+      const p0 = closes[closes.length - 1 - n];
+      const p1 = closes[closes.length - 1];
+      const b0 = benchmarkCloses[benchmarkCloses.length - 1 - n];
+      const b1 = benchmarkCloses[benchmarkCloses.length - 1];
+      const stkRet = p0 > 0 ? (p1 - p0) / p0 : 0;
+      const bmkRet = b0 > 0 ? (b1 - b0) / b0 : 0;
+      const delta = stkRet - bmkRet;
+      rsScore = clamp01(0.5 + delta * 2);
+    }
+  }
 
   return {
     ema9,
@@ -1374,6 +1403,7 @@ export function computeFeatures(candles = [], opts = {}) {
     fractalChaos,
     envelopes,
     atr,
+    atr14: atr,
     supertrend,
     anchoredVwap,
     obv,
@@ -1422,5 +1452,6 @@ export function computeFeatures(candles = [], opts = {}) {
     medianPrice,
     typicalPrice,
     weightedClose,
+    ...(rsScore === undefined ? {} : { rsScore }),
   };
 }
