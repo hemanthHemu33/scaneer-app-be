@@ -10,6 +10,8 @@ import {
   computeFeatures,
 } from "./featureEngine.js";
 import { confirmRetest, detectAllPatterns, sanitizeCandles } from "./util.js";
+import { validateATRStopLoss, adjustStopLoss } from "./riskValidator.js";
+import { riskDefaults } from "./riskConfig.js";
 
 // Indicator helpers imported above return only the latest scalar value.
 // Any indicator series needed by strategies should be generated locally
@@ -43,9 +45,24 @@ export const DEFAULT_CONFIG = Object.freeze({
   eventRvolMultiplier: 1.5,
   eventSlAtrMultiplier: 1.5,
   regimeAtrZScoreBins: { low: -1, high: 1 },
-  maxSpreadPct: 0.5,
+  // Keep as "visual" percent to avoid breaking existing callers,
+  // but we'll normalize to fraction when gating (see helper below).
+  maxSpreadPct: 0.5, // means 0.5% (not 50%)
   minAvgVolume: 100000,
 });
+
+function pctToFrac(p) {
+  // 0.5   -> 0.005 (0.5%)
+  // 0.005 -> 0.005 (already a fraction)
+  if (p == null || !Number.isFinite(p)) return undefined;
+  if (p <= 0) return 0;
+  return p > 0.1 ? p / 100 : p;
+}
+
+function spreadCapFraction(cfg) {
+  // prefers riskDefaults if set, else converts cfg
+  return riskDefaults.market?.maxSpreadPct ?? pctToFrac(cfg.maxSpreadPct);
+}
 
 function emaSeries(prices, length) {
   const k = 2 / (length + 1);
@@ -84,6 +101,16 @@ function lowest(candles, count) {
   if (!candles.length) return null;
   const slice = candles.slice(-count);
   return Math.min(...slice.map((c) => c.low));
+}
+
+function resolveCategory(type = "", name = "") {
+  const s = `${type} ${name}`.toLowerCase();
+  if (s.includes("vwap") || s.includes("mean") || s.includes("reversion"))
+    return "mean-reversion";
+  if (s.includes("breakout") || s.includes("breakdown") || s.includes("gap"))
+    return "breakout";
+  if (s.includes("trend")) return "trend";
+  return "breakout"; // safe default for RR
 }
 
 const IST_OFFSET_MIN = 330; // IST is UTC+5:30
@@ -396,7 +423,15 @@ export function detectGapUpOrDown(
   if (typeof yesterdayClose !== "number" || typeof todayOpen !== "number")
     return null;
   const gapPercent = ((todayOpen - yesterdayClose) / yesterdayClose) * 100;
-  if (Math.abs(gapPercent) > config.maxGapPct) return null;
+  const cfgMaxGap = Number.isFinite(config.maxGapPct)
+    ? config.maxGapPct
+    : Infinity;
+  const defaultMaxGap = riskDefaults.market?.maxDailySpikePct;
+  const defaultsPct = Number.isFinite(defaultMaxGap)
+    ? defaultMaxGap * 100
+    : Infinity;
+  const maxGap = Math.min(cfgMaxGap, defaultsPct);
+  if (Number.isFinite(maxGap) && Math.abs(gapPercent) > maxGap) return null;
   if (gapPercent >= config.gapPctMinLong)
     return {
       type: "Gap-Up Breakout",
@@ -1741,7 +1776,15 @@ function computeDetectorScore(raw, candles, features, context, entry, stopLoss, 
     rsScore * 0.1;
 
   let penalty = 0;
-  if (context.spreadPct != null && context.spreadPct > config.maxSpreadPct) penalty += 0.1;
+  const spreadFracScore =
+    context.spreadFrac ?? pctToFrac(context.spreadPct);
+  const capFracScore = spreadCapFraction(config);
+  if (
+    spreadFracScore != null &&
+    capFracScore != null &&
+    spreadFracScore > capFracScore
+  )
+    penalty += 0.1;
   if (context.newsImpact || context.badNews) penalty += 0.2;
   if (raw.meta?.missingRetest) penalty += 0.05;
   const rsi = features.rsi14 ?? features.rsi;
@@ -1773,12 +1816,39 @@ function normalizeResult(
     (context.avgAtr || atr || 0) * config.riskAtrMaxMultiple
   );
   const entry = price;
-  const stopLoss =
+  let stopLoss =
     raw.stopLoss !== undefined
       ? raw.stopLoss
       : dir === "Long"
       ? entry - usedAtr * config.slAtrMultiple
       : entry + usedAtr * config.slAtrMultiple;
+  const slOk = validateATRStopLoss({
+    entry,
+    stopLoss,
+    atr: usedAtr,
+    minMult: riskDefaults.sl.minAtrMult,
+    maxMult: riskDefaults.sl.maxAtrMult,
+  });
+  if (!slOk) {
+    const minDist = usedAtr * (riskDefaults.sl.minAtrMult ?? 0.5);
+    const maxDist = usedAtr * (riskDefaults.sl.maxAtrMult ?? 3);
+    const dist = Math.max(
+      minDist,
+      Math.min(Math.abs(entry - stopLoss), maxDist)
+    );
+    stopLoss = dir === "Long" ? entry - dist : entry + dist;
+  }
+  stopLoss = adjustStopLoss({
+    price: entry,
+    stopLoss,
+    direction: dir,
+    atr: usedAtr,
+  });
+  const { tickSize } = context || {};
+  if (Number.isFinite(tickSize) && tickSize > 0) {
+    const snap = (v) => Number((Math.round(v / tickSize) * tickSize).toFixed(8));
+    stopLoss = snap(stopLoss);
+  }
   const targets =
     raw.targets ||
     config.targetAtrMultiples.reduce((acc, m, i) => {
@@ -1807,6 +1877,9 @@ function normalizeResult(
     ...(raw.meta || {}),
     ...(context.meta || {}),
   };
+  if (!meta.strategyCategory) {
+    meta.strategyCategory = resolveCategory(raw.type, raw.name);
+  }
   return {
     name: raw.name,
     type: raw.type || "Event",
@@ -1839,8 +1912,12 @@ export function evaluateStrategies(
       return [];
     if (!isEvent && context.rvol < cfg.rvolMin) return [];
   }
-  if (context.spreadPct != null && context.spreadPct > cfg.maxSpreadPct) return [];
-  if (context.avgVolume && context.avgVolume < cfg.minAvgVolume) return [];
+  const spreadFrac =
+    context.spreadFrac ?? pctToFrac(context.spreadPct);
+  const capFrac = spreadCapFraction(cfg);
+  if (spreadFrac != null && capFrac != null && spreadFrac > capFrac) return [];
+  if (context.avgVolume && cfg.minAvgVolume && context.avgVolume < cfg.minAvgVolume)
+    return [];
   if (isEvent) {
     cfg = {
       ...cfg,

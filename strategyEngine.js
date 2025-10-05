@@ -1,7 +1,12 @@
 import { calculateEMA, getATR, computeFeatures } from './featureEngine.js';
 import { detectAllPatterns, sanitizeCandles, toSpreadPct, confirmRetest } from './util.js';
-import { detectGapUpOrDown } from './strategies.js';
-import { RISK_REWARD_RATIO, calculatePositionSize } from './positionSizing.js';
+import { detectGapUpOrDown, evaluateStrategies } from './strategies.js';
+import {
+  RISK_REWARD_RATIO,
+  calculatePositionSize,
+  calculateTradeParameters,
+} from './positionSizing.js';
+import { riskDefaults } from './riskConfig.js';
 
 const DEFAULT_SUPERTREND_SETTINGS = { atrLength: 10, multiplier: 3 };
 const MAX_SPREAD_PCT = 0.5; // reject signals when quoted spread > 0.5% of price
@@ -616,8 +621,66 @@ export function evaluateAllStrategies(context = {}) {
     strategyTripleTop,
     strategyVWAPReversal,
   ];
-  return strategies
-    .map((fn) => fn(base))
+  const classic = strategies.map((fn) => fn(base)).filter(Boolean);
+
+  const smartSignals = Array.isArray(base.candles)
+    ? evaluateStrategies(base.candles, base, { topN: 2 })
+    : [];
+  const smart = (smartSignals || []).map((s) => {
+    if (!s) return null;
+    const trade =
+      calculateTradeParameters({
+        entry: s.entry,
+        stopLoss: s.stopLoss,
+        direction: s.direction,
+        atr: base.atr,
+        capital: base.accountBalance || 0,
+        leverage: base.leverage || 0,
+        marginPercent: base.marginPercent,
+        drawdown: base.drawdown,
+        slippage:
+          base.slippage ?? riskDefaults.frictions?.defaultSlippage ?? 0,
+        spread: base.spread || 0,
+        costBuffer:
+          base.costBuffer ?? riskDefaults.frictions?.costBuffer ?? 1,
+        riskPercent:
+          base.riskPerTradePercentage ??
+          riskDefaults.sizing?.defaultRiskPercent ??
+          0.01,
+        tickSize: base.tickSize ?? base.tick ?? base.tick_size,
+      }) || {};
+    const qty = Math.max(1, Math.floor(trade.qty || 0));
+    const target1 =
+      trade.target1 ?? s.targets?.T1 ?? s.targets?.T2 ?? s.entry;
+    const target2 =
+      trade.target2 ?? s.targets?.T2 ?? s.targets?.T1 ?? target1;
+    const meta = s.meta ? { ...s.meta } : undefined;
+    return {
+      stock: base.symbol,
+      strategy: s.name,
+      pattern: s.type,
+      direction: s.direction,
+      entry: s.entry,
+      stopLoss: trade.stopLoss ?? s.stopLoss,
+      target1,
+      target2,
+      qty,
+      atr: base.atr,
+      spread: base.spread || 0,
+      liquidity: base.liquidity || 0,
+      confidence: s.confidence ?? s.score ?? 0.55,
+      generatedAt: new Date().toISOString(),
+      source: 'evaluateStrategies',
+      strategyCategory: s.meta?.strategyCategory || 'breakout',
+      algoSignal: { strategy: s.meta?.strategyCategory || 'breakout' },
+      targets: s.targets,
+      meta,
+    };
+  });
+
+  const signals = [...classic, ...smart];
+
+  return signals
     .filter(Boolean)
     .map((signal) => {
       if (!signal || typeof signal !== 'object') return signal;
