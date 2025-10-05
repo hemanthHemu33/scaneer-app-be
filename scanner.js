@@ -119,9 +119,30 @@ export async function analyzeCandles(
 
     const cleanCandles = sanitizeCandles(candles);
     if (cleanCandles.length < 5) return null;
+    const benchmarkCloses =
+      marketContext?.benchmarkCloses?.[symbol] ??
+      marketContext?.benchmark?.[symbol] ??
+      marketContext?.benchmarks?.[symbol] ??
+      null;
     const features = computeFeatures(cleanCandles, {
       seriesKey: symbol ? `${symbol}:primary` : null,
       supertrendSettings: { atrLength: 10, multiplier: 3 },
+      only: [
+        "ema9",
+        "ema21",
+        "ema50",
+        "ema200",
+        "rsi",
+        "atr",
+        "macd",
+        "macdHist",
+        "ttmSqueeze",
+        "zScore",
+        "rvol",
+        "vwap",
+      ],
+      benchmarkCloses,
+      rsLookback: 20,
     });
     if (!features) return null;
 
@@ -164,6 +185,8 @@ export async function analyzeCandles(
       totalSell,
       dailyHistory,
       sessionCandles: sessionData,
+      benchmarkCloses,
+      rsLookback: 20,
     };
     let dailyRangePct = 0;
     if (Array.isArray(dailyHistory) && dailyHistory.length) {
@@ -179,7 +202,16 @@ export async function analyzeCandles(
     const wickPct = last ? getWickNoise(last) : 0;
     const strongPriceAction = isStrongPriceAction(cleanCandles);
     const atrStable = isAtrStable(cleanCandles);
-    const expiryMinutesRaw = calculateExpiryMinutes({ atr: atrValue, rvol });
+    const lastPrice = Number.isFinite(last?.close)
+      ? last.close
+      : Number.isFinite(last?.open)
+      ? last.open
+      : undefined;
+    const expiryMinutesRaw = calculateExpiryMinutes({
+      atr: atrValue,
+      rvol,
+      price: lastPrice,
+    });
     const expiryMinutes =
       Number.isFinite(expiryMinutesRaw) && expiryMinutesRaw > 0
         ? expiryMinutesRaw
@@ -236,6 +268,8 @@ export async function analyzeCandles(
         regime: marketContext?.regime,
         spreadPct,
         features,
+        benchmarkCloses,
+        rsLookback: 20,
       },
       { topN: 1, atr: atrValue }
     );
