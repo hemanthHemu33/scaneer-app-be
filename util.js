@@ -8,7 +8,7 @@ dayjs.extend(timezone);
 
 // --- helpers ---------------------------------------------------------------
 export function sanitizeCandles(candles = []) {
-  return candles
+  const cleaned = candles
     .filter(
       (c) =>
         c &&
@@ -17,19 +17,33 @@ export function sanitizeCandles(candles = []) {
         Number.isFinite(+c.low) &&
         Number.isFinite(+c.close)
     )
-    .map((c) => ({
-      open: +c.open,
-      high: +c.high,
-      low: +c.low,
-      close: +c.close,
-      volume: Number.isFinite(+c.volume) ? +c.volume : 0,
-      timestamp: c.timestamp
-        ? new Date(c.timestamp)
-        : c.date
-          ? new Date(c.date)
-          : undefined,
-    }))
+    .map((c) => {
+      const base = {
+        open: +c.open,
+        high: +c.high,
+        low: +c.low,
+        close: +c.close,
+        volume: Number.isFinite(+c.volume) ? +c.volume : 0,
+      };
+
+      const timeInfo = (() => {
+        const raw = c.ts ?? c.timestamp ?? c.date;
+        if (raw == null) return {};
+        const date = raw instanceof Date ? raw : new Date(raw);
+        const ms = date.getTime();
+        if (!Number.isFinite(ms)) return {};
+        return { ts: ms, timestamp: date };
+      })();
+
+      return { ...base, ...timeInfo };
+    })
     .filter((c) => c.high >= c.low);
+
+  if (cleaned.some((c) => Number.isFinite(c.ts))) {
+    cleaned.sort((a, b) => (a.ts ?? 0) - (b.ts ?? 0));
+  }
+
+  return cleaned;
 }
 
 export const toSpreadPct = (spread, price) =>
@@ -228,11 +242,23 @@ export function debounceSignal(
   return true;
 }
 
-export function calculateExpiryMinutes({ atr, rvol }) {
+export function calculateExpiryMinutes({ atr, rvol, price } = {}) {
   const base = 5;
-  const atrFactor = atr ? Math.min(Math.max(atr, 1), 4) : 1;
-  const volumeFactor = rvol && rvol > 1 ? 1 + Math.min(rvol - 1, 1) : 1;
-  return base * atrFactor * volumeFactor;
+  let atrFactor = 1;
+  if (Number.isFinite(atr)) {
+    if (Number.isFinite(price) && price > 0) {
+      const atrPct = atr / price;
+      atrFactor = Math.min(2.5, Math.max(0.75, 1 + (atrPct / 0.01) * 0.5));
+    } else {
+      atrFactor = Math.min(4, Math.max(1, atr));
+    }
+  }
+  const volumeFactor = Number.isFinite(rvol)
+    ? rvol >= 1
+      ? Math.min(2, 1 + (rvol - 1))
+      : Math.max(0.6, rvol)
+    : 1;
+  return Math.round(base * atrFactor * volumeFactor);
 }
 
 export function detectAllPatterns(candles, atrValue, lookback = 5) {
@@ -1806,8 +1832,10 @@ export function calculateRequiredMargin({
 }) {
   if (!price || !qty) return 0;
   const pct =
-    typeof brokerMargin === "number"
-      ? brokerMargin
+    Number.isFinite(brokerMargin)
+      ? brokerMargin > 1
+        ? brokerMargin / 100
+        : brokerMargin
       : leverage > 0
       ? 1 / leverage
       : DEFAULT_MARGIN_PERCENT;
@@ -1881,6 +1909,44 @@ export function aggregateCandles(candles = [], interval = 5) {
   return grouped;
 }
 
+export function aggregateCandlesByTime(candles = [], timeframeMs) {
+  if (!Array.isArray(candles) || candles.length === 0 || !timeframeMs) return [];
+  const data = sanitizeCandles(candles);
+  if (!data.length) return [];
+
+  const buckets = [];
+  let bucketStart = null;
+  let bucket = null;
+
+  for (const candle of data) {
+    const ts = candle.ts ?? candle.timestamp?.getTime();
+    if (!Number.isFinite(ts)) continue;
+    const start = Math.floor(ts / timeframeMs) * timeframeMs;
+
+    if (bucketStart === null || start !== bucketStart) {
+      if (bucket) buckets.push(bucket);
+      bucketStart = start;
+      bucket = {
+        open: candle.open,
+        high: candle.high,
+        low: candle.low,
+        close: candle.close,
+        volume: candle.volume || 0,
+        ts: start,
+        timestamp: new Date(start),
+      };
+    } else {
+      bucket.high = Math.max(bucket.high, candle.high);
+      bucket.low = Math.min(bucket.low, candle.low);
+      bucket.close = candle.close;
+      bucket.volume += candle.volume || 0;
+    }
+  }
+
+  if (bucket) buckets.push(bucket);
+  return buckets;
+}
+
 export function patternConfluenceAcrossTimeframes(candles = [], patternType) {
   if (!Array.isArray(candles) || candles.length < 10) return false;
   const clean = sanitizeCandles(candles);
@@ -1888,7 +1954,10 @@ export function patternConfluenceAcrossTimeframes(candles = [], patternType) {
   const atrLo = getATR(clean, 14) || 1;
   const lowerPatterns = detectAllPatterns(clean, atrLo, 5);
   if (!lowerPatterns.find((p) => p.type === patternType)) return false;
-  const agg5 = aggregateCandles(clean, 5);
+  const agg5 =
+    clean.some((c) => Number.isFinite(c.ts))
+      ? aggregateCandlesByTime(clean, 5 * 60 * 1000)
+      : aggregateCandles(clean, 5);
   const atrAgg = getATR(agg5, 14) || atrLo;
   const aggPatterns = detectAllPatterns(agg5, atrAgg, 5);
   return aggPatterns.some((p) => p.type === patternType);
