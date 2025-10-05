@@ -464,6 +464,9 @@ export function detectAndScorePattern(
     computeFeatures(cleanCandles, {
       seriesKey: seriesKeyFor(context, "pattern"),
       supertrendSettings: { atrLength: 10, multiplier: 3 },
+      only: ["ema9", "ema21", "ema200", "rsi", "atr", "macd", "macdHist", "vwap"],
+      benchmarkCloses: context.benchmarkCloses,
+      rsLookback: context.rsLookback ?? 20,
     });
   if (!featureSet) return null;
 
@@ -1111,6 +1114,9 @@ function detectGapUpRsiMacdBullish(candles, ctx = {}) {
     computeFeatures(candles, {
       seriesKey: seriesKeyFor(ctx, "gapUp"),
       supertrendSettings: { atrLength: 10, multiplier: 3 },
+      only: ["rsi", "macd", "macdHist", "ema9", "ema21"],
+      benchmarkCloses: ctx?.benchmarkCloses,
+      rsLookback: ctx?.rsLookback ?? 20,
     });
   const rsiOk = features?.rsi > 50;
   const macdOk = features?.macd?.histogram > 0;
@@ -1300,6 +1306,9 @@ function detectGapDownRsiMacdBearish(candles, ctx = {}) {
     computeFeatures(candles, {
       seriesKey: seriesKeyFor(ctx, "gapDown"),
       supertrendSettings: { atrLength: 10, multiplier: 3 },
+      only: ["rsi", "macd", "macdHist", "ema9", "ema21"],
+      benchmarkCloses: ctx?.benchmarkCloses,
+      rsLookback: ctx?.rsLookback ?? 20,
     });
   const rsiOk = features?.rsi < 50;
   const macdOk = features?.macd?.histogram < 0;
@@ -1596,6 +1605,9 @@ function detectTtmSqueezeBreakout(candles, ctx = {}) {
     computeFeatures(candles, {
       seriesKey: seriesKeyFor(ctx, "ttm"),
       supertrendSettings: { atrLength: 10, multiplier: 3 },
+      only: ["ttmSqueeze", "macd", "macdHist"],
+      benchmarkCloses: ctx?.benchmarkCloses,
+      rsLookback: ctx?.rsLookback ?? 20,
     });
   const squeeze = features?.ttmSqueeze;
   const hist = features?.macdHist;
@@ -1946,6 +1958,22 @@ export function evaluateStrategies(
     computeFeatures(clean, {
       seriesKey: seriesKeyFor(context, "strategy"),
       supertrendSettings: { atrLength: 10, multiplier: 3 },
+      only: [
+        "ema9",
+        "ema21",
+        "ema50",
+        "ema200",
+        "rsi",
+        "atr",
+        "macd",
+        "ttmSqueeze",
+        "macdHist",
+        "zScore",
+        "rvol",
+        "vwap",
+      ],
+      benchmarkCloses: context.benchmarkCloses,
+      rsLookback: context.rsLookback ?? 20,
     }) || {};
   const atrCandidate =
     options?.atr ??
