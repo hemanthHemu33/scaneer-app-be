@@ -7,6 +7,39 @@ const DEFAULT_SUPERTREND_SETTINGS = { atrLength: 10, multiplier: 3 };
 const MAX_SPREAD_PCT = 0.5; // reject signals when quoted spread > 0.5% of price
 const MIN_LIQUIDITY = 0;    // keep 0 if you don’t have a liquidity scale yet
 
+function extractSizingParams(context = {}) {
+  const {
+    lotSize,
+    minLotSize,
+    minQty,
+    leverage,
+    marginPercent,
+    marginPerLot,
+    utilizationCap,
+    marginBuffer,
+    exchangeMarginMultiplier,
+    costBuffer,
+    drawdown,
+    lossStreak,
+    maxQty,
+  } = context || {};
+  return {
+    lotSize,
+    minLotSize,
+    minQty,
+    leverage,
+    marginPercent,
+    marginPerLot,
+    utilizationCap,
+    marginBuffer,
+    exchangeMarginMultiplier,
+    costBuffer,
+    drawdown,
+    lossStreak,
+    maxQty,
+  };
+}
+
 function buildSeriesKey(ctx = {}, fallback = 'strategy') {
   if (!ctx || typeof ctx !== 'object') return null;
   const symbol = ctx.symbol ?? null;
@@ -66,6 +99,7 @@ export function strategySupertrend(context = {}) {
       slPoints: risk,
       price: entry,
       volatility: atr,
+      ...extractSizingParams(context),
     });
     qty = Math.max(1, Math.floor(qty || 0));
     return {
@@ -104,6 +138,7 @@ export function strategySupertrend(context = {}) {
       slPoints: risk,
       price: entry,
       volatility: atr,
+      ...extractSizingParams(context),
     });
     qty = Math.max(1, Math.floor(qty || 0));
     return {
@@ -176,6 +211,7 @@ export function strategyEMAReversal(context = {}) {
       slPoints: risk,
       price: entry,
       volatility: atr,
+      ...extractSizingParams(context),
     });
     qty = Math.max(1, Math.floor(qty || 0));
     return {
@@ -210,6 +246,7 @@ export function strategyEMAReversal(context = {}) {
       slPoints: risk,
       price: entry,
       volatility: atr,
+      ...extractSizingParams(context),
     });
     qty = Math.max(1, Math.floor(qty || 0));
     return {
@@ -282,6 +319,7 @@ export function strategyTripleTop(context = {}) {
     slPoints: risk,
     price: entry,
     volatility: atr,
+    ...extractSizingParams(context),
   });
   qty = Math.max(1, Math.floor(qty || 0));
   return {
@@ -350,6 +388,7 @@ export function strategyVWAPReversal(context = {}) {
     slPoints: risk,
     price: entry,
     volatility: atr,
+    ...extractSizingParams(context),
   });
   qty = Math.max(1, Math.floor(qty || 0));
 
@@ -436,6 +475,7 @@ export function patternBasedStrategy(context = {}) {
     slPoints: risk,
     price: entry,
     volatility: atr,
+    ...extractSizingParams(context),
   });
   qty = Math.max(1, Math.floor(qty || 0));
   const dir = direction === 'Long' ? 1 : -1;
@@ -507,6 +547,7 @@ export function strategyGapUpDown(context = {}) {
     slPoints: risk,
     price: entry,
     volatility: atr,
+    ...extractSizingParams(context),
   });
   qty = Math.max(1, Math.floor(qty || 0));
   const target1 =
