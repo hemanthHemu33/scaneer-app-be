@@ -7,6 +7,7 @@ import {
 } from './dynamicRiskModel.js';
 import { adjustStopLoss } from './riskValidator.js';
 import { DEFAULT_MARGIN_PERCENT } from './util.js';
+import { riskDefaults } from './riskConfig.js';
 
 // Default risk to reward ratio used for target calculations
 export const RISK_REWARD_RATIO = 1.5;
@@ -105,7 +106,8 @@ export function dollarVolatilitySizing({ capital, atr, price, riskPercent = 0.01
  *
  * @param {Object} opts
  * @param {number} opts.capital            Total trading capital available.
- * @param {number} [opts.risk=0.01]        Risk per trade. If <=1 treated as percentage of capital, otherwise absolute amount.
+ * @param {number} [opts.risk]        Risk per trade. Defaults to global sizing percent when omitted.
+ *                                     If <=1 treated as percentage of capital, otherwise absolute amount.
  * @param {number} opts.slPoints           Stop loss distance in points.
  * @param {number} [opts.price]            Entry price used for margin estimation.
  * @param {number} [opts.volatility]       Instrument volatility (e.g. ATR).
@@ -135,7 +137,7 @@ export function dollarVolatilitySizing({ capital, atr, price, riskPercent = 0.01
  */
 export function calculatePositionSize({
   capital,
-  risk = 0.01,
+  risk,
   slPoints,
   price,
   volatility,
@@ -151,9 +153,9 @@ export function calculatePositionSize({
   leverage = 0,
   marginBuffer = 1,
   exchangeMarginMultiplier = 1,
-  costBuffer = 1,
-  slippage = 0,
-  spread = 0,
+  costBuffer,
+  slippage,
+  spread,
   volatilityGuard,
   marketDepth,
   priceMovement,
@@ -170,13 +172,24 @@ export function calculatePositionSize({
   debug,
 }) {
   if (!capital) return 0;
-  const methodName = method || 'default';
+  const fr = riskDefaults.frictions || {};
+  const sizingDefaults = riskDefaults.sizing || {};
+  const defaultRiskPct = sizingDefaults.defaultRiskPercent ?? 0.01;
+  const methodName = (method ?? sizingDefaults.method) || 'default';
+  const riskInput = typeof risk === 'number' ? risk : defaultRiskPct;
+  const riskPercentValue =
+    riskInput <= 1 ? riskInput : capital > 0 ? riskInput / capital : riskInput;
+  const riskAmount = riskInput <= 1 ? capital * riskInput : riskInput;
+  const bufferInput = costBuffer ?? fr.costBuffer ?? 1;
+  const slippageInput = slippage ?? fr.defaultSlippage ?? 0;
+  const spreadInput = spread ?? 0;
+
   const noSLNeeded = ['equal-capital', 'atr', 'dollar-volatility'].includes(methodName);
 
   const baseDistance = Number.isFinite(slPoints) ? Math.max(slPoints, 0) : 0;
-  const slip = Number.isFinite(slippage) ? Math.max(slippage, 0) : 0;
-  const spr = Number.isFinite(spread) ? Math.max(spread, 0) : 0;
-  const buffer = Number.isFinite(costBuffer) && costBuffer > 0 ? costBuffer : 1;
+  const slip = Number.isFinite(slippageInput) ? Math.max(slippageInput, 0) : 0;
+  const spr = Number.isFinite(spreadInput) ? Math.max(spreadInput, 0) : 0;
+  const buffer = Number.isFinite(bufferInput) && bufferInput > 0 ? bufferInput : 1;
   const effectiveDistance = Math.max((baseDistance + slip + spr) * buffer, 0);
   if (!noSLNeeded && effectiveDistance <= 0) return 0;
 
@@ -199,10 +212,10 @@ export function calculatePositionSize({
   let qty;
   switch (methodName) {
     case 'fixed-rupee':
-      qty = fixedRupeeRiskModel({ riskAmount: risk, slPoints: sl });
+      qty = fixedRupeeRiskModel({ riskAmount, slPoints: sl });
       break;
     case 'fixed-percent':
-      qty = fixedPercentRiskModel({ capital, riskPercent: risk, slPoints: sl });
+      qty = fixedPercentRiskModel({ capital, riskPercent: riskPercentValue, slPoints: sl });
       break;
     case 'kelly':
       qty = kellyCriterionSize({
@@ -216,7 +229,7 @@ export function calculatePositionSize({
     case 'volatility-weighted':
       qty = volatilityWeightedSize({
         capital,
-        baseRisk: risk,
+        baseRisk: riskPercentValue,
         volatility,
         benchmarkVolatility,
         slPoints: sl,
@@ -231,22 +244,26 @@ export function calculatePositionSize({
     case 'confidence': {
       const baseQty = fixedPercentRiskModel({
         capital,
-        riskPercent: risk,
+        riskPercent: riskPercentValue,
         slPoints: sl,
       });
       qty = confidenceBasedSizing({ baseQty, confidence });
       break;
     }
     case 'atr':
-      qty = atrBasedSizing({ capital, atr: volatility, atrMult, riskPercent: risk });
+      qty = atrBasedSizing({ capital, atr: volatility, atrMult, riskPercent: riskPercentValue });
       break;
     case 'dollar-volatility':
-      qty = dollarVolatilitySizing({ capital, atr: volatility, price, riskPercent: risk });
+      qty = dollarVolatilitySizing({
+        capital,
+        atr: volatility,
+        price,
+        riskPercent: riskPercentValue,
+      });
       break;
     default: {
-      const riskAmount = risk <= 1 ? capital * risk : risk;
       if (riskAmount <= 0) return 0;
-      qty = riskAmount / sl;
+      qty = riskAmount / Math.max(sl, 1e-6);
     }
   }
 
@@ -365,6 +382,7 @@ export function calculatePositionSize({
   return qty > 0 ? qty : 0;
 }
 
+
 /**
  * Calculate trade parameters including stop loss, quantity and targets.
  * Handles dynamic and fallback stop losses, RR based target calculation
@@ -383,7 +401,7 @@ export function calculatePositionSize({
  * @param {number} [opts.spread]    Current bid/ask spread
  * @param {number} [opts.costBuffer] Buffer for taxes and slippage
  * @param {number} [opts.tickSize]  Instrument tick size for price snapping
- * @param {number} [opts.riskPercent=0.01] Risk per trade as a fraction of capital
+ * @param {number} [opts.riskPercent] Risk per trade as a fraction of capital. Defaults to global sizing percent when omitted.
  * @returns {Object} { stopLoss, qty, target1, target2 }
  */
 export function calculateTradeParameters({
@@ -395,12 +413,21 @@ export function calculateTradeParameters({
   leverage = 0,
   marginPercent,
   drawdown = 0,
-  slippage = 0,
-  spread = 0,
-  costBuffer = 1,
+  slippage,
+  spread,
+  costBuffer,
   tickSize,
-  riskPercent = 0.01,
+  riskPercent,
 }) {
+  const fr = riskDefaults.frictions || {};
+  const sizingDefaults = riskDefaults.sizing || {};
+  const defaultRiskPercent = sizingDefaults.defaultRiskPercent ?? 0.01;
+  const effectiveCostBuffer = costBuffer ?? fr.costBuffer ?? 1;
+  const effectiveSlippage = slippage ?? fr.defaultSlippage ?? 0;
+  const effectiveSpread = spread ?? 0;
+  const effectiveRiskPercent =
+    typeof riskPercent === 'number' ? riskPercent : defaultRiskPercent;
+
   const dynamicSL = calculateDynamicStopLoss({ atr, entry, direction });
 
   let finalSL = dynamicSL;
@@ -429,12 +456,17 @@ export function calculateTradeParameters({
     direction,
     atr,
     tickSize,
+    minAtrMult: riskDefaults?.sl?.minAtrMult ?? 0.5,
+    maxAtrMult: riskDefaults?.sl?.maxAtrMult ?? 3,
   });
 
   const rawRisk = Math.abs(entry - finalSL);
-  const buffer = Number.isFinite(costBuffer) && costBuffer > 0 ? costBuffer : 1;
-  const effectiveRisk = (rawRisk + slippage + spread) * buffer;
-  const riskAmount = capital * riskPercent;
+  const buffer =
+    Number.isFinite(effectiveCostBuffer) && effectiveCostBuffer > 0
+      ? effectiveCostBuffer
+      : 1;
+  const effectiveRisk = (rawRisk + effectiveSlippage + effectiveSpread) * buffer;
+  const riskAmount = capital * effectiveRiskPercent;
   let qty = calculatePositionSize({
     capital,
     risk: riskAmount,
@@ -448,8 +480,8 @@ export function calculateTradeParameters({
     leverage,
     marginPercent,
     costBuffer: buffer,
-    slippage,
-    spread,
+    slippage: effectiveSlippage,
+    spread: effectiveSpread,
   });
 
   // drawdown/loss-streak throttling already applied inside calculatePositionSize
