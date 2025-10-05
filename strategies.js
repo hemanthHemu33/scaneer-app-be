@@ -6,6 +6,7 @@ import {
   calculateSupertrend,
   calculateVWAP,
   calculateAnchoredVWAP,
+  calculateBollingerBands,
   getATR,
   computeFeatures,
 } from "./featureEngine.js";
@@ -340,13 +341,10 @@ function detectDarkCloudPiercing(candles) {
 function detectBollingerBounce(candles) {
   if (candles.length < 20) return null;
   const closes = candles.map((c) => c.close);
-  const sma20 = calculateEMA(closes, 20); // use EMA as SMA proxy
-  const std = Math.sqrt(
-    closes.slice(-20).reduce((s, p) => s + Math.pow(p - sma20, 2), 0) / 20
-  );
-  const lower = sma20 - 2 * std;
+  const bb = calculateBollingerBands(closes, 20, 2);
+  if (!bb) return null;
   const last = candles.at(-1);
-  if (last.low <= lower && last.close > last.open) {
+  if (last.low <= bb.lower && last.close > last.open) {
     return { name: "Bollinger Band Bounce", confidence: 0.6 };
   }
   return null;
@@ -649,8 +647,15 @@ function detectNewsVolatilityTrap(candles) {
   return null;
 }
 
-function detectRelativeStrength(candles) {
+function detectRelativeStrength(candles, ctx = {}) {
   if (candles.length < 10) return null;
+  const rs = ctx.features?.rsScore ?? ctx.rsScore;
+  if (typeof rs === "number") {
+    if (rs > 0.6) {
+      return { name: "Relative Strength (Sector vs Stock)", confidence: 0.5 };
+    }
+    return null;
+  }
   const closes = candles.map((c) => c.close);
   const ema10 = calculateEMA(closes, 10);
   const last = candles.at(-1);
@@ -674,13 +679,15 @@ function detectLiquidityTrap(candles) {
   return null;
 }
 
-function detectTrendExhaustion(candles) {
+function detectTrendExhaustion(candles, ctx = {}) {
   if (candles.length < 6) return null;
   const last = candles.at(-1);
-  const rsi = calculateRSI(
-    candles.map((c) => c.close),
-    14
-  );
+  const rsi =
+    ctx.features?.rsi ??
+    calculateRSI(
+      candles.map((c) => c.close),
+      14
+    );
   const candlesUp = candles.slice(-5).every((c) => c.close > c.open);
   if (candlesUp && rsi > 75 && last.close < last.open) {
     return { name: "Trend Exhaustion Strategy", confidence: 0.6 };
@@ -822,8 +829,10 @@ function detectBreakoutFailureReversal(candles) {
 function detectAtrRangeExpansion(candles) {
   if (candles.length < 15) return null;
   const atr = getATR(candles, 14);
-  const diff = highest(candles, 1) - lowest(candles, 1);
-  if (diff > atr && atr > 0) {
+  const last = candles.at(-1);
+  if (!last || atr <= 0) return null;
+  const range = last.high - last.low;
+  if (range > atr) {
     return { name: "ATR Range Expansion", confidence: 0.55 };
   }
   return null;
@@ -832,8 +841,13 @@ function detectAtrRangeExpansion(candles) {
 function detectMarubozuContinuation(candles) {
   if (candles.length < 4) return null;
   const last3 = candles.slice(-3);
-  const noLowerWick = last3.every((c) => c.open <= c.low && c.close >= c.open);
-  if (noLowerWick && candles.at(-1).close > candles.at(-2).close) {
+  const noLowerWick = last3.every((c) => {
+    const body = Math.abs(c.close - c.open) || 1;
+    return c.close >= c.open && Math.abs(c.open - c.low) <= body * 0.1;
+  });
+  const last = candles.at(-1);
+  const prev = candles.at(-2);
+  if (noLowerWick && last.close > prev.close) {
     return { name: "Marubozu Trend Continuation", confidence: 0.55 };
   }
   return null;
@@ -874,23 +888,51 @@ function detectVcp(candles) {
   return null;
 }
 
-function detectBreakoutAboveResistance(candles) {
+function detectBreakoutAboveResistance(
+  candles,
+  ctx = {},
+  config = DEFAULT_CONFIG
+) {
   if (candles.length < 6) return null;
   const prevHigh = highest(candles.slice(-6, -1), 5);
   const last = candles.at(-1);
   const avgVol = avg(candles.slice(-6, -1).map((c) => c.volume || 0));
   if (last.close > prevHigh && last.volume > avgVol) {
+    if (config.requireBreakoutRetest) {
+      const atr = ctx.features?.atr ?? ctx.atr;
+      const retested = confirmRetest(candles.slice(-2), prevHigh, "Long", { atr });
+      if (!retested && config.requireBreakoutRetest === "hard") return null;
+      return {
+        name: "Breakout above Resistance",
+        confidence: retested ? 0.65 : 0.6,
+        meta: { missingRetest: !retested },
+      };
+    }
     return { name: "Breakout above Resistance", confidence: 0.6 };
   }
   return null;
 }
 
-function detectBreakdownBelowSupport(candles) {
+function detectBreakdownBelowSupport(
+  candles,
+  ctx = {},
+  config = DEFAULT_CONFIG
+) {
   if (candles.length < 6) return null;
   const prevLow = lowest(candles.slice(-6, -1), 5);
   const last = candles.at(-1);
   const avgVol = avg(candles.slice(-6, -1).map((c) => c.volume || 0));
   if (last.close < prevLow && last.volume > avgVol) {
+    if (config.requireBreakoutRetest) {
+      const atr = ctx.features?.atr ?? ctx.atr;
+      const retested = confirmRetest(candles.slice(-2), prevLow, "Short", { atr });
+      if (!retested && config.requireBreakoutRetest === "hard") return null;
+      return {
+        name: "Breakdown below Support",
+        confidence: retested ? 0.65 : 0.6,
+        meta: { missingRetest: !retested },
+      };
+    }
     return { name: "Breakdown below Support", confidence: 0.6 };
   }
   return null;
@@ -1036,7 +1078,7 @@ function detectGapUpInsideBarRetest(candles) {
   if (candles.length < 3) return null;
   const prev = candles.at(-2);
   const last = candles.at(-1);
-  const gap = (prev.open - candles.at(-3).close) / candles.at(-3).close;
+  const gap = (last.open - prev.close) / prev.close;
   const inside = last.high <= prev.high && last.low >= prev.low;
   const retest = Math.abs(last.low - prev.high) / prev.high < 0.005;
   if (gap > 0.015 && inside && retest) {
@@ -1441,16 +1483,18 @@ function detectBearTrapAfterGapDown(candles) {
 
 function detectParabolicExhaustion(
   candles,
-  _ctx = {},
+  ctx = {},
   config = DEFAULT_CONFIG
 ) {
   if (candles.length < 5) return null;
   const last5 = candles.slice(-5);
   const rising = last5.every((c) => c.close > c.open);
-  const rsi = calculateRSI(
-    candles.map((c) => c.close),
-    14
-  );
+  const rsi =
+    ctx.features?.rsi ??
+    calculateRSI(
+      candles.map((c) => c.close),
+      14
+    );
   if (rising && rsi > config.rsiExhaustion) {
     const last = candles.at(-1);
     if (last.close < last.open) {
@@ -1542,14 +1586,16 @@ function detectDeltaDivergence(candles, ctx = {}) {
   return null;
 }
 
-function detectRangeCompressionRsiFlush(candles) {
+function detectRangeCompressionRsiFlush(candles, ctx = {}) {
   if (candles.length < 10) return null;
   const ranges = candles.slice(-10).map((c) => c.high - c.low);
   const compressed = ranges.every((r) => r < avg(ranges) * 1.2);
-  const rsi = calculateRSI(
-    candles.map((c) => c.close),
-    14
-  );
+  const rsi =
+    ctx.features?.rsi ??
+    calculateRSI(
+      candles.map((c) => c.close),
+      14
+    );
   const last = candles.at(-1);
   if (
     compressed &&
@@ -1583,14 +1629,17 @@ function detectVwapRejectionBounce(candles) {
   return null;
 }
 
-function detectMarketSentimentReversal(candles) {
+function detectMarketSentimentReversal(candles, ctx = {}) {
   if (candles.length < 3) return null;
   const last = candles.at(-1);
   if (
     last.high - last.close > (last.high - last.low) * 0.6 &&
-    calculateRSI(
-      candles.map((c) => c.close),
-      14
+    (
+      ctx.features?.rsi ??
+      calculateRSI(
+        candles.map((c) => c.close),
+        14
+      )
     ) > 75
   ) {
     return { name: "Market Sentiment Reversal", confidence: 0.55 };
