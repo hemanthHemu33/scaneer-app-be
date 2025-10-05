@@ -386,20 +386,54 @@ export async function analyzeCandles(
     setIfDefined('drawdown', dd);
     setIfDefined('lossStreak', riskState?.consecutiveLosses ?? base.lossStreak);
 
+    const appliedSlippage = Number.isFinite(sizingOverrides.slippage)
+      ? sizingOverrides.slippage
+      : Number.isFinite(base.slippage)
+      ? base.slippage
+      : Number.isFinite(slippage)
+      ? slippage
+      : 0;
+    const appliedSpread = Number.isFinite(sizingOverrides.spread)
+      ? sizingOverrides.spread
+      : Number.isFinite(base.spread)
+      ? base.spread
+      : Number.isFinite(spread)
+      ? spread
+      : 0;
+    const appliedCostBuffer = Number.isFinite(sizingOverrides.costBuffer)
+      ? sizingOverrides.costBuffer
+      : Number.isFinite(riskDefaults.costBuffer)
+      ? riskDefaults.costBuffer
+      : Number.isFinite(marketContext?.costBuffer)
+      ? marketContext.costBuffer
+      : 1;
+
+    sizingOverrides.slippage = appliedSlippage;
+    sizingOverrides.spread = appliedSpread;
+    sizingOverrides.costBuffer = appliedCostBuffer;
+
+    const sizingDebug = {};
+
     let qty = calculatePositionSize({
       capital: accountBalance,
       risk: accountBalance * riskPerTradePercentage,
       slPoints: baseRisk,
       price: base.entry,
       volatility: atrValue,
+      debug: sizingDebug,
       ...sizingOverrides,
     });
     if (riskReward > 2) qty = Math.floor(qty * 1.1);
     else if (riskReward < 1.2) qty = Math.floor(qty * 0.9);
     qty = Math.max(1, qty || 0);
+    sizingDebug.signalQty = qty;
     const tradeValue =
       Number.isFinite(base.entry) && qty ? base.entry * qty : undefined;
     if (tradeValue !== undefined) preliminary.tradeValue = tradeValue;
+
+    const rawStopDistance = baseRisk;
+    const effectiveStopDistance =
+      (rawStopDistance + appliedSlippage + appliedSpread) * appliedCostBuffer;
 
     const now = new Date();
     const priceSeries = cleanCandles
@@ -526,8 +560,8 @@ export async function analyzeCandles(
       rsi,
       supertrend,
       atrValue,
-      slippage,
-      spread,
+      slippage: appliedSlippage,
+      spread: appliedSpread,
       liquidity: effectiveLiquidity,
       liveTick,
       depth,
@@ -561,6 +595,10 @@ export async function analyzeCandles(
       riskAmount: accountBalance * riskPerTradePercentage,
       accountBalance,
       baseRisk,
+      rawStopDistance,
+      effectiveStopDistance,
+      costBufferApplied: appliedCostBuffer,
+      sizingDebug,
     };
 
     // Step 7: Append meta information and build final signal

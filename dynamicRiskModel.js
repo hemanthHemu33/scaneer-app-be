@@ -1,6 +1,6 @@
 // dynamicRiskModel.js
 // Provides dynamic risk management utilities for trading strategies
-import { validateRR as baseValidateRR } from './riskValidator.js';
+import { validateRR as baseValidateRR, adjustStopLoss } from './riskValidator.js';
 import { DEFAULT_MARGIN_PERCENT } from './util.js';
 import { riskDefaults } from './riskConfig.js';
 
@@ -34,6 +34,7 @@ export function calculateDynamicStopLoss({
  * @param {number} opts.stopLoss - Stop loss price
  * @param {number} [opts.qtyStep=1] - Minimum tradable quantity increment
  * @param {number} [opts.tickSize] - Deprecated alias for qtyStep
+ * @param {number} [opts.lotSize] - Preferred lot size step (alias for qtyStep)
  * @param {number} [opts.volatility] - Volatility metric (e.g. ATR)
  * @param {number} [opts.capUtil=0.05] - Legacy capital utilization cap per trade
  * @param {number} [opts.price=entry] - Price used for margin estimation
@@ -45,6 +46,9 @@ export function calculateDynamicStopLoss({
  * @param {number} [opts.utilizationCap] - Override for capital utilization when margin provided
  * @param {number} [opts.minQty] - Minimum allowable quantity
  * @param {number} [opts.maxQty] - Maximum allowable quantity
+ * @param {number} [opts.slippage=0] - Expected slippage in price terms
+ * @param {number} [opts.spread=0] - Expected spread cost per unit
+ * @param {number} [opts.costBuffer=1] - Multiplier applied to per-unit risk distance
  * @returns {number} quantity
  */
 export function calculateLotSize({
@@ -54,6 +58,7 @@ export function calculateLotSize({
   stopLoss,
   qtyStep = 1,
   tickSize,
+  lotSize,
   volatility,
   capUtil = 0.05,
   price = entry,
@@ -65,16 +70,26 @@ export function calculateLotSize({
   utilizationCap,
   minQty,
   maxQty,
+  slippage = 0,
+  spread = 0,
+  costBuffer = 1,
 }) {
   if (!capital || !entry || !stopLoss) return 0;
-  const sl = Math.abs(entry - stopLoss);
+  const sl = Math.max(
+    (Math.abs(entry - stopLoss) + (slippage || 0) + (spread || 0)) * (costBuffer || 1),
+    1e-6,
+  );
   if (sl <= 0) return 0;
 
   const risk = riskAmount <= 1 ? capital * riskAmount : riskAmount;
   let qty = risk / Math.max(sl, 1e-6);
 
   const stepInput =
-    typeof tickSize === 'number' && !Number.isNaN(tickSize) ? tickSize : qtyStep;
+    typeof lotSize === 'number' && lotSize > 0
+      ? lotSize
+      : typeof tickSize === 'number' && !Number.isNaN(tickSize)
+      ? tickSize
+      : qtyStep;
   const step = typeof stepInput === 'number' && stepInput > 0 ? stepInput : 1;
   const roundDownToStep = (value) => {
     if (!Number.isFinite(value) || value <= 0) return 0;
@@ -236,6 +251,10 @@ export function adjustRiskAfterLossStreak({ lossStreak = 0, lotSize }) {
  * @param {number} [opts.marginBuffer=1] - Margin safety buffer
  * @param {number} [opts.exchangeMarginMultiplier=1] - Exchange margin multiplier
  * @param {number} [opts.utilizationCap] - Capital utilization cap
+ * @param {number} [opts.lotSize] - Preferred lot size step
+ * @param {number} [opts.slippage=0] - Expected slippage in price terms
+ * @param {number} [opts.spread=0] - Expected spread cost per unit
+ * @param {number} [opts.costBuffer=1] - Multiplier applied to per-unit risk distance
  * @returns {Object} { stopLoss, qty }
  */
 export function realTimeRiskController({
@@ -252,8 +271,13 @@ export function realTimeRiskController({
   marginBuffer = 1,
   exchangeMarginMultiplier = 1,
   utilizationCap,
+  lotSize,
+  slippage = 0,
+  spread = 0,
+  costBuffer = 1,
 }) {
-  const stopLoss = calculateDynamicStopLoss({ atr, entry, direction });
+  let stopLoss = calculateDynamicStopLoss({ atr, entry, direction });
+  stopLoss = adjustStopLoss({ price: entry, stopLoss, direction, atr });
   const qty = calculateLotSize({
     capital,
     riskAmount: risk,
@@ -261,19 +285,23 @@ export function realTimeRiskController({
     stopLoss,
     volatility,
     qtyStep,
+    lotSize,
     leverage,
     marginPercent,
     marginPerLot,
     marginBuffer,
     exchangeMarginMultiplier,
     utilizationCap,
+    slippage,
+    spread,
+    costBuffer,
   });
   return { stopLoss, qty };
 }
 
 /**
  * Simple backtest runner for the risk model.
- * @param {Array} data - Array of { entry, direction, atr }
+ * @param {Array} data - Array of { entry, direction, atr, [outcome], [rr] }
  * @param {Object} opts
  * @param {number} opts.capital - Starting capital
  * @param {number} opts.risk - Risk per trade
@@ -284,15 +312,31 @@ export function backtestRiskModel(data = [], { capital = 100000, risk = 0.01 } =
   let maxDrawdown = 0;
   let peak = capital;
   for (const d of data) {
+    const rowSlippage = Number.isFinite(d.slippage) ? d.slippage : 0;
+    const rowSpread = Number.isFinite(d.spread) ? d.spread : 0;
+    const rowCostBuffer = Number.isFinite(d.costBuffer) ? d.costBuffer : 1;
     const { stopLoss, qty } = realTimeRiskController({
       atr: d.atr,
       entry: d.entry,
       direction: d.direction,
       capital: balance,
       risk,
+      lotSize: d.lotSize,
+      slippage: rowSlippage,
+      spread: rowSpread,
+      costBuffer: rowCostBuffer,
     });
     const sl = Math.abs(d.entry - stopLoss);
-    balance -= sl * qty;
+    const effectiveSL = (sl + rowSlippage + rowSpread) * rowCostBuffer;
+    const outcome = d.outcome ?? 'loss';
+    if (outcome === 'win') {
+      const rr = typeof d.rr === 'number' ? d.rr : 1.5;
+      balance += effectiveSL * qty * rr;
+    } else if (outcome === 'breakeven') {
+      // no change
+    } else {
+      balance -= effectiveSL * qty;
+    }
     if (balance > peak) peak = balance;
     const dd = (peak - balance) / peak;
     if (dd > maxDrawdown) maxDrawdown = dd;

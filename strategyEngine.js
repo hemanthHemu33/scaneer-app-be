@@ -22,6 +22,9 @@ function extractSizingParams(context = {}) {
     drawdown,
     lossStreak,
     maxQty,
+    slippage: ctxSlippage,
+    inferredSlippage,
+    spread: ctxSpread,
   } = context || {};
   return {
     lotSize,
@@ -37,6 +40,13 @@ function extractSizingParams(context = {}) {
     drawdown,
     lossStreak,
     maxQty,
+    slippage:
+      typeof ctxSlippage === 'number'
+        ? ctxSlippage
+        : typeof inferredSlippage === 'number'
+        ? inferredSlippage
+        : undefined,
+    spread: ctxSpread,
   };
 }
 
