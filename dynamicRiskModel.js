@@ -272,12 +272,19 @@ export function realTimeRiskController({
   exchangeMarginMultiplier = 1,
   utilizationCap,
   lotSize,
+  tickSize,
   slippage = 0,
   spread = 0,
   costBuffer = 1,
 }) {
   let stopLoss = calculateDynamicStopLoss({ atr, entry, direction });
-  stopLoss = adjustStopLoss({ price: entry, stopLoss, direction, atr });
+  stopLoss = adjustStopLoss({
+    price: entry,
+    stopLoss,
+    direction,
+    atr,
+    tickSize,
+  });
   const qty = calculateLotSize({
     capital,
     riskAmount: risk,
@@ -322,6 +329,7 @@ export function backtestRiskModel(data = [], { capital = 100000, risk = 0.01 } =
       capital: balance,
       risk,
       lotSize: d.lotSize,
+      tickSize: d.tickSize,
       slippage: rowSlippage,
       spread: rowSpread,
       costBuffer: rowCostBuffer,

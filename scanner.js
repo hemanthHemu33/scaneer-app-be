@@ -673,6 +673,12 @@ export async function rankAndExecute(signals = []) {
       maxSpreadPct: FILTERS.maxSpreadPct,
       winrate:
         marketContext?.strategyWinrates?.[top.strategy] ?? marketContext?.winrate ?? 0,
+      costBuffer:
+        top.costBufferApplied ?? top.costBuffer ?? marketContext?.costBuffer ?? riskDefaults.costBuffer,
+      slippage: top.slippage ?? marketContext?.slippage ?? 0,
+      spread: top.spread ?? marketContext?.spread ?? 0,
+      support: top.support,
+      resistance: top.resistance,
     });
     if (!ok) return null;
     const requiredMargin = calculateRequiredMargin({

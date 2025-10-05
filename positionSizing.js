@@ -382,6 +382,7 @@ export function calculatePositionSize({
  * @param {number} [opts.slippage]  Expected slippage per unit
  * @param {number} [opts.spread]    Current bid/ask spread
  * @param {number} [opts.costBuffer] Buffer for taxes and slippage
+ * @param {number} [opts.tickSize]  Instrument tick size for price snapping
  * @param {number} [opts.riskPercent=0.01] Risk per trade as a fraction of capital
  * @returns {Object} { stopLoss, qty, target1, target2 }
  */
@@ -397,6 +398,7 @@ export function calculateTradeParameters({
   slippage = 0,
   spread = 0,
   costBuffer = 1,
+  tickSize,
   riskPercent = 0.01,
 }) {
   const dynamicSL = calculateDynamicStopLoss({ atr, entry, direction });
@@ -426,10 +428,12 @@ export function calculateTradeParameters({
     stopLoss: finalSL,
     direction,
     atr,
+    tickSize,
   });
 
   const rawRisk = Math.abs(entry - finalSL);
-  const effectiveRisk = rawRisk + slippage + spread;
+  const buffer = Number.isFinite(costBuffer) && costBuffer > 0 ? costBuffer : 1;
+  const effectiveRisk = (rawRisk + slippage + spread) * buffer;
   const riskAmount = capital * riskPercent;
   let qty = calculatePositionSize({
     capital,
@@ -443,7 +447,7 @@ export function calculateTradeParameters({
     utilizationCap: 1,
     leverage,
     marginPercent,
-    costBuffer,
+    costBuffer: buffer,
     slippage,
     spread,
   });

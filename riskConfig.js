@@ -41,9 +41,33 @@ const configuredDefaults = {
   minRR: num(process.env.MIN_RR),
 };
 
-export const riskDefaults = Object.freeze(
-  Object.fromEntries(
-    Object.entries(configuredDefaults).filter(([, value]) => value !== undefined)
-  )
-);
+const prune = (obj = {}) =>
+  Object.fromEntries(Object.entries(obj).filter(([, value]) => value !== undefined));
+
+const nestedDefaults = {
+  market: {
+    maxAtrMult: num(process.env.MARKET_MAX_ATR_MULT),
+    maxLatencyMs: num(process.env.MARKET_MAX_LATENCY_MS),
+  },
+  sl: {
+    minAtrMult: num(process.env.SL_MIN_ATR_MULT),
+    maxAtrMult: num(process.env.SL_MAX_ATR_MULT),
+  },
+};
+
+const flatDefaults = prune(configuredDefaults);
+
+export const riskDefaults = Object.freeze({
+  market: {
+    maxAtrMult: 1.5,
+    maxLatencyMs: 120_000,
+    ...prune(nestedDefaults.market),
+  },
+  sl: {
+    minAtrMult: 0.5,
+    maxAtrMult: 3,
+    ...prune(nestedDefaults.sl),
+  },
+  ...flatDefaults,
+});
 

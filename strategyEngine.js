@@ -618,5 +618,14 @@ export function evaluateAllStrategies(context = {}) {
   ];
   return strategies
     .map((fn) => fn(base))
-    .filter(Boolean);
+    .filter(Boolean)
+    .map((signal) => {
+      if (!signal || typeof signal !== 'object') return signal;
+      const tickSize = base.tickSize ?? base.tick ?? base.tick_size ?? signal.tickSize;
+      const lotSize = base.lotSize ?? base.contractSize ?? signal.lotSize;
+      const enriched = { ...signal };
+      if (tickSize !== undefined) enriched.tickSize = tickSize;
+      if (lotSize !== undefined) enriched.lotSize = lotSize;
+      return enriched;
+    });
 }
