@@ -592,6 +592,19 @@ export function isSignalValid(signal, ctx = {}) {
     stopLoss: signal.stopLoss,
     target: signal.target2 ?? signal.target,
     winrate: ctx.winrate || 0,
+    slippage: signal.slippage ?? ctx.slippage ?? 0,
+    spread: signal.spread ?? ctx.spread ?? 0,
+    costBuffer:
+      (Number.isFinite(ctx.costBuffer) && ctx.costBuffer > 0 && ctx.costBuffer) ||
+      (Number.isFinite(signal.costBufferApplied)
+        ? signal.costBufferApplied
+        : Number.isFinite(signal.costBuffer)
+        ? signal.costBuffer
+        : Number.isFinite(riskState.config?.costBuffer)
+        ? riskState.config.costBuffer
+        : Number.isFinite(riskDefaults.costBuffer)
+        ? riskDefaults.costBuffer
+        : 1),
   });
   if (!rr.valid)
     return recordRejection(rr.reason ?? "rrBelowMinimum", {
@@ -627,6 +640,8 @@ export function isSignalValid(signal, ctx = {}) {
       entry: signal.entry,
       stopLoss: signal.stopLoss,
       atr: Number.isFinite(signal.atr) ? signal.atr : undefined,
+      minMult: riskDefaults?.sl?.minAtrMult ?? 0.5,
+      maxMult: riskDefaults?.sl?.maxAtrMult ?? 3,
     })
   )
     return recordRejection("atrStopLossInvalid");
@@ -641,6 +656,7 @@ export function isSignalValid(signal, ctx = {}) {
       stopLoss: signal.stopLoss,
       atr: Number.isFinite(signal.atr) ? signal.atr : undefined,
       structureBreak: ctx.structureBreak,
+      direction: signal.direction,
     })
   )
     return recordRejection("slInvalid", {
