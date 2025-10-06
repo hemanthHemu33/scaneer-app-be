@@ -465,6 +465,8 @@ export function detectAndScorePattern(
       only: ["ema9", "ema21", "ema200", "rsi", "atr", "macd", "macdHist", "vwap"],
       benchmarkCloses: context.benchmarkCloses,
       rsLookback: context.rsLookback ?? 20,
+      vwapMode: (config?.vwapMode) || "rolling",
+      vwapWindow: 10,
     });
   if (!featureSet) return null;
 
@@ -2023,6 +2025,8 @@ export function evaluateStrategies(
       ],
       benchmarkCloses: context.benchmarkCloses,
       rsLookback: context.rsLookback ?? 20,
+      vwapMode: (cfg?.vwapMode) || "rolling",
+      vwapWindow: 10,
     }) || {};
   const atrCandidate =
     options?.atr ??
