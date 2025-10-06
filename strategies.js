@@ -33,6 +33,7 @@ export const DEFAULT_CONFIG = Object.freeze({
   rsiOS: 30,
   rsiExhaustion: 80,
   vwapMode: "rolling",
+  vwapWindow: 20,
   vwapDeviationPct: 0.02,
   insideBarNarrowPct: 0.3,
   requireBreakoutRetest: "soft",
@@ -465,14 +466,17 @@ export function detectAndScorePattern(
       only: ["ema9", "ema21", "ema200", "rsi", "atr", "macd", "macdHist", "vwap"],
       benchmarkCloses: context.benchmarkCloses,
       rsLookback: context.rsLookback ?? 20,
-      vwapMode: (config?.vwapMode) || "rolling",
-      vwapWindow: 10,
+      vwapMode: config?.vwapMode || "rolling",
+      vwapWindow: config?.vwapWindow ?? 20,
     });
   if (!featureSet) return null;
 
   const { ema9, ema21, ema200, rsi } = featureSet;
   const atr = (featureSet?.atr ?? getATR(cleanCandles, 14)) ?? 0;
-  const patterns = detectAllPatterns(cleanCandles, atr, 5);
+  const patterns = detectAllPatterns(cleanCandles, atr, 5, {
+    vwapMode: config?.vwapMode || "rolling",
+    vwapWindow: config?.vwapWindow ?? 20,
+  });
   if (!patterns || patterns.length === 0) return null;
 
   let best = null;
@@ -1016,7 +1020,11 @@ function detectPrebreakoutConsolidation(candles) {
   return null;
 }
 
-function detectCupHandleBreakout(candles, ctx = {}) {
+function detectCupHandleBreakout(
+  candles,
+  ctx = {},
+  config = DEFAULT_CONFIG
+) {
   const cleanCandles = sanitizeCandles(candles);
   if (cleanCandles.length < 5) return null;
   const atrCandidate = ctx.atr;
@@ -1024,7 +1032,11 @@ function detectCupHandleBreakout(candles, ctx = {}) {
     Number.isFinite(atrCandidate) && atrCandidate > 0
       ? atrCandidate
       : getATR(cleanCandles, 14) || 0;
-  const patterns = detectAllPatterns(cleanCandles, atr, 5);
+  const cfg = ctx?.config || config || DEFAULT_CONFIG;
+  const patterns = detectAllPatterns(cleanCandles, atr, 5, {
+    vwapMode: cfg?.vwapMode || "rolling",
+    vwapWindow: cfg?.vwapWindow ?? 20,
+  });
   const cup = patterns.find((p) => p.type === "Cup & Handle");
   if (cup) {
     return { name: "Cup & Handle Breakout", confidence: 0.6 };
@@ -2025,8 +2037,8 @@ export function evaluateStrategies(
       ],
       benchmarkCloses: context.benchmarkCloses,
       rsLookback: context.rsLookback ?? 20,
-      vwapMode: (cfg?.vwapMode) || "rolling",
-      vwapWindow: 10,
+      vwapMode: cfg?.vwapMode || "rolling",
+      vwapWindow: cfg?.vwapWindow ?? 20,
     }) || {};
   const atrCandidate =
     options?.atr ??

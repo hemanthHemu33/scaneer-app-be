@@ -41,6 +41,25 @@ export function sanitizeCandles(candles = []) {
 
   if (cleaned.some((c) => Number.isFinite(c.ts))) {
     cleaned.sort((a, b) => (a.ts ?? 0) - (b.ts ?? 0));
+    // Deduplicate consecutive candles with the same timestamp
+    const deduped = [];
+    let lastTs;
+    for (const candle of cleaned) {
+      const ts = Number.isFinite(candle.ts) ? candle.ts : null;
+      if (ts === null) {
+        deduped.push(candle);
+        lastTs = undefined;
+        continue;
+      }
+      if (ts !== lastTs) {
+        deduped.push(candle);
+        lastTs = ts;
+      } else if (deduped.length) {
+        // If exchanges resend a bar, keep the most recent payload
+        deduped[deduped.length - 1] = candle;
+      }
+    }
+    return deduped;
   }
 
   return cleaned;
@@ -185,8 +204,16 @@ export function calculateMA(prices, length) {
 
 // Avoid heavy circular deps: import kite.js only when needed
 export async function getMAForSymbol(symbolOrToken, period) {
-  const { getMA } = await import("./kite.js");
-  return getMA(symbolOrToken, period);
+  try {
+    const { getMA } = await import("./kite.js");
+    return getMA(symbolOrToken, period);
+  } catch (err) {
+    console.warn(
+      "[util.getMAForSymbol] kite.js unavailable:",
+      err?.message || err
+    );
+    return null;
+  }
 }
 
 // Alias for clarity when callers provide a token id
@@ -261,7 +288,8 @@ export function calculateExpiryMinutes({ atr, rvol, price } = {}) {
   return Math.round(base * atrFactor * volumeFactor);
 }
 
-export function detectAllPatterns(candles, atrValue, lookback = 5) {
+export function detectAllPatterns(candles, atrValue, lookback = 5, opts = {}) {
+  const { vwapMode = "rolling", vwapWindow = 20 } = opts;
   const data = sanitizeCandles(candles);
   const patterns = [];
   if (data.length < lookback) return [];
@@ -275,12 +303,30 @@ export function detectAllPatterns(candles, atrValue, lookback = 5) {
   const recentLow = Math.min(...lows);
   const px = Number.isFinite(last?.close) ? last.close : last?.open ?? 0;
   const epsilon = Math.max(px * 0.001, atrValue ? atrValue * 0.05 : 0.1);
-  const vwapPeriod = Math.min(candles.length, 20);
-  const vwap = calculateVWAP(candles.slice(-vwapPeriod));
-  const prevVWAP =
-    candles.length > vwapPeriod
-      ? calculateVWAP(candles.slice(-(vwapPeriod + 1), -1))
-      : vwap;
+  // --- VWAP with mode control ---
+  let vwap, prevVWAP;
+  if (vwapMode === "session") {
+    const lastBar = candles.at(-1);
+    const lastTs = lastBar?.ts ?? lastBar?.timestamp?.getTime();
+    const dayStart = Number.isFinite(lastTs) ? new Date(lastTs) : null;
+    if (dayStart) dayStart.setHours(0, 0, 0, 0);
+    const sessionCandles = !dayStart
+      ? candles
+      : candles.filter((candle) => {
+          const ts = candle.ts ?? candle.timestamp?.getTime();
+          return Number.isFinite(ts) && ts >= +dayStart;
+        });
+    const activeSession = sessionCandles.length ? sessionCandles : candles;
+    const prevSession = activeSession.slice(0, -1);
+    vwap = calculateVWAP(activeSession);
+    prevVWAP = prevSession.length ? calculateVWAP(prevSession) : vwap;
+  } else {
+    const win = Math.min(candles.length, Math.max(1, vwapWindow));
+    const rolling = candles.slice(-win);
+    const prevRolling = candles.slice(-(win + 1), -1);
+    vwap = calculateVWAP(rolling);
+    prevVWAP = prevRolling.length ? calculateVWAP(prevRolling) : vwap;
+  }
 
   // --- Single Candle Reversal ---
   const isDoji =
@@ -1904,7 +1950,21 @@ export function aggregateCandles(candles = [], interval = 5) {
     const high = Math.max(...chunk.map(c => c.high));
     const low = Math.min(...chunk.map(c => c.low));
     const volume = chunk.reduce((s, c) => s + (c.volume || 0), 0);
-    grouped.push({ open, high, low, close, volume });
+    const tsStart = chunk[0].ts ?? chunk[0].timestamp?.getTime();
+    const tsEnd =
+      chunk[chunk.length - 1].ts ??
+      chunk[chunk.length - 1].timestamp?.getTime();
+    grouped.push({
+      open,
+      high,
+      low,
+      close,
+      volume,
+      ...(Number.isFinite(tsEnd)
+        ? { ts: tsEnd, timestamp: new Date(tsEnd) }
+        : {}),
+      ...(Number.isFinite(tsStart) ? { tStart: tsStart } : {}),
+    });
   }
   return grouped;
 }
@@ -1947,18 +2007,29 @@ export function aggregateCandlesByTime(candles = [], timeframeMs) {
   return buckets;
 }
 
-export function patternConfluenceAcrossTimeframes(candles = [], patternType) {
+export function patternConfluenceAcrossTimeframes(
+  candles = [],
+  patternType,
+  opts = {}
+) {
+  const { vwapMode = "rolling", vwapWindow = 20 } = opts;
   if (!Array.isArray(candles) || candles.length < 10) return false;
   const clean = sanitizeCandles(candles);
   if (clean.length < 10) return false;
   const atrLo = getATR(clean, 14) || 1;
-  const lowerPatterns = detectAllPatterns(clean, atrLo, 5);
+  const lowerPatterns = detectAllPatterns(clean, atrLo, 5, {
+    vwapMode,
+    vwapWindow,
+  });
   if (!lowerPatterns.find((p) => p.type === patternType)) return false;
   const agg5 =
     clean.some((c) => Number.isFinite(c.ts))
       ? aggregateCandlesByTime(clean, 5 * 60 * 1000)
       : aggregateCandles(clean, 5);
   const atrAgg = getATR(agg5, 14) || atrLo;
-  const aggPatterns = detectAllPatterns(agg5, atrAgg, 5);
+  const aggPatterns = detectAllPatterns(agg5, atrAgg, 5, {
+    vwapMode,
+    vwapWindow,
+  });
   return aggPatterns.some((p) => p.type === patternType);
 }

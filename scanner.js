@@ -1,6 +1,6 @@
 // scanner.js
 
-import { computeFeatures } from "./featureEngine.js";
+import { computeFeatures, resetIndicatorCache } from "./featureEngine.js";
 import {
   debounceSignal,
   calculateExpiryMinutes,
@@ -72,6 +72,8 @@ const FILTERS = {
   maxSpreadPct: MODE === "strict" ? 0.3 : 0.5,
 };
 
+let lastFeatureSeriesKey = null;
+
 function logError(context, err) {
   console.error(
     `[${new Date().toISOString()}] ❌ [${context}] ${err?.message || err}`
@@ -124,8 +126,13 @@ export async function analyzeCandles(
       marketContext?.benchmark?.[symbol] ??
       marketContext?.benchmarks?.[symbol] ??
       null;
+    const seriesKey = symbol ? `${symbol}:primary` : null;
+    if (seriesKey && seriesKey !== lastFeatureSeriesKey) {
+      resetIndicatorCache();
+      lastFeatureSeriesKey = seriesKey;
+    }
     const features = computeFeatures(cleanCandles, {
-      seriesKey: symbol ? `${symbol}:primary` : null,
+      seriesKey,
       supertrendSettings: { atrLength: 10, multiplier: 3 },
       only: [
         "ema9",
