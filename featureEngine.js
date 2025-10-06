@@ -3,6 +3,15 @@
 
 // Simple in-memory cache for EMA values keyed by optional id
 const emaCache = new Map();
+const EMA_CACHE_MAX_KEYS = 500;
+
+function _capEmaCache() {
+  if (emaCache.size > EMA_CACHE_MAX_KEYS) {
+    // Simple FIFO trim; if you want true LRU, swap to a Map iteration strategy.
+    const firstKey = emaCache.keys().next().value;
+    emaCache.delete(firstKey);
+  }
+}
 
 function clamp01(x) {
   if (!Number.isFinite(x)) return 0.5;
@@ -16,15 +25,24 @@ export function calculateEMA(prices, length, key) {
   let start = 0;
   if (key && emaCache.has(key)) {
     const cached = emaCache.get(key);
-    ema = cached.value;
-    start = cached.index + 1;
+    // Guard: if series isn't strictly longer than cache index, recompute
+    if (!cached || cached.index >= prices.length - 1) {
+      ema = prices[0];
+      start = 1;
+    } else {
+      ema = cached.value;
+      start = cached.index + 1;
+    }
   } else {
     ema = prices[0];
   }
   for (let i = start; i < prices.length; i++) {
     ema = prices[i] * k + ema * (1 - k);
   }
-  if (key) emaCache.set(key, { value: ema, index: prices.length - 1 });
+  if (key) {
+    emaCache.set(key, { value: ema, index: prices.length - 1 });
+    _capEmaCache();
+  }
   return ema;
 }
 
@@ -1194,6 +1212,8 @@ export function computeFeatures(candles = [], opts = {}) {
     benchmarkCloses = null,
     rsLookback = 20,
     only = null,
+    vwapMode = "session",
+    vwapWindow = 10,
   } = opts;
   if (!Array.isArray(candles) || candles.length === 0) return null;
 
@@ -1294,16 +1314,20 @@ export function computeFeatures(candles = [], opts = {}) {
         supertrendSettings.multiplier ?? 3
       )
     : null;
-  const vwap = want("vwap") ? calculateVWAP(valid) : null;
+  const vwap = want("vwap")
+    ? vwapMode === "rolling"
+      ? calculateVWAP(valid.slice(-Math.max(1, vwapWindow)))
+      : calculateVWAP(valid)
+    : null;
   const pivot = calculatePivotPoints(valid);
   const fibRetracements = calculateFibonacciRetracements(Math.max(...highs), Math.min(...lows));
   const fibExtensions = calculateFibonacciExtensions(Math.max(...highs), Math.min(...lows));
   const psar = calculateParabolicSAR(valid);
-  const heikinAshi = calculateHeikinAshi(valid);
-  const renko = calculateRenko(valid);
-  const kagi = calculateKagi(closes);
-  const pointFigure = calculatePointFigure(closes);
-  const zigzag = calculateZigZag(closes);
+  const heikinAshi = want("heikinAshi") ? calculateHeikinAshi(valid) : null;
+  const renko = want("renko") ? calculateRenko(valid) : null;
+  const kagi = want("kagi") ? calculateKagi(closes) : null;
+  const pointFigure = want("pointFigure") ? calculatePointFigure(closes) : null;
+  const zigzag = want("zigzag") ? calculateZigZag(closes) : null;
   const medianPrice = calculateMedianPrice(valid.at(-1));
   const typicalPrice = calculateTypicalPrice(valid.at(-1));
   const weightedClose = calculateWeightedClose(valid.at(-1));
