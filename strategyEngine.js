@@ -298,6 +298,7 @@ export function strategyTripleTop(context = {}) {
     spread = 0,
     liquidity = 0,
     atr: contextAtr,
+    config: contextConfig,
   } = context;
   const cleanCandles = Array.isArray(candles)
     ? context.__sanitizedCandles
@@ -306,17 +307,25 @@ export function strategyTripleTop(context = {}) {
     : [];
   if (!Array.isArray(cleanCandles) || cleanCandles.length < 7) return null;
 
+  const cfg = contextConfig || {};
+  const vwapMode = cfg?.vwapMode || 'rolling';
+  const vwapWindow = cfg?.vwapWindow ?? 20;
   const seriesKey = buildSeriesKey(context, 'tripleTop');
   const featureSet =
     features ??
     computeFeatures(cleanCandles, {
       seriesKey,
       supertrendSettings: DEFAULT_SUPERTREND_SETTINGS,
+      vwapMode,
+      vwapWindow,
     });
   if (!featureSet) return null;
 
   const atr = (contextAtr ?? featureSet?.atr ?? getATR(cleanCandles, 14)) ?? 0;
-  const patterns = detectAllPatterns(cleanCandles, atr, 5);
+  const patterns = detectAllPatterns(cleanCandles, atr, 5, {
+    vwapMode,
+    vwapWindow,
+  });
   const tripleTop = patterns.find(p => p.type === 'Triple Top');
   if (!tripleTop) return null;
 
@@ -368,6 +377,7 @@ export function strategyVWAPReversal(context = {}) {
     spread = 0,
     liquidity = 0,
     atr: contextAtr,
+    config: contextConfig,
   } = context;
   const cleanCandles = Array.isArray(candles)
     ? context.__sanitizedCandles
@@ -376,17 +386,25 @@ export function strategyVWAPReversal(context = {}) {
     : [];
   if (!Array.isArray(cleanCandles) || cleanCandles.length < 5) return null;
 
+  const cfg = contextConfig || {};
+  const vwapMode = cfg?.vwapMode || 'rolling';
+  const vwapWindow = cfg?.vwapWindow ?? 20;
   const seriesKey = buildSeriesKey(context, 'vwap');
   const featureSet =
     features ??
     computeFeatures(cleanCandles, {
       seriesKey,
       supertrendSettings: DEFAULT_SUPERTREND_SETTINGS,
+      vwapMode,
+      vwapWindow,
     });
   if (!featureSet) return null;
 
   const atr = (contextAtr ?? featureSet?.atr ?? getATR(cleanCandles, 14)) ?? 0;
-  const patterns = detectAllPatterns(cleanCandles, atr, 5);
+  const patterns = detectAllPatterns(cleanCandles, atr, 5, {
+    vwapMode,
+    vwapWindow,
+  });
   const pattern = patterns.find(p => p.type === 'VWAP Reversal');
   if (!pattern) return null;
 
@@ -442,6 +460,7 @@ export function patternBasedStrategy(context = {}) {
     spread = 0,
     liquidity = 0,
     atr: contextAtr,
+    config: contextConfig,
   } = context;
   const cleanCandles = Array.isArray(candles)
     ? context.__sanitizedCandles
@@ -450,17 +469,25 @@ export function patternBasedStrategy(context = {}) {
     : [];
   if (!Array.isArray(cleanCandles) || cleanCandles.length < 5) return null;
 
+  const cfg = contextConfig || {};
+  const vwapMode = cfg?.vwapMode || 'rolling';
+  const vwapWindow = cfg?.vwapWindow ?? 20;
   const seriesKey = buildSeriesKey(context, 'pattern');
   const featureSet =
     features ??
     computeFeatures(cleanCandles, {
       seriesKey,
       supertrendSettings: DEFAULT_SUPERTREND_SETTINGS,
+      vwapMode,
+      vwapWindow,
     });
   if (!featureSet) return null;
 
   const atr = (contextAtr ?? featureSet?.atr ?? getATR(cleanCandles, 14)) ?? 0;
-  const patterns = detectAllPatterns(cleanCandles, atr, 5);
+  const patterns = detectAllPatterns(cleanCandles, atr, 5, {
+    vwapMode,
+    vwapWindow,
+  });
   if (!patterns || patterns.length === 0) return null;
 
   let best = null;
