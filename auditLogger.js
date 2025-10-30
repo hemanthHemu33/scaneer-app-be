@@ -48,6 +48,16 @@ export async function logSignalCreated(signalData, marketCtx = {}) {
     targetPrice: signalData.target2 || signalData.target,
     confidence: signalData.confidence || signalData.confidenceScore,
     timeframe: signalData.timeframe || '1m',
+    rawStopDistance: signalData.rawStopDistance ?? signalData.sizing?.rawDistance ?? null,
+    effectiveStopDistance:
+      signalData.effectiveStopDistance ?? signalData.sizing?.effectiveDistance ?? null,
+    requestedQty: signalData.sizing?.requestedQty ?? null,
+    finalQty: signalData.qty ?? null,
+    marginCapQty: signalData.sizing?.marginCap?.capQty ?? null,
+    marginCapped: signalData.sizing?.marginCapped ?? null,
+    costBuffer: signalData.costBuffer ?? null,
+    slippage: signalData.slippage ?? null,
+    spread: signalData.spread ?? null,
     market: {
       vix: marketCtx.vix,
       atr: signalData.atr,

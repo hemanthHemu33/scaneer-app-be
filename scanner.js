@@ -1,6 +1,6 @@
 // scanner.js
 
-import { computeFeatures } from "./featureEngine.js";
+import { computeFeatures, resetIndicatorCache } from "./featureEngine.js";
 import {
   debounceSignal,
   calculateExpiryMinutes,
@@ -72,6 +72,8 @@ const FILTERS = {
   maxSpreadPct: MODE === "strict" ? 0.3 : 0.5,
 };
 
+let lastFeatureSeriesKey = null;
+
 function logError(context, err) {
   console.error(
     `[${new Date().toISOString()}] ❌ [${context}] ${err?.message || err}`
@@ -118,9 +120,35 @@ export async function analyzeCandles(
 
     const cleanCandles = sanitizeCandles(candles);
     if (cleanCandles.length < 5) return null;
+    const benchmarkCloses =
+      marketContext?.benchmarkCloses?.[symbol] ??
+      marketContext?.benchmark?.[symbol] ??
+      marketContext?.benchmarks?.[symbol] ??
+      null;
+    const seriesKey = symbol ? `${symbol}:primary` : null;
+    if (seriesKey && seriesKey !== lastFeatureSeriesKey) {
+      resetIndicatorCache();
+      lastFeatureSeriesKey = seriesKey;
+    }
     const features = computeFeatures(cleanCandles, {
-      seriesKey: symbol ? `${symbol}:primary` : null,
+      seriesKey,
       supertrendSettings: { atrLength: 10, multiplier: 3 },
+      only: [
+        "ema9",
+        "ema21",
+        "ema50",
+        "ema200",
+        "rsi",
+        "atr",
+        "macd",
+        "macdHist",
+        "ttmSqueeze",
+        "zScore",
+        "rvol",
+        "vwap",
+      ],
+      benchmarkCloses,
+      rsLookback: 20,
     });
     if (!features) return null;
 
@@ -163,6 +191,8 @@ export async function analyzeCandles(
       totalSell,
       dailyHistory,
       sessionCandles: sessionData,
+      benchmarkCloses,
+      rsLookback: 20,
     };
     let dailyRangePct = 0;
     if (Array.isArray(dailyHistory) && dailyHistory.length) {
@@ -178,7 +208,16 @@ export async function analyzeCandles(
     const wickPct = last ? getWickNoise(last) : 0;
     const strongPriceAction = isStrongPriceAction(cleanCandles);
     const atrStable = isAtrStable(cleanCandles);
-    const expiryMinutesRaw = calculateExpiryMinutes({ atr: atrValue, rvol });
+    const lastPrice = Number.isFinite(last?.close)
+      ? last.close
+      : Number.isFinite(last?.open)
+      ? last.open
+      : undefined;
+    const expiryMinutesRaw = calculateExpiryMinutes({
+      atr: atrValue,
+      rvol,
+      price: lastPrice,
+    });
     const expiryMinutes =
       Number.isFinite(expiryMinutesRaw) && expiryMinutesRaw > 0
         ? expiryMinutesRaw
@@ -228,6 +267,8 @@ export async function analyzeCandles(
         regime: marketContext?.regime,
         spreadPct,
         features,
+        benchmarkCloses,
+        rsLookback: 20,
       },
       { topN: 1, atr: atrValue }
     );
@@ -343,20 +384,87 @@ export async function analyzeCandles(
     const consolidationOk = isAwayFromConsolidation(cleanCandles, base.entry);
     const { getDrawdown } = await import("./account.js");
     const dd = typeof getDrawdown === "function" ? getDrawdown() : 0;
+    const sizingOverrides = {};
+    const setIfDefined = (key, value) => {
+      if (value !== undefined) sizingOverrides[key] = value;
+    };
+    setIfDefined('lotSize', base.lotSize ?? riskDefaults.lotSize);
+    setIfDefined('minLotSize', base.minLotSize ?? riskDefaults.minLotSize);
+    setIfDefined('minQty', base.minQty ?? riskDefaults.minQty);
+    setIfDefined('maxQty', base.maxQty ?? riskDefaults.maxQty);
+    setIfDefined(
+      'leverage',
+      base.leverage ?? riskDefaults.leverage ?? marketContext?.leverage
+    );
+    setIfDefined(
+      'marginPercent',
+      base.marginPercent ?? riskDefaults.marginPercent ?? marketContext?.marginPercent
+    );
+    setIfDefined('marginPerLot', base.marginPerLot ?? riskDefaults.marginPerLot);
+    setIfDefined(
+      'utilizationCap',
+      base.utilizationCap ?? riskDefaults.utilizationCap ?? marketContext?.utilizationCap
+    );
+    setIfDefined('marginBuffer', base.marginBuffer ?? riskDefaults.marginBuffer);
+    setIfDefined(
+      'exchangeMarginMultiplier',
+      base.exchangeMarginMultiplier ?? riskDefaults.exchangeMarginMultiplier
+    );
+    setIfDefined(
+      'costBuffer',
+      base.costBuffer ?? riskDefaults.costBuffer ?? marketContext?.costBuffer
+    );
+    setIfDefined('drawdown', dd);
+    setIfDefined('lossStreak', riskState?.consecutiveLosses ?? base.lossStreak);
+
+    const appliedSlippage = Number.isFinite(sizingOverrides.slippage)
+      ? sizingOverrides.slippage
+      : Number.isFinite(base.slippage)
+      ? base.slippage
+      : Number.isFinite(slippage)
+      ? slippage
+      : 0;
+    const appliedSpread = Number.isFinite(sizingOverrides.spread)
+      ? sizingOverrides.spread
+      : Number.isFinite(base.spread)
+      ? base.spread
+      : Number.isFinite(spread)
+      ? spread
+      : 0;
+    const appliedCostBuffer = Number.isFinite(sizingOverrides.costBuffer)
+      ? sizingOverrides.costBuffer
+      : Number.isFinite(riskDefaults.costBuffer)
+      ? riskDefaults.costBuffer
+      : Number.isFinite(marketContext?.costBuffer)
+      ? marketContext.costBuffer
+      : 1;
+
+    sizingOverrides.slippage = appliedSlippage;
+    sizingOverrides.spread = appliedSpread;
+    sizingOverrides.costBuffer = appliedCostBuffer;
+
+    const sizingDebug = {};
+
     let qty = calculatePositionSize({
       capital: accountBalance,
       risk: accountBalance * riskPerTradePercentage,
       slPoints: baseRisk,
       price: base.entry,
       volatility: atrValue,
-      drawdown: dd,
+      debug: sizingDebug,
+      ...sizingOverrides,
     });
     if (riskReward > 2) qty = Math.floor(qty * 1.1);
     else if (riskReward < 1.2) qty = Math.floor(qty * 0.9);
     qty = Math.max(1, qty || 0);
+    sizingDebug.signalQty = qty;
     const tradeValue =
       Number.isFinite(base.entry) && qty ? base.entry * qty : undefined;
     if (tradeValue !== undefined) preliminary.tradeValue = tradeValue;
+
+    const rawStopDistance = baseRisk;
+    const effectiveStopDistance =
+      (rawStopDistance + appliedSlippage + appliedSpread) * appliedCostBuffer;
 
     const now = new Date();
     const priceSeries = cleanCandles
@@ -485,8 +593,8 @@ export async function analyzeCandles(
       rsi,
       supertrend,
       atrValue,
-      slippage,
-      spread,
+      slippage: appliedSlippage,
+      spread: appliedSpread,
       liquidity: effectiveLiquidity,
       liveTick,
       depth,
@@ -520,6 +628,10 @@ export async function analyzeCandles(
       riskAmount: accountBalance * riskPerTradePercentage,
       accountBalance,
       baseRisk,
+      rawStopDistance,
+      effectiveStopDistance,
+      costBufferApplied: appliedCostBuffer,
+      sizingDebug,
     };
 
     // Step 7: Append meta information and build final signal
@@ -593,9 +705,19 @@ export async function rankAndExecute(signals = []) {
       maxSpread: FILTERS.maxSpread,
       maxSpreadPct: FILTERS.maxSpreadPct,
       winrate:
+<<<<<<< HEAD
         marketContext?.strategyWinrates?.[top.strategy] ??
         marketContext?.winrate ??
         0,
+=======
+        marketContext?.strategyWinrates?.[top.strategy] ?? marketContext?.winrate ?? 0,
+      costBuffer:
+        top.costBufferApplied ?? top.costBuffer ?? marketContext?.costBuffer ?? riskDefaults.costBuffer,
+      slippage: top.slippage ?? marketContext?.slippage ?? 0,
+      spread: top.spread ?? marketContext?.spread ?? 0,
+      support: top.support,
+      resistance: top.resistance,
+>>>>>>> f990f86a8446be5de2c02aad447720b390b75a6f
     });
     if (!ok) return null;
     const requiredMargin = calculateRequiredMargin({

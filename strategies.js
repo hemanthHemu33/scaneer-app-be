@@ -6,10 +6,13 @@ import {
   calculateSupertrend,
   calculateVWAP,
   calculateAnchoredVWAP,
+  calculateBollingerBands,
   getATR,
   computeFeatures,
 } from "./featureEngine.js";
 import { confirmRetest, detectAllPatterns, sanitizeCandles } from "./util.js";
+import { validateATRStopLoss, adjustStopLoss } from "./riskValidator.js";
+import { riskDefaults } from "./riskConfig.js";
 
 // Indicator helpers imported above return only the latest scalar value.
 // Any indicator series needed by strategies should be generated locally
@@ -30,6 +33,7 @@ export const DEFAULT_CONFIG = Object.freeze({
   rsiOS: 30,
   rsiExhaustion: 80,
   vwapMode: "rolling",
+  vwapWindow: 20,
   vwapDeviationPct: 0.02,
   insideBarNarrowPct: 0.3,
   requireBreakoutRetest: "soft",
@@ -43,9 +47,24 @@ export const DEFAULT_CONFIG = Object.freeze({
   eventRvolMultiplier: 1.5,
   eventSlAtrMultiplier: 1.5,
   regimeAtrZScoreBins: { low: -1, high: 1 },
-  maxSpreadPct: 0.5,
+  // Keep as "visual" percent to avoid breaking existing callers,
+  // but we'll normalize to fraction when gating (see helper below).
+  maxSpreadPct: 0.5, // means 0.5% (not 50%)
   minAvgVolume: 100000,
 });
+
+function pctToFrac(p) {
+  // 0.5   -> 0.005 (0.5%)
+  // 0.005 -> 0.005 (already a fraction)
+  if (p == null || !Number.isFinite(p)) return undefined;
+  if (p <= 0) return 0;
+  return p > 0.1 ? p / 100 : p;
+}
+
+function spreadCapFraction(cfg) {
+  // prefers riskDefaults if set, else converts cfg
+  return riskDefaults.market?.maxSpreadPct ?? pctToFrac(cfg.maxSpreadPct);
+}
 
 function emaSeries(prices, length) {
   const k = 2 / (length + 1);
@@ -84,6 +103,16 @@ function lowest(candles, count) {
   if (!candles.length) return null;
   const slice = candles.slice(-count);
   return Math.min(...slice.map((c) => c.low));
+}
+
+function resolveCategory(type = "", name = "") {
+  const s = `${type} ${name}`.toLowerCase();
+  if (s.includes("vwap") || s.includes("mean") || s.includes("reversion"))
+    return "mean-reversion";
+  if (s.includes("breakout") || s.includes("breakdown") || s.includes("gap"))
+    return "breakout";
+  if (s.includes("trend")) return "trend";
+  return "breakout"; // safe default for RR
 }
 
 const IST_OFFSET_MIN = 330; // IST is UTC+5:30
@@ -313,13 +342,10 @@ function detectDarkCloudPiercing(candles) {
 function detectBollingerBounce(candles) {
   if (candles.length < 20) return null;
   const closes = candles.map((c) => c.close);
-  const sma20 = calculateEMA(closes, 20); // use EMA as SMA proxy
-  const std = Math.sqrt(
-    closes.slice(-20).reduce((s, p) => s + Math.pow(p - sma20, 2), 0) / 20
-  );
-  const lower = sma20 - 2 * std;
+  const bb = calculateBollingerBands(closes, 20, 2);
+  if (!bb) return null;
   const last = candles.at(-1);
-  if (last.low <= lower && last.close > last.open) {
+  if (last.low <= bb.lower && last.close > last.open) {
     return { name: "Bollinger Band Bounce", confidence: 0.6 };
   }
   return null;
@@ -396,7 +422,15 @@ export function detectGapUpOrDown(
   if (typeof yesterdayClose !== "number" || typeof todayOpen !== "number")
     return null;
   const gapPercent = ((todayOpen - yesterdayClose) / yesterdayClose) * 100;
-  if (Math.abs(gapPercent) > config.maxGapPct) return null;
+  const cfgMaxGap = Number.isFinite(config.maxGapPct)
+    ? config.maxGapPct
+    : Infinity;
+  const defaultMaxGap = riskDefaults.market?.maxDailySpikePct;
+  const defaultsPct = Number.isFinite(defaultMaxGap)
+    ? defaultMaxGap * 100
+    : Infinity;
+  const maxGap = Math.min(cfgMaxGap, defaultsPct);
+  if (Number.isFinite(maxGap) && Math.abs(gapPercent) > maxGap) return null;
   if (gapPercent >= config.gapPctMinLong)
     return {
       type: "Gap-Up Breakout",
@@ -429,12 +463,20 @@ export function detectAndScorePattern(
     computeFeatures(cleanCandles, {
       seriesKey: seriesKeyFor(context, "pattern"),
       supertrendSettings: { atrLength: 10, multiplier: 3 },
+      only: ["ema9", "ema21", "ema200", "rsi", "atr", "macd", "macdHist", "vwap"],
+      benchmarkCloses: context.benchmarkCloses,
+      rsLookback: context.rsLookback ?? 20,
+      vwapMode: config?.vwapMode || "rolling",
+      vwapWindow: config?.vwapWindow ?? 20,
     });
   if (!featureSet) return null;
 
   const { ema9, ema21, ema200, rsi } = featureSet;
   const atr = (featureSet?.atr ?? getATR(cleanCandles, 14)) ?? 0;
-  const patterns = detectAllPatterns(cleanCandles, atr, 5);
+  const patterns = detectAllPatterns(cleanCandles, atr, 5, {
+    vwapMode: config?.vwapMode || "rolling",
+    vwapWindow: config?.vwapWindow ?? 20,
+  });
   if (!patterns || patterns.length === 0) return null;
 
   let best = null;
@@ -611,8 +653,15 @@ function detectNewsVolatilityTrap(candles) {
   return null;
 }
 
-function detectRelativeStrength(candles) {
+function detectRelativeStrength(candles, ctx = {}) {
   if (candles.length < 10) return null;
+  const rs = ctx.features?.rsScore ?? ctx.rsScore;
+  if (typeof rs === "number") {
+    if (rs > 0.6) {
+      return { name: "Relative Strength (Sector vs Stock)", confidence: 0.5 };
+    }
+    return null;
+  }
   const closes = candles.map((c) => c.close);
   const ema10 = calculateEMA(closes, 10);
   const last = candles.at(-1);
@@ -636,13 +685,15 @@ function detectLiquidityTrap(candles) {
   return null;
 }
 
-function detectTrendExhaustion(candles) {
+function detectTrendExhaustion(candles, ctx = {}) {
   if (candles.length < 6) return null;
   const last = candles.at(-1);
-  const rsi = calculateRSI(
-    candles.map((c) => c.close),
-    14
-  );
+  const rsi =
+    ctx.features?.rsi ??
+    calculateRSI(
+      candles.map((c) => c.close),
+      14
+    );
   const candlesUp = candles.slice(-5).every((c) => c.close > c.open);
   if (candlesUp && rsi > 75 && last.close < last.open) {
     return { name: "Trend Exhaustion Strategy", confidence: 0.6 };
@@ -784,8 +835,10 @@ function detectBreakoutFailureReversal(candles) {
 function detectAtrRangeExpansion(candles) {
   if (candles.length < 15) return null;
   const atr = getATR(candles, 14);
-  const diff = highest(candles, 1) - lowest(candles, 1);
-  if (diff > atr && atr > 0) {
+  const last = candles.at(-1);
+  if (!last || atr <= 0) return null;
+  const range = last.high - last.low;
+  if (range > atr) {
     return { name: "ATR Range Expansion", confidence: 0.55 };
   }
   return null;
@@ -794,8 +847,13 @@ function detectAtrRangeExpansion(candles) {
 function detectMarubozuContinuation(candles) {
   if (candles.length < 4) return null;
   const last3 = candles.slice(-3);
-  const noLowerWick = last3.every((c) => c.open <= c.low && c.close >= c.open);
-  if (noLowerWick && candles.at(-1).close > candles.at(-2).close) {
+  const noLowerWick = last3.every((c) => {
+    const body = Math.abs(c.close - c.open) || 1;
+    return c.close >= c.open && Math.abs(c.open - c.low) <= body * 0.1;
+  });
+  const last = candles.at(-1);
+  const prev = candles.at(-2);
+  if (noLowerWick && last.close > prev.close) {
     return { name: "Marubozu Trend Continuation", confidence: 0.55 };
   }
   return null;
@@ -836,23 +894,51 @@ function detectVcp(candles) {
   return null;
 }
 
-function detectBreakoutAboveResistance(candles) {
+function detectBreakoutAboveResistance(
+  candles,
+  ctx = {},
+  config = DEFAULT_CONFIG
+) {
   if (candles.length < 6) return null;
   const prevHigh = highest(candles.slice(-6, -1), 5);
   const last = candles.at(-1);
   const avgVol = avg(candles.slice(-6, -1).map((c) => c.volume || 0));
   if (last.close > prevHigh && last.volume > avgVol) {
+    if (config.requireBreakoutRetest) {
+      const atr = ctx.features?.atr ?? ctx.atr;
+      const retested = confirmRetest(candles.slice(-2), prevHigh, "Long", { atr });
+      if (!retested && config.requireBreakoutRetest === "hard") return null;
+      return {
+        name: "Breakout above Resistance",
+        confidence: retested ? 0.65 : 0.6,
+        meta: { missingRetest: !retested },
+      };
+    }
     return { name: "Breakout above Resistance", confidence: 0.6 };
   }
   return null;
 }
 
-function detectBreakdownBelowSupport(candles) {
+function detectBreakdownBelowSupport(
+  candles,
+  ctx = {},
+  config = DEFAULT_CONFIG
+) {
   if (candles.length < 6) return null;
   const prevLow = lowest(candles.slice(-6, -1), 5);
   const last = candles.at(-1);
   const avgVol = avg(candles.slice(-6, -1).map((c) => c.volume || 0));
   if (last.close < prevLow && last.volume > avgVol) {
+    if (config.requireBreakoutRetest) {
+      const atr = ctx.features?.atr ?? ctx.atr;
+      const retested = confirmRetest(candles.slice(-2), prevLow, "Short", { atr });
+      if (!retested && config.requireBreakoutRetest === "hard") return null;
+      return {
+        name: "Breakdown below Support",
+        confidence: retested ? 0.65 : 0.6,
+        meta: { missingRetest: !retested },
+      };
+    }
     return { name: "Breakdown below Support", confidence: 0.6 };
   }
   return null;
@@ -934,7 +1020,11 @@ function detectPrebreakoutConsolidation(candles) {
   return null;
 }
 
-function detectCupHandleBreakout(candles, ctx = {}) {
+function detectCupHandleBreakout(
+  candles,
+  ctx = {},
+  config = DEFAULT_CONFIG
+) {
   const cleanCandles = sanitizeCandles(candles);
   if (cleanCandles.length < 5) return null;
   const atrCandidate = ctx.atr;
@@ -942,7 +1032,11 @@ function detectCupHandleBreakout(candles, ctx = {}) {
     Number.isFinite(atrCandidate) && atrCandidate > 0
       ? atrCandidate
       : getATR(cleanCandles, 14) || 0;
-  const patterns = detectAllPatterns(cleanCandles, atr, 5);
+  const cfg = ctx?.config || config || DEFAULT_CONFIG;
+  const patterns = detectAllPatterns(cleanCandles, atr, 5, {
+    vwapMode: cfg?.vwapMode || "rolling",
+    vwapWindow: cfg?.vwapWindow ?? 20,
+  });
   const cup = patterns.find((p) => p.type === "Cup & Handle");
   if (cup) {
     return { name: "Cup & Handle Breakout", confidence: 0.6 };
@@ -998,7 +1092,7 @@ function detectGapUpInsideBarRetest(candles) {
   if (candles.length < 3) return null;
   const prev = candles.at(-2);
   const last = candles.at(-1);
-  const gap = (prev.open - candles.at(-3).close) / candles.at(-3).close;
+  const gap = (last.open - prev.close) / prev.close;
   const inside = last.high <= prev.high && last.low >= prev.low;
   const retest = Math.abs(last.low - prev.high) / prev.high < 0.005;
   if (gap > 0.015 && inside && retest) {
@@ -1076,6 +1170,9 @@ function detectGapUpRsiMacdBullish(candles, ctx = {}) {
     computeFeatures(candles, {
       seriesKey: seriesKeyFor(ctx, "gapUp"),
       supertrendSettings: { atrLength: 10, multiplier: 3 },
+      only: ["rsi", "macd", "macdHist", "ema9", "ema21"],
+      benchmarkCloses: ctx?.benchmarkCloses,
+      rsLookback: ctx?.rsLookback ?? 20,
     });
   const rsiOk = features?.rsi > 50;
   const macdOk = features?.macd?.histogram > 0;
@@ -1265,6 +1362,9 @@ function detectGapDownRsiMacdBearish(candles, ctx = {}) {
     computeFeatures(candles, {
       seriesKey: seriesKeyFor(ctx, "gapDown"),
       supertrendSettings: { atrLength: 10, multiplier: 3 },
+      only: ["rsi", "macd", "macdHist", "ema9", "ema21"],
+      benchmarkCloses: ctx?.benchmarkCloses,
+      rsLookback: ctx?.rsLookback ?? 20,
     });
   const rsiOk = features?.rsi < 50;
   const macdOk = features?.macd?.histogram < 0;
@@ -1397,16 +1497,18 @@ function detectBearTrapAfterGapDown(candles) {
 
 function detectParabolicExhaustion(
   candles,
-  _ctx = {},
+  ctx = {},
   config = DEFAULT_CONFIG
 ) {
   if (candles.length < 5) return null;
   const last5 = candles.slice(-5);
   const rising = last5.every((c) => c.close > c.open);
-  const rsi = calculateRSI(
-    candles.map((c) => c.close),
-    14
-  );
+  const rsi =
+    ctx.features?.rsi ??
+    calculateRSI(
+      candles.map((c) => c.close),
+      14
+    );
   if (rising && rsi > config.rsiExhaustion) {
     const last = candles.at(-1);
     if (last.close < last.open) {
@@ -1498,14 +1600,16 @@ function detectDeltaDivergence(candles, ctx = {}) {
   return null;
 }
 
-function detectRangeCompressionRsiFlush(candles) {
+function detectRangeCompressionRsiFlush(candles, ctx = {}) {
   if (candles.length < 10) return null;
   const ranges = candles.slice(-10).map((c) => c.high - c.low);
   const compressed = ranges.every((r) => r < avg(ranges) * 1.2);
-  const rsi = calculateRSI(
-    candles.map((c) => c.close),
-    14
-  );
+  const rsi =
+    ctx.features?.rsi ??
+    calculateRSI(
+      candles.map((c) => c.close),
+      14
+    );
   const last = candles.at(-1);
   if (
     compressed &&
@@ -1539,14 +1643,17 @@ function detectVwapRejectionBounce(candles) {
   return null;
 }
 
-function detectMarketSentimentReversal(candles) {
+function detectMarketSentimentReversal(candles, ctx = {}) {
   if (candles.length < 3) return null;
   const last = candles.at(-1);
   if (
     last.high - last.close > (last.high - last.low) * 0.6 &&
-    calculateRSI(
-      candles.map((c) => c.close),
-      14
+    (
+      ctx.features?.rsi ??
+      calculateRSI(
+        candles.map((c) => c.close),
+        14
+      )
     ) > 75
   ) {
     return { name: "Market Sentiment Reversal", confidence: 0.55 };
@@ -1561,6 +1668,9 @@ function detectTtmSqueezeBreakout(candles, ctx = {}) {
     computeFeatures(candles, {
       seriesKey: seriesKeyFor(ctx, "ttm"),
       supertrendSettings: { atrLength: 10, multiplier: 3 },
+      only: ["ttmSqueeze", "macd", "macdHist"],
+      benchmarkCloses: ctx?.benchmarkCloses,
+      rsLookback: ctx?.rsLookback ?? 20,
     });
   const squeeze = features?.ttmSqueeze;
   const hist = features?.macdHist;
@@ -1741,7 +1851,15 @@ function computeDetectorScore(raw, candles, features, context, entry, stopLoss, 
     rsScore * 0.1;
 
   let penalty = 0;
-  if (context.spreadPct != null && context.spreadPct > config.maxSpreadPct) penalty += 0.1;
+  const spreadFracScore =
+    context.spreadFrac ?? pctToFrac(context.spreadPct);
+  const capFracScore = spreadCapFraction(config);
+  if (
+    spreadFracScore != null &&
+    capFracScore != null &&
+    spreadFracScore > capFracScore
+  )
+    penalty += 0.1;
   if (context.newsImpact || context.badNews) penalty += 0.2;
   if (raw.meta?.missingRetest) penalty += 0.05;
   const rsi = features.rsi14 ?? features.rsi;
@@ -1773,12 +1891,39 @@ function normalizeResult(
     (context.avgAtr || atr || 0) * config.riskAtrMaxMultiple
   );
   const entry = price;
-  const stopLoss =
+  let stopLoss =
     raw.stopLoss !== undefined
       ? raw.stopLoss
       : dir === "Long"
       ? entry - usedAtr * config.slAtrMultiple
       : entry + usedAtr * config.slAtrMultiple;
+  const slOk = validateATRStopLoss({
+    entry,
+    stopLoss,
+    atr: usedAtr,
+    minMult: riskDefaults.sl.minAtrMult,
+    maxMult: riskDefaults.sl.maxAtrMult,
+  });
+  if (!slOk) {
+    const minDist = usedAtr * (riskDefaults.sl.minAtrMult ?? 0.5);
+    const maxDist = usedAtr * (riskDefaults.sl.maxAtrMult ?? 3);
+    const dist = Math.max(
+      minDist,
+      Math.min(Math.abs(entry - stopLoss), maxDist)
+    );
+    stopLoss = dir === "Long" ? entry - dist : entry + dist;
+  }
+  stopLoss = adjustStopLoss({
+    price: entry,
+    stopLoss,
+    direction: dir,
+    atr: usedAtr,
+  });
+  const { tickSize } = context || {};
+  if (Number.isFinite(tickSize) && tickSize > 0) {
+    const snap = (v) => Number((Math.round(v / tickSize) * tickSize).toFixed(8));
+    stopLoss = snap(stopLoss);
+  }
   const targets =
     raw.targets ||
     config.targetAtrMultiples.reduce((acc, m, i) => {
@@ -1807,6 +1952,9 @@ function normalizeResult(
     ...(raw.meta || {}),
     ...(context.meta || {}),
   };
+  if (!meta.strategyCategory) {
+    meta.strategyCategory = resolveCategory(raw.type, raw.name);
+  }
   return {
     name: raw.name,
     type: raw.type || "Event",
@@ -1839,8 +1987,12 @@ export function evaluateStrategies(
       return [];
     if (!isEvent && context.rvol < cfg.rvolMin) return [];
   }
-  if (context.spreadPct != null && context.spreadPct > cfg.maxSpreadPct) return [];
-  if (context.avgVolume && context.avgVolume < cfg.minAvgVolume) return [];
+  const spreadFrac =
+    context.spreadFrac ?? pctToFrac(context.spreadPct);
+  const capFrac = spreadCapFraction(cfg);
+  if (spreadFrac != null && capFrac != null && spreadFrac > capFrac) return [];
+  if (context.avgVolume && cfg.minAvgVolume && context.avgVolume < cfg.minAvgVolume)
+    return [];
   if (isEvent) {
     cfg = {
       ...cfg,
@@ -1869,6 +2021,24 @@ export function evaluateStrategies(
     computeFeatures(clean, {
       seriesKey: seriesKeyFor(context, "strategy"),
       supertrendSettings: { atrLength: 10, multiplier: 3 },
+      only: [
+        "ema9",
+        "ema21",
+        "ema50",
+        "ema200",
+        "rsi",
+        "atr",
+        "macd",
+        "ttmSqueeze",
+        "macdHist",
+        "zScore",
+        "rvol",
+        "vwap",
+      ],
+      benchmarkCloses: context.benchmarkCloses,
+      rsLookback: context.rsLookback ?? 20,
+      vwapMode: cfg?.vwapMode || "rolling",
+      vwapWindow: cfg?.vwapWindow ?? 20,
     }) || {};
   const atrCandidate =
     options?.atr ??

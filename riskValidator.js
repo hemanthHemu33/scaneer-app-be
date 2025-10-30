@@ -2,6 +2,7 @@
 // Provides pre-execution risk validation utilities
 import { logSignalRejected } from './auditLogger.js';
 import { toISTDate } from './util.js';
+import { riskDefaults } from './riskConfig.js';
 
 function resolveStrategyCategory(name = '') {
   const s = String(name).toLowerCase();
@@ -38,8 +39,18 @@ export function getMinRRForStrategy(strategy, winrate = 0) {
   }
 }
 
-export function validateRR({ strategy, entry, stopLoss, target, winrate = 0 }) {
-  const risk = Math.abs(entry - stopLoss);
+export function validateRR({
+  strategy,
+  entry,
+  stopLoss,
+  target,
+  winrate = 0,
+  slippage = 0,
+  spread = 0,
+  costBuffer = 1,
+}) {
+  const raw = Math.abs(entry - stopLoss);
+  const risk = Math.max((raw + slippage + spread) * (costBuffer || 1), 1e-6);
   if (!risk) return { valid: false, rr: 0, minRR: Infinity };
   const rr = Math.abs((target - entry) / risk);
   const minRR = getMinRRForStrategy(strategy, winrate);
@@ -52,29 +63,61 @@ export function validateRR({ strategy, entry, stopLoss, target, winrate = 0 }) {
   return { valid: true, rr, minRR };
 }
 
-export function adjustStopLoss({ price, stopLoss, direction, atr, structureBreak = false }) {
+const snapToTick = (v, tickSize) => {
+  if (!tickSize || tickSize <= 0) return v;
+  const n = Math.round(v / tickSize) * tickSize;
+  return Number(n.toFixed(8));
+};
+
+export function adjustStopLoss({
+  price,
+  stopLoss,
+  direction,
+  atr,
+  structureBreak = false,
+  tickSize,
+  minAtrMult = 0.25,
+  maxAtrMult = 4,
+}) {
+  if (!Number.isFinite(price) || !Number.isFinite(stopLoss)) return stopLoss;
   let newSL = stopLoss;
-  const safeAtr = Number.isFinite(atr) ? atr : price * 0.005;
-  const thresh = safeAtr * 0.5;
+  const safeAtr = Number.isFinite(atr) ? atr : Math.max(price * 0.005, 0.01);
+  const minDist = safeAtr * minAtrMult;
+  const maxDist = safeAtr * maxAtrMult;
+
   if (structureBreak) {
-    return direction === 'Long' ? Math.max(stopLoss, price) : Math.min(stopLoss, price);
+    newSL = direction === 'Long' ? price - minDist : price + minDist;
+    return snapToTick(newSL, tickSize);
   }
-  if (direction === 'Long') {
-    if (price - stopLoss > thresh) {
-      newSL = Math.max(stopLoss, price - thresh);
-    }
-  } else {
-    if (stopLoss - price > thresh) {
-      newSL = Math.min(stopLoss, price + thresh);
-    }
+
+  if (direction === 'Long' && newSL >= price) newSL = price - minDist;
+  if (direction === 'Short' && newSL <= price) newSL = price + minDist;
+
+  const dist = Math.abs(price - newSL);
+  if (dist < minDist) {
+    newSL = direction === 'Long' ? price - minDist : price + minDist;
+  } else if (dist > maxDist) {
+    newSL = direction === 'Long' ? price - maxDist : price + maxDist;
   }
+
+  newSL = snapToTick(newSL, tickSize);
   return newSL;
 }
 
-export function isSLInvalid({ price, stopLoss, atr, structureBreak = false }) {
-  // we don't auto-invalidate on structureBreak; SL is validated by distance
+export function isSLInvalid({
+  price,
+  stopLoss,
+  atr,
+  structureBreak = false,
+  direction,
+  tickSize,
+}) {
+  if (!Number.isFinite(price) || !Number.isFinite(stopLoss)) return true;
+  if (direction === 'Long' && stopLoss >= price) return true;
+  if (direction === 'Short' && stopLoss <= price) return true;
+  const safeAtr = Number.isFinite(atr) ? atr : Math.max(price * 0.005, 0.01);
   const proximity = Math.abs(price - stopLoss);
-  return proximity <= atr * 0.2;
+  return proximity <= safeAtr * 0.2;
 }
 
 // Ensure stop-loss distance is sensible relative to ATR
@@ -124,7 +167,10 @@ function computeSpreadLimit({ price, maxSpread, maxSpreadPct }) {
   if (typeof maxSpread === 'number') return maxSpread;
   if (typeof maxSpreadPct === 'number') {
     const p = Number(price);
-    if (Number.isFinite(p) && p > 0) return (maxSpreadPct / 100) * p;
+    if (Number.isFinite(p) && p > 0) {
+      const pct = maxSpreadPct > 1 ? maxSpreadPct / 100 : maxSpreadPct;
+      return pct * p;
+    }
   }
   return null;
 }
@@ -192,9 +238,11 @@ export function checkMarketConditions({
   newsImpact = false,
   eventActive = false,
 }) {
-  if (avgAtr && atr > avgAtr * 1.5) return false;
+  const atrMult = riskDefaults?.market?.maxAtrMult ?? 1.5;
+  const maxLatencyMs = riskDefaults?.market?.maxLatencyMs ?? 2 * 60 * 1000;
+  if (avgAtr && atr > avgAtr * atrMult) return false;
   if (indexTrend && signalDirection && indexTrend !== signalDirection) return false;
-  if (timeSinceSignal > 2 * 60 * 1000) return false;
+  if (timeSinceSignal > maxLatencyMs) return false;
   if (typeof spread === 'number') {
     let spreadLimit = computeSpreadLimit({ price, maxSpread, maxSpreadPct });
     if (spreadLimit == null) spreadLimit = 0.3; // final fallback
@@ -238,12 +286,24 @@ export function checkTimingFilters({
 
 export function validatePreExecution(signal, market) {
   const { strategy } = signal.algoSignal || { strategy: signal.pattern };
+  const mc = riskDefaults.market || {};
+  const fr = riskDefaults.frictions || {};
+
+  if (market && typeof market === 'object') {
+    if (!('maxSpread' in market) && mc.maxSpread != null) market.maxSpread = mc.maxSpread;
+    if (!('maxSpreadPct' in market) && mc.maxSpreadPct != null)
+      market.maxSpreadPct = mc.maxSpreadPct;
+  }
+
   const rrInfo = validateRR({
     strategy,
     entry: signal.entry,
     stopLoss: signal.stopLoss,
     target: signal.target2,
     winrate: market.winrate || 0,
+    slippage: signal.slippage ?? market.slippage ?? fr.defaultSlippage ?? 0,
+    spread: signal.spread ?? market.spread ?? 0,
+    costBuffer: market.costBuffer ?? fr.costBuffer ?? 1,
   });
   if (!rrInfo.valid) {
     console.log(
@@ -264,6 +324,7 @@ export function validatePreExecution(signal, market) {
       stopLoss: signal.stopLoss,
       atr: signal.atr,
       structureBreak: market.structureBreak,
+      direction: signal.direction,
     })
   ) {
     console.log(`[RISK] ${signal.stock || signal.symbol} stop-loss invalid`);
@@ -274,6 +335,45 @@ export function validatePreExecution(signal, market) {
       signal
     );
     return false;
+  }
+
+  if (
+    !validateATRStopLoss({
+      entry: signal.entry,
+      stopLoss: signal.stopLoss,
+      atr: signal.atr,
+      minMult: riskDefaults?.sl?.minAtrMult ?? 0.5,
+      maxMult: riskDefaults?.sl?.maxAtrMult ?? 3,
+    })
+  ) {
+    console.log(`[RISK] ${signal.stock || signal.symbol} SL outside ATR bounds`);
+    logSignalRejected(
+      signal.signalId || signal.algoSignal?.signalId,
+      'atrSLInvalid',
+      { entry: signal.entry, stopLoss: signal.stopLoss, atr: signal.atr },
+      signal
+    );
+    return false;
+  }
+
+  if (market?.support != null || market?.resistance != null) {
+    const ok = validateSupportResistance({
+      entry: market.currentPrice ?? signal.entry,
+      direction: signal.direction,
+      support: market.support,
+      resistance: market.resistance,
+      atr: signal.atr,
+    });
+    if (!ok) {
+      console.log(`[RISK] ${signal.stock || signal.symbol} too close to S/R`);
+      logSignalRejected(
+        signal.signalId || signal.algoSignal?.signalId,
+        'srProximity',
+        { support: market.support, resistance: market.resistance },
+        signal
+      );
+      return false;
+    }
   }
 
   if (

@@ -24,6 +24,7 @@ import {
   tickBuffer,
   lastTickTs,
   getInstrumentTokenCount,
+  watchStockSymbolUniverse,
 } from "./kite.js";
 import { createLiveFeedMonitor } from "./liveFeedMonitor.js";
 import {
@@ -313,6 +314,7 @@ server.listen(3000, async () => {
 
   try {
     await ensureUniverseSeeded(db);
+    await watchStockSymbolUniverse();
     const token = await initSession();
     if (!token) {
       console.warn("⚠️ No Kite session; live feed will not start.");
