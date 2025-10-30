@@ -388,34 +388,44 @@ export async function analyzeCandles(
     const setIfDefined = (key, value) => {
       if (value !== undefined) sizingOverrides[key] = value;
     };
-    setIfDefined('lotSize', base.lotSize ?? riskDefaults.lotSize);
-    setIfDefined('minLotSize', base.minLotSize ?? riskDefaults.minLotSize);
-    setIfDefined('minQty', base.minQty ?? riskDefaults.minQty);
-    setIfDefined('maxQty', base.maxQty ?? riskDefaults.maxQty);
+    setIfDefined("lotSize", base.lotSize ?? riskDefaults.lotSize);
+    setIfDefined("minLotSize", base.minLotSize ?? riskDefaults.minLotSize);
+    setIfDefined("minQty", base.minQty ?? riskDefaults.minQty);
+    setIfDefined("maxQty", base.maxQty ?? riskDefaults.maxQty);
     setIfDefined(
-      'leverage',
+      "leverage",
       base.leverage ?? riskDefaults.leverage ?? marketContext?.leverage
     );
     setIfDefined(
-      'marginPercent',
-      base.marginPercent ?? riskDefaults.marginPercent ?? marketContext?.marginPercent
+      "marginPercent",
+      base.marginPercent ??
+        riskDefaults.marginPercent ??
+        marketContext?.marginPercent
     );
-    setIfDefined('marginPerLot', base.marginPerLot ?? riskDefaults.marginPerLot);
     setIfDefined(
-      'utilizationCap',
-      base.utilizationCap ?? riskDefaults.utilizationCap ?? marketContext?.utilizationCap
+      "marginPerLot",
+      base.marginPerLot ?? riskDefaults.marginPerLot
     );
-    setIfDefined('marginBuffer', base.marginBuffer ?? riskDefaults.marginBuffer);
     setIfDefined(
-      'exchangeMarginMultiplier',
+      "utilizationCap",
+      base.utilizationCap ??
+        riskDefaults.utilizationCap ??
+        marketContext?.utilizationCap
+    );
+    setIfDefined(
+      "marginBuffer",
+      base.marginBuffer ?? riskDefaults.marginBuffer
+    );
+    setIfDefined(
+      "exchangeMarginMultiplier",
       base.exchangeMarginMultiplier ?? riskDefaults.exchangeMarginMultiplier
     );
     setIfDefined(
-      'costBuffer',
+      "costBuffer",
       base.costBuffer ?? riskDefaults.costBuffer ?? marketContext?.costBuffer
     );
-    setIfDefined('drawdown', dd);
-    setIfDefined('lossStreak', riskState?.consecutiveLosses ?? base.lossStreak);
+    setIfDefined("drawdown", dd);
+    setIfDefined("lossStreak", riskState?.consecutiveLosses ?? base.lossStreak);
 
     const appliedSlippage = Number.isFinite(sizingOverrides.slippage)
       ? sizingOverrides.slippage
@@ -705,19 +715,18 @@ export async function rankAndExecute(signals = []) {
       maxSpread: FILTERS.maxSpread,
       maxSpreadPct: FILTERS.maxSpreadPct,
       winrate:
-<<<<<<< HEAD
         marketContext?.strategyWinrates?.[top.strategy] ??
         marketContext?.winrate ??
         0,
-=======
-        marketContext?.strategyWinrates?.[top.strategy] ?? marketContext?.winrate ?? 0,
       costBuffer:
-        top.costBufferApplied ?? top.costBuffer ?? marketContext?.costBuffer ?? riskDefaults.costBuffer,
+        top.costBufferApplied ??
+        top.costBuffer ??
+        marketContext?.costBuffer ??
+        riskDefaults.costBuffer,
       slippage: top.slippage ?? marketContext?.slippage ?? 0,
       spread: top.spread ?? marketContext?.spread ?? 0,
       support: top.support,
       resistance: top.resistance,
->>>>>>> f990f86a8446be5de2c02aad447720b390b75a6f
     });
     if (!ok) return null;
     const requiredMargin = calculateRequiredMargin({
