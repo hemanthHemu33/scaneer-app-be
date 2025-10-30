@@ -190,10 +190,152 @@ async function hydrateSessionData(
   }
 }
 
+function normalizeSymbol(symbol) {
+  if (typeof symbol !== "string") return null;
+  const trimmed = symbol.trim();
+  if (!trimmed) return null;
+  return trimmed.includes(":") ? trimmed : `NSE:${trimmed}`;
+}
+
+// Track the currently applied universe so we can diff change-stream updates
+let stockSymbolUniverse = new Set();
+let stockSymbolWatcher = null;
+let stockSymbolSyncChain = Promise.resolve();
+
 // Fetch stock symbols from database
 async function getStockSymbols() {
   const doc = await db.collection("stock_symbols").findOne({});
   return doc?.symbols || [];
+}
+
+function collectUniqueSymbols(symbols = []) {
+  const unique = new Set();
+  for (const raw of symbols || []) {
+    const normalized = normalizeSymbol(raw);
+    if (normalized) unique.add(normalized);
+  }
+  return Array.from(unique);
+}
+
+async function syncStockSymbolUniverse(nextSymbols = []) {
+  const symbols = collectUniqueSymbols(nextSymbols);
+  const prevUniverse = stockSymbolUniverse;
+  stockSymbolUniverse = new Set(symbols);
+
+  if (!symbols.length) {
+    if (instrumentTokens.length) {
+      updateInstrumentTokens([]);
+    }
+    for (const token of Object.keys(tickBuffer)) delete tickBuffer[token];
+    for (const token of Object.keys(sessionData)) delete sessionData[token];
+    clearCandleHistory();
+    return;
+  }
+
+  const addedSymbols = symbols.filter((sym) => !prevUniverse.has(sym));
+
+  const tokens = await getTokensForSymbols(symbols);
+  const numericTokens = Array.from(
+    new Set(tokens.map((t) => Number(t)).filter((t) => Number.isFinite(t)))
+  );
+
+  const keepSet = new Set(numericTokens.map((t) => String(t)));
+  const currentSet = new Set(instrumentTokens.map((t) => String(Number(t))));
+  const removedTokens = Array.from(currentSet).filter((t) => !keepSet.has(t));
+
+  for (const token of removedTokens) {
+    delete tickBuffer[token];
+    delete sessionData[token];
+    delete candleHistory[token];
+  }
+
+  updateInstrumentTokens(numericTokens);
+
+  if (addedSymbols.length) {
+    try {
+      const addedTokens = Array.from(
+        new Set(
+          (await getTokensForSymbols(addedSymbols))
+            .map((t) => Number(t))
+            .filter((t) => Number.isFinite(t))
+        )
+      );
+      if (addedTokens.length) {
+        try {
+          await hydrateSessionData(addedTokens);
+        } catch (err) {
+          logError("hydrateSessionData.stockSymbolChange", err);
+        }
+      }
+    } catch (err) {
+      logError("hydrateSessionData.stockSymbolChange", err);
+    }
+
+    await Promise.allSettled(
+      addedSymbols.map(async (symbol) => {
+        try {
+          await ensureDataForSymbol(symbol);
+        } catch (err) {
+          logError("ensureDataForSymbol.stockSymbolChange", err, { symbol });
+        }
+      })
+    );
+  }
+}
+
+export async function watchStockSymbolUniverse() {
+  if (stockSymbolWatcher) return stockSymbolWatcher;
+
+  try {
+    const initial = await getStockSymbols();
+    await syncStockSymbolUniverse(initial);
+  } catch (err) {
+    logError("watchStockSymbolUniverse.initial", err);
+  }
+
+  const collection = db.collection("stock_symbols");
+  try {
+    stockSymbolWatcher = collection.watch([], { fullDocument: "updateLookup" });
+  } catch (err) {
+    logError("watchStockSymbolUniverse.start", err);
+    stockSymbolWatcher = null;
+    return null;
+  }
+
+  stockSymbolWatcher.on("change", (change) => {
+    const symbols = change.fullDocument?.symbols || [];
+    stockSymbolSyncChain = stockSymbolSyncChain
+      .catch(() => {})
+      .then(() => syncStockSymbolUniverse(symbols))
+      .catch((err) => {
+        logError("watchStockSymbolUniverse.change", err);
+      });
+  });
+
+  const resetWatcher = () => {
+    try {
+      stockSymbolWatcher?.close();
+    } catch (err) {
+      logError("watchStockSymbolUniverse.close", err);
+    }
+    stockSymbolWatcher = null;
+    setTimeout(() => {
+      watchStockSymbolUniverse().catch((err) =>
+        logError("watchStockSymbolUniverse.restart", err)
+      );
+    }, 5000);
+  };
+
+  stockSymbolWatcher.on("error", (err) => {
+    logError("watchStockSymbolUniverse.error", err);
+    resetWatcher();
+  });
+
+  stockSymbolWatcher.on("end", () => {
+    resetWatcher();
+  });
+
+  return stockSymbolWatcher;
 }
 
 // SET THE STOCKS SYMBOLS
