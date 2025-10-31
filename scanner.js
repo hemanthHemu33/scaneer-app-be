@@ -342,36 +342,13 @@ export async function analyzeCandles(
       Number.isFinite(base.entry) && Number.isFinite(base.stopLoss)
         ? Math.abs(base.entry - base.stopLoss)
         : null;
-    const rrNumerator = Number.isFinite(base.target2 ?? base.target1)
+    let rrNumerator = Number.isFinite(base.target2 ?? base.target1)
       ? Math.abs((base.target2 ?? base.target1) - base.entry)
       : null;
-    const riskReward =
+    let riskReward =
       baseRisk && baseRisk > 0 && rrNumerator !== null
         ? rrNumerator / baseRisk
         : 0;
-    console.log(`[DIAG] ${symbol}`, {
-      lastClose: last?.close,
-      rsi,
-      adx,
-      ema9,
-      ema21,
-      ema50,
-      vwap,
-      atrValue,
-      atrPct,
-      wickPct,
-      rvol,
-      avgVolume,
-      effectiveLiquidity,
-      vix: safeVix,
-      regime: safeRegime,
-      spread,
-      slippage,
-      rr:
-        baseRisk && baseRisk > 0 && rrNumerator !== null
-          ? (rrNumerator / baseRisk).toFixed(2)
-          : null,
-    });
 
     if (!Number.isFinite(baseRisk) || baseRisk <= 0) {
       console.log(`[SKIP] ${symbol} - invalid baseRisk`, {
@@ -453,6 +430,45 @@ export async function analyzeCandles(
     sizingOverrides.spread = appliedSpread;
     sizingOverrides.costBuffer = appliedCostBuffer;
 
+    const rawStopDistance = baseRisk;
+    const effectiveStopDistance =
+      (rawStopDistance + appliedSlippage + appliedSpread) * appliedCostBuffer;
+
+    let target1 = base.target1;
+    let target2 = base.target2 ?? base.target1;
+    if (
+      Number.isFinite(effectiveStopDistance) &&
+      effectiveStopDistance > 0 &&
+      Number.isFinite(base.entry)
+    ) {
+      const directionSign = base.direction === "Short" ? -1 : 1;
+      const targetDistance = effectiveStopDistance * RISK_REWARD_RATIO;
+      const partialDistance = targetDistance * 0.5;
+      target1 = base.entry + directionSign * partialDistance;
+      target2 = base.entry + directionSign * targetDistance;
+    }
+
+    rrNumerator = Number.isFinite(target2 ?? target1)
+      ? Math.abs((target2 ?? target1) - base.entry)
+      : rrNumerator;
+    if (
+      Number.isFinite(effectiveStopDistance) &&
+      effectiveStopDistance > 0 &&
+      rrNumerator !== null
+    ) {
+      riskReward = rrNumerator / effectiveStopDistance;
+    }
+
+    if (target1 !== undefined && preliminary.target1 === undefined) {
+      preliminary.target1 = target1;
+    }
+    if (target2 !== undefined) {
+      preliminary.target2 = target2;
+      preliminary.target = target2;
+    } else if (target1 !== undefined) {
+      preliminary.target = target1;
+    }
+
     const sizingDebug = {};
 
     let qty = calculatePositionSize({
@@ -472,9 +488,26 @@ export async function analyzeCandles(
       Number.isFinite(base.entry) && qty ? base.entry * qty : undefined;
     if (tradeValue !== undefined) preliminary.tradeValue = tradeValue;
 
-    const rawStopDistance = baseRisk;
-    const effectiveStopDistance =
-      (rawStopDistance + appliedSlippage + appliedSpread) * appliedCostBuffer;
+    console.log(`[DIAG] ${symbol}`, {
+      lastClose: last?.close,
+      rsi,
+      adx,
+      ema9,
+      ema21,
+      ema50,
+      vwap,
+      atrValue,
+      atrPct,
+      wickPct,
+      rvol,
+      avgVolume,
+      effectiveLiquidity,
+      vix: safeVix,
+      regime: safeRegime,
+      spread: appliedSpread,
+      slippage: appliedSlippage,
+      rr: Number.isFinite(riskReward) ? riskReward.toFixed(2) : null,
+    });
 
     const now = new Date();
     const priceSeries = cleanCandles
@@ -584,8 +617,8 @@ export async function analyzeCandles(
     const tradeParams = {
       entry: base.entry,
       stopLoss: base.stopLoss,
-      target1: base.target1,
-      target2: base.target2,
+      target1,
+      target2,
       qty,
     };
 
