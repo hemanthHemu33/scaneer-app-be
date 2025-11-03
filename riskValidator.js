@@ -9,8 +9,15 @@ function resolveStrategyCategory(name = '') {
   if (s.includes('supertrend')) return 'trend';
   if (s.includes('ema') && s.includes('reversal')) return 'mean-reversion';
   if (s.includes('vwap')) return 'mean-reversion';
-  if (s.includes('triple top') || s.includes('double top') || s.includes('head & shoulders'))
-    return 'breakout';
+  if (
+    s.includes('head & shoulders') ||
+    s.includes('inverse head & shoulders') ||
+    s.includes('double top') ||
+    s.includes('double bottom') ||
+    s.includes('triple top') ||
+    s.includes('triple bottom')
+  )
+    return 'reversal';
   if (s.includes('gap')) return 'breakout';
   if (s.includes('scalp') || s.includes('fade')) return 'scalping';
   if (s.includes('trend')) return 'trend';
@@ -25,6 +32,8 @@ export function getMinRRForStrategy(strategy, winrate = 0) {
       return 2;
     case 'breakout':
       return 1.8;
+    case 'reversal':
+      return 1.5;
     case 'mean-reversion':
       return 1.5;
     case 'scalping':
