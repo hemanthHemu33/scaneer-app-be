@@ -1317,6 +1317,106 @@ async function flushTickBufferToDB() {
 }
 
 const lastSignalMap = {};
+
+const autoExecFlag = String(process.env.AUTO_EXECUTE ?? "true").toLowerCase();
+const AUTO_EXECUTE_ENABLED =
+  process.env.NODE_ENV !== "test" &&
+  !["false", "0", "off", "disabled"].includes(autoExecFlag);
+const parsedAutoWindow = Number(process.env.AUTO_EXECUTE_WINDOW_MS);
+const AUTO_EXECUTE_WINDOW_MS =
+  Number.isFinite(parsedAutoWindow) && parsedAutoWindow >= 0
+    ? parsedAutoWindow
+    : 1000;
+
+const pendingAutoSignals = [];
+const pendingAutoSignalKeys = new Set();
+let pendingAutoTimer = null;
+
+function cloneForExecution(signal) {
+  try {
+    if (typeof structuredClone === "function") {
+      return structuredClone(signal);
+    }
+  } catch (err) {
+    logError("autoExecute.clone", err);
+  }
+  try {
+    return JSON.parse(JSON.stringify(signal));
+  } catch (err) {
+    logError("autoExecute.cloneFallback", err);
+    return { ...signal };
+  }
+}
+
+function getAutoSignalKey(signal) {
+  return (
+    signal.signalId ||
+    signal.algoSignal?.signalId ||
+    `${signal.stock || signal.symbol}-${signal.pattern || "unknown"}-${
+      signal.direction || "NA"
+    }-${signal.generatedAt || signal.time || Date.now()}`
+  );
+}
+
+async function flushAutoExecuteQueue() {
+  if (!pendingAutoSignals.length) return;
+  const items = pendingAutoSignals.splice(0, pendingAutoSignals.length);
+  pendingAutoSignalKeys.clear();
+  const signals = items.map((item) => item.signal);
+  try {
+    const { rankAndExecute } = await import("./scanner.js");
+    const result = await rankAndExecute(signals);
+    const isObjectResult =
+      result && typeof result === "object" && !Array.isArray(result);
+    const candidate = isObjectResult
+      ? result.top || result.candidate || null
+      : result;
+    const orders = isObjectResult && "orders" in result ? result.orders : null;
+    const reason = isObjectResult && "reason" in result ? result.reason : null;
+    if (orders) return; // success already logged downstream
+    if (candidate) {
+      const symbol = candidate.stock || candidate.symbol || "unknown";
+      const strategy =
+        candidate.pattern || candidate.strategy || candidate.strategyName || "";
+      let status = "top candidate";
+      if (reason === "margin") status = "blocked by margin for";
+      else if (reason === "validation") status = "failed validation for";
+      else if (reason === "exposure") status = "blocked by exposure for";
+      else if (reason === "execution-failed")
+        status = "execution failed for";
+      console.log(
+        `🤖 Auto execution evaluated ${signals.length} signal(s); ${status} ${symbol}${
+          strategy ? ` (${strategy})` : ""
+        }`
+      );
+    } else {
+      console.log(
+        `🤖 Auto execution evaluated ${signals.length} signal(s); none qualified`
+      );
+    }
+  } catch (err) {
+    logError("autoExecute.flush", err);
+  }
+}
+
+function scheduleAutoExecution(signal) {
+  if (!AUTO_EXECUTE_ENABLED) return;
+  const key = getAutoSignalKey(signal);
+  if (key && pendingAutoSignalKeys.has(key)) return;
+  if (key) pendingAutoSignalKeys.add(key);
+  pendingAutoSignals.push({ key, signal: cloneForExecution(signal) });
+  const triggerFlush = () => {
+    pendingAutoTimer = null;
+    flushAutoExecuteQueue().catch((err) => logError("autoExecute.run", err));
+  };
+  if (pendingAutoTimer) return;
+  if (AUTO_EXECUTE_WINDOW_MS > 0) {
+    pendingAutoTimer = setTimeout(triggerFlush, AUTO_EXECUTE_WINDOW_MS);
+    pendingAutoTimer.unref?.();
+  } else {
+    triggerFlush();
+  }
+}
 // Allow io to be optional and fall back to the initialized global socket
 async function emitUnifiedSignal(signal, source, io = globalIO) {
   const key = `${signal.stock}-${signal.pattern}-${signal.direction}`;
@@ -1382,6 +1482,7 @@ async function emitUnifiedSignal(signal, source, io = globalIO) {
   }
   logTrade(signal);
   const persistInfo = await persistThenNotify(signal);
+  scheduleAutoExecution(signal);
   incrementMetric("emitted");
   const ctx = (typeof marketContext === "object" && marketContext) || {};
   logSignalCreated(signal, {

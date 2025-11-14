@@ -734,68 +734,89 @@ export async function rankAndExecute(signals = []) {
   const { selectTopSignal } = await import("./signalRanker.js");
   const { validatePreExecution } = await import("./riskValidator.js");
   const top = selectTopSignal(signals);
-  if (top) {
-    const { refreshAccountBalance } = await import("./account.js");
-    await refreshAccountBalance();
-    accountBalance = getAccountBalance();
-    // final pre-exec gate (uses robust spread% logic)
-    const ok = validatePreExecution(top, {
-      avgAtr: top.atr,
-      indexTrend: top.isUptrend ? "up" : top.isDowntrend ? "down" : "sideways",
-      timeSinceSignal: 0,
-      volume: top.liquidity ?? 0,
-      currentPrice: top.entry,
-      maxSpread: FILTERS.maxSpread,
-      maxSpreadPct: FILTERS.maxSpreadPct,
-      winrate:
-        marketContext?.strategyWinrates?.[top.strategy] ??
-        marketContext?.winrate ??
-        0,
-      costBuffer:
-        top.costBufferApplied ??
-        top.costBuffer ??
-        marketContext?.costBuffer ??
-        riskDefaults.costBuffer,
-      slippage: top.slippage ?? marketContext?.slippage ?? 0,
-      spread: top.spread ?? marketContext?.spread ?? 0,
-      support: top.support,
-      resistance: top.resistance,
-    });
-    if (!ok) return null;
-    const requiredMargin = calculateRequiredMargin({
-      price: top.entry,
-      qty: top.qty,
-    });
-    const tradeValue = top.entry * top.qty;
-    const sector = getSector(top.stock || top.symbol);
-    const exposureOk =
-      openPositions.size < MAX_OPEN_TRADES &&
-      checkExposureLimits({
-        symbol: top.stock || top.symbol,
-        tradeValue,
-        sector,
-        totalCapital: accountBalance,
-        sectorCaps: SECTOR_CAPS,
-      });
-    if (!exposureOk) {
-      console.log(
-        `[PORTFOLIO] Exposure limits blocked trade for ${
-          top.stock || top.symbol
-        }`
-      );
-      return null;
-    }
-    if (accountBalance >= requiredMargin) {
-      await sendToExecution(top);
-    } else {
-      console.log(
-        `[SKIP] Insufficient margin. Required ${requiredMargin}, available ${accountBalance} for ${
-          top.stock || top.symbol
-        }`
-      );
-    }
+  const result = {
+    candidate: top || null,
+    top: null,
+    orders: null,
+    reason: null,
+  };
+  if (!top) return result;
+
+  const { refreshAccountBalance } = await import("./account.js");
+  await refreshAccountBalance();
+  accountBalance = getAccountBalance();
+  // final pre-exec gate (uses robust spread% logic)
+  const ok = validatePreExecution(top, {
+    avgAtr: top.atr,
+    indexTrend: top.isUptrend ? "up" : top.isDowntrend ? "down" : "sideways",
+    timeSinceSignal: 0,
+    volume: top.liquidity ?? 0,
+    currentPrice: top.entry,
+    maxSpread: FILTERS.maxSpread,
+    maxSpreadPct: FILTERS.maxSpreadPct,
+    winrate:
+      marketContext?.strategyWinrates?.[top.strategy] ??
+      marketContext?.winrate ??
+      0,
+    costBuffer:
+      top.costBufferApplied ??
+      top.costBuffer ??
+      marketContext?.costBuffer ??
+      riskDefaults.costBuffer,
+    slippage: top.slippage ?? marketContext?.slippage ?? 0,
+    spread: top.spread ?? marketContext?.spread ?? 0,
+    support: top.support,
+    resistance: top.resistance,
+  });
+  if (!ok) {
+    result.reason = "validation";
+    return result;
   }
-  return top;
+  const requiredMargin = calculateRequiredMargin({
+    price: top.entry,
+    qty: top.qty,
+  });
+  const tradeValue = top.entry * top.qty;
+  const sector = getSector(top.stock || top.symbol);
+  const exposureOk =
+    openPositions.size < MAX_OPEN_TRADES &&
+    checkExposureLimits({
+      symbol: top.stock || top.symbol,
+      tradeValue,
+      sector,
+      totalCapital: accountBalance,
+      sectorCaps: SECTOR_CAPS,
+    });
+  if (!exposureOk) {
+    console.log(
+      `[PORTFOLIO] Exposure limits blocked trade for ${
+        top.stock || top.symbol
+      }`
+    );
+    result.reason = "exposure";
+    return result;
+  }
+  if (accountBalance >= requiredMargin) {
+    const execution = await sendToExecution(top);
+    if (execution) {
+      const label = top.pattern || top.strategy || top.strategyName || "signal";
+      console.log(
+        `[AUTO-EXEC] Submitted ${top.stock || top.symbol} via ${label}`
+      );
+      result.top = top;
+      result.orders = execution;
+    } else {
+      result.reason = "execution-failed";
+    }
+  } else {
+    console.log(
+      `[SKIP] Insufficient margin. Required ${requiredMargin}, available ${accountBalance} for ${
+        top.stock || top.symbol
+      }`
+    );
+    result.reason = "margin";
+  }
+  return result;
 }
 
 export { getAccountBalance, initAccountBalance };
