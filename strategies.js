@@ -9,6 +9,7 @@ import {
   calculateBollingerBands,
   getATR,
   computeFeatures,
+  calculateSMA,
 } from "./featureEngine.js";
 import { confirmRetest, detectAllPatterns, sanitizeCandles } from "./util.js";
 import { validateATRStopLoss, adjustStopLoss } from "./riskValidator.js";
@@ -124,15 +125,25 @@ function inIstRange(ts, start, end) {
   const m = istMinutes(ts);
   return m >= start && m < end;
 }
+
+// Normalize a candle's time to ms since epoch (prefers .ts, then Date -> ms)
+function getTimeMs(candle) {
+  if (!candle) return undefined;
+  if (Number.isFinite(candle.ts)) return candle.ts;
+  if (candle.timestamp instanceof Date) return candle.timestamp.getTime();
+  if (Number.isFinite(candle.timestamp)) return candle.timestamp;
+  return undefined;
+}
 const PREOPEN_START = 9 * 60;
 const PREOPEN_END = 9 * 60 + 15;
 const MARKET_OPEN = PREOPEN_END;
 const MARKET_CLOSE = 15 * 60 + 30;
 
 function rangeBetween(candles, startMin, endMin) {
-  const window = candles.filter(
-    (c) => c.timestamp != null && inIstRange(c.timestamp, startMin, endMin)
-  );
+  const window = candles.filter((c) => {
+    const t = getTimeMs(c);
+    return Number.isFinite(t) && inIstRange(t, startMin, endMin);
+  });
   if (!window.length) return null;
   return {
     high: Math.max(...window.map((c) => c.high)),
@@ -366,25 +377,27 @@ function detectInsideBarBreakout(candles, _ctx = {}, config = DEFAULT_CONFIG) {
   return null;
 }
 
-function detectSupportResistancePingPong(candles) {
+function detectSupportResistancePingPong(candles, ctx = {}) {
   if (candles.length < 6) return null;
   const highs = candles.slice(-6).map((c) => c.high);
   const lows = candles.slice(-6).map((c) => c.low);
   const high = Math.max(...highs);
   const low = Math.min(...lows);
   const last = candles.at(-1);
-  if (last.low <= low * 1.001 || last.high >= high * 0.999) {
+  const atr = ctx.atr ?? ctx.features?.atr ?? getATR(candles, 14) ?? 0;
+  const eps = Math.max((high - low) * 0.002, atr * 0.1);
+  if (Math.abs(last.low - low) <= eps || Math.abs(last.high - high) <= eps) {
     return { name: "Support-Resistance Ping Pong", confidence: 0.5 };
   }
   return null;
 }
 
 function detectVWReversalZone(candles, _ctx = {}, config = DEFAULT_CONFIG) {
-  if (candles.length < 10) return null;
+  if (candles.length < Math.max(10, config.vwapWindow)) return null;
   const vwap =
     config.vwapMode === "session"
       ? calculateAnchoredVWAP(candles)
-      : calculateVWAP(candles.slice(-10));
+      : calculateVWAP(candles.slice(-config.vwapWindow));
   const last = candles.at(-1);
   const deviation = Math.abs(last.close - vwap) / vwap;
   if (
@@ -397,9 +410,10 @@ function detectVWReversalZone(candles, _ctx = {}, config = DEFAULT_CONFIG) {
 }
 
 function detectGapOpeningRangeBreakout(candles) {
-  const opening = candles.filter((c) =>
-    c.timestamp != null && inIstRange(c.timestamp, MARKET_OPEN, MARKET_OPEN + 15)
-  );
+  const opening = candles.filter((c) => {
+    const t = getTimeMs(c);
+    return Number.isFinite(t) && inIstRange(t, MARKET_OPEN, MARKET_OPEN + 15);
+  });
   if (!opening.length) return null;
   const first = opening[0];
   const rangeHigh = Math.max(...opening.map((c) => c.high));
@@ -533,11 +547,11 @@ export function detectAndScorePattern(
 }
 
 function detectVwapBounce(candles, _ctx = {}, config = DEFAULT_CONFIG) {
-  if (candles.length < 10) return null;
+  if (candles.length < Math.max(10, config.vwapWindow)) return null;
   const vwap =
     config.vwapMode === "session"
       ? calculateAnchoredVWAP(candles)
-      : calculateVWAP(candles.slice(-10));
+      : calculateVWAP(candles.slice(-config.vwapWindow));
   const last = candles.at(-1);
   const prev = candles.at(-2);
   const deviation = Math.abs(prev.low - vwap) / vwap;
@@ -564,13 +578,15 @@ function detectFlatBaseBreakout(candles) {
 }
 
 function detectPreMarketBreakout(candles) {
-  const pre = candles.filter((c) =>
-    c.timestamp != null && inIstRange(c.timestamp, PREOPEN_START, PREOPEN_END)
-  );
+  const pre = candles.filter((c) => {
+    const t = getTimeMs(c);
+    return Number.isFinite(t) && inIstRange(t, PREOPEN_START, PREOPEN_END);
+  });
   if (!pre.length) return null;
   const rangeHigh = Math.max(...pre.map((c) => c.high));
   const last = candles.at(-1);
-  if (last?.timestamp != null && istMinutes(last.timestamp) >= MARKET_OPEN && last.close > rangeHigh) {
+  const t = getTimeMs(last);
+  if (Number.isFinite(t) && istMinutes(t) >= MARKET_OPEN && last.close > rangeHigh) {
     return { name: "Pre-Market High/Low Breakout", confidence: 0.55 };
   }
   return null;
@@ -589,10 +605,10 @@ function detectTrendReversalCombo(candles) {
   return null;
 }
 
-function detectAtrExpansionBreakout(candles) {
+function detectAtrExpansionBreakout(candles, ctx = {}) {
   if (candles.length < 15) return null;
-  const atr = getATR(candles, 14);
-  const prevAtr = getATR(candles.slice(0, -1), 14);
+  const atr = ctx.atr ?? getATR(candles, 14);
+  const prevAtr = ctx.prevAtr ?? getATR(candles.slice(0, -1), 14);
   const last = candles.at(-1);
   if (atr > prevAtr * 1.2 && last.close > highest(candles, 5)) {
     return { name: "ATR Expansion Breakout", confidence: 0.6 };
@@ -713,15 +729,17 @@ function detectCompressionBreakout(candles) {
 }
 
 function detectOpeningRangeFakeout(candles) {
-  const opening = candles.filter((c) =>
-    c.timestamp != null && inIstRange(c.timestamp, MARKET_OPEN, MARKET_OPEN + 15)
-  );
+  const opening = candles.filter((c) => {
+    const t = getTimeMs(c);
+    return Number.isFinite(t) && inIstRange(t, MARKET_OPEN, MARKET_OPEN + 15);
+  });
   if (!opening.length) return null;
   const rangeHigh = Math.max(...opening.map((c) => c.high));
   const last = candles.at(-1);
+  const t = getTimeMs(last);
   if (
-    last?.timestamp != null &&
-    istMinutes(last.timestamp) >= MARKET_OPEN + 15 &&
+    Number.isFinite(t) &&
+    istMinutes(t) >= MARKET_OPEN + 15 &&
     last.high > rangeHigh &&
     last.close < rangeHigh
   ) {
@@ -744,7 +762,7 @@ function detectInsideOutsideInside(candles) {
 function detect50SmaAnchor(candles) {
   if (candles.length < 50) return null;
   const closes = candles.map((c) => c.close);
-  const sma50 = calculateEMA(closes, 50);
+  const sma50 = calculateSMA(closes, 50);
   const last = candles.at(-1);
   const prev = candles.at(-2);
   if (prev.low <= sma50 && last.close > prev.close) {
@@ -832,9 +850,9 @@ function detectBreakoutFailureReversal(candles) {
   return null;
 }
 
-function detectAtrRangeExpansion(candles) {
+function detectAtrRangeExpansion(candles, ctx = {}) {
   if (candles.length < 15) return null;
-  const atr = getATR(candles, 14);
+  const atr = ctx.atr ?? getATR(candles, 14);
   const last = candles.at(-1);
   if (!last || atr <= 0) return null;
   const range = last.high - last.low;
@@ -1556,15 +1574,17 @@ function detectEventVolatilityTrap(candles) {
 }
 
 function detectOpeningRangeReversal(candles) {
-  const opening = candles.filter((c) =>
-    c.timestamp != null && inIstRange(c.timestamp, MARKET_OPEN, MARKET_OPEN + 30)
-  );
+  const opening = candles.filter((c) => {
+    const t = getTimeMs(c);
+    return Number.isFinite(t) && inIstRange(t, MARKET_OPEN, MARKET_OPEN + 30);
+  });
   if (!opening.length) return null;
   const rangeHigh = Math.max(...opening.map((c) => c.high));
   const rangeLow = Math.min(...opening.map((c) => c.low));
   const last = candles.at(-1);
-  if (last?.timestamp == null) return null;
-  const m = istMinutes(last.timestamp);
+  const t = getTimeMs(last);
+  if (!Number.isFinite(t)) return null;
+  const m = istMinutes(t);
   if (m >= MARKET_OPEN + 30 && last.high > rangeHigh && last.close < rangeHigh) {
     return { name: "Opening Range Reversal (ORR)", confidence: 0.55 };
   }
@@ -1632,9 +1652,12 @@ function detectMaSlopeAcceleration(candles) {
   return null;
 }
 
-function detectVwapRejectionBounce(candles) {
-  if (candles.length < 10) return null;
-  const vwap = calculateVWAP(candles.slice(-10));
+function detectVwapRejectionBounce(candles, _ctx = {}, config = DEFAULT_CONFIG) {
+  if (candles.length < Math.max(10, config.vwapWindow)) return null;
+  const vwap =
+    config.vwapMode === "session"
+      ? calculateAnchoredVWAP(candles)
+      : calculateVWAP(candles.slice(-config.vwapWindow));
   const last = candles.at(-1);
   const prev = candles.at(-2);
   if (prev.close < vwap && last.close > vwap && last.low > prev.low) {
@@ -1824,7 +1847,7 @@ function computeRegimeFit(type = "", regime) {
 
 function computeTimeOfDayScore(ts) {
   if (ts == null) return 0.8;
-  const m = istMinutes(ts);
+  const m = istMinutes(ts instanceof Date ? ts.getTime() : ts);
   if (m >= MARKET_OPEN + 15 && m <= MARKET_OPEN + 90) return 1;
   if (m <= MARKET_CLOSE - 60 && m > MARKET_OPEN + 90) return 0.8;
   return 0.6;
@@ -1836,7 +1859,7 @@ function computeDetectorScore(raw, candles, features, context, entry, stopLoss, 
   const rvolScore = mapRvolScore(context.rvol ?? features.rvol);
   const riskQuality = computeRiskQuality(entry, stopLoss, atr);
   const regimeFit = computeRegimeFit(raw.type || raw.name, context.regime);
-  const todScore = computeTimeOfDayScore(candles.at(-1)?.timestamp);
+  const todScore = computeTimeOfDayScore(getTimeMs(candles.at(-1)));
   const rsScore = typeof (context.rsScore ?? features.rsScore) === "number"
     ? Math.max(0, Math.min(context.rsScore ?? features.rsScore, 1))
     : 0.5;
@@ -1999,8 +2022,8 @@ export function evaluateStrategies(
       slAtrMultiple: cfg.slAtrMultiple * (cfg.eventSlAtrMultiplier || 1),
     };
   }
-  const lastTs = clean.at(-1)?.timestamp;
-  if (lastTs != null) {
+  const lastTs = getTimeMs(clean.at(-1));
+  if (Number.isFinite(lastTs)) {
     const m = istMinutes(lastTs);
     if (m < MARKET_OPEN) {
       if (!cfg.allowPreOpenEntries) return [];
@@ -2917,7 +2940,8 @@ function detectAnchoredVwapBreakout(candles) {
     anchored &&
     last.close > anchored &&
     prev.close <= anchored &&
-    Math.abs(anchored - ema200) / ema200 < 0.01
+    Number.isFinite(ema200) &&
+    Math.abs(anchored - ema200) / Math.max(1e-9, Math.abs(ema200)) < 0.01
   ) {
     return { name: 'Anchored VWAP Breakout', confidence: 0.6 };
   }
