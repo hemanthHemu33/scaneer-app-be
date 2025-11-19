@@ -17,6 +17,7 @@ A real‑time scanner and trade‑decision engine for the Indian stock market. I
 * **Portfolio context** to avoid conflicts and cap exposure
 * **Audit trail** with optional encrypted logs + Telegram alerts
 * **REST + WebSocket** interfaces for administration and live dashboards
+* **Auto-trading controls** with configurable intraday guardrails (confidence floor, swing-score floor, max open trades)
 
 ---
 
@@ -113,6 +114,26 @@ Add a symbol to the tracked universe.
 ### GET `/stockSymbols`
 
 List tracked symbols.
+
+### GET `/autotrader/config`
+
+Return the current auto-trading guardrails (enabled flag, minimum confidence, minimum swing score, max open trades, intraday enforcement).
+
+### POST `/autotrader/config`
+
+Update intraday auto-trading controls at runtime.
+
+```json
+{
+  "enabled": true,
+  "minConfidence": 0.65,
+  "minSwingScore": 0.7,
+  "maxOpenTrades": 3,
+  "intradayOnly": true
+}
+```
+
+The backend now evaluates every signal with the `swingTrader` module. It blends confidence, trend alignment, RR, liquidity, and time-of-day into a normalized swing score (0–1). Only signals that clear both the confidence and swing-score floors are queued for auto-execution, ensuring the system only trades high-conviction intraday swings.
 
 ### DELETE `/stockSymbols/:symbol`
 

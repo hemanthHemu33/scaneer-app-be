@@ -43,6 +43,7 @@ import { startExitMonitor, recordExit as logExit } from "./exitManager.js";
 import { logTrade as recordTrade, logOrderUpdate } from "./tradeLogger.js";
 import { getAccountBalance, initAccountBalance } from "./account.js";
 import { marketContext } from "./smartStrategySelector.js";
+import { evaluateAutoTradeEligibility } from "./autoTrader.js";
 dotenv.config();
 
 import db from "./db.js"; // 🧠 Import database module for future use
@@ -1318,10 +1319,6 @@ async function flushTickBufferToDB() {
 
 const lastSignalMap = {};
 
-const autoExecFlag = String(process.env.AUTO_EXECUTE ?? "true").toLowerCase();
-const AUTO_EXECUTE_ENABLED =
-  process.env.NODE_ENV !== "test" &&
-  !["false", "0", "off", "disabled"].includes(autoExecFlag);
 const parsedAutoWindow = Number(process.env.AUTO_EXECUTE_WINDOW_MS);
 const AUTO_EXECUTE_WINDOW_MS =
   Number.isFinite(parsedAutoWindow) && parsedAutoWindow >= 0
@@ -1384,6 +1381,9 @@ async function flushAutoExecuteQueue() {
       else if (reason === "exposure") status = "blocked by exposure for";
       else if (reason === "execution-failed")
         status = "execution failed for";
+      else if (reason === "confidence")
+        status = "insufficient confidence for";
+      else if (reason === "swing") status = "no swing edge for";
       console.log(
         `🤖 Auto execution evaluated ${signals.length} signal(s); ${status} ${symbol}${
           strategy ? ` (${strategy})` : ""
@@ -1400,7 +1400,16 @@ async function flushAutoExecuteQueue() {
 }
 
 function scheduleAutoExecution(signal) {
-  if (!AUTO_EXECUTE_ENABLED) return;
+  const eligibility = evaluateAutoTradeEligibility(signal);
+  if (!eligibility.ok) {
+    const symbol = signal.stock || signal.symbol || "unknown";
+    if (eligibility.reason !== "disabled") {
+      console.log(
+        `🤖 Auto execution skipped for ${symbol}: ${eligibility.reason}`
+      );
+    }
+    return;
+  }
   const key = getAutoSignalKey(signal);
   if (key && pendingAutoSignalKeys.has(key)) return;
   if (key) pendingAutoSignalKeys.add(key);

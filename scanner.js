@@ -38,6 +38,8 @@ import { signalQualityScore, applyPenaltyConditions } from "./confidence.js";
 import { sendToExecution } from "./orderExecution.js";
 import { initAccountBalance, getAccountBalance } from "./account.js";
 import { calculateRequiredMargin } from "./util.js";
+import { getAutoTradingConfig } from "./autoTrader.js";
+import { scoreSwingOpportunity } from "./swingTrader.js";
 import { buildSignal } from "./signalBuilder.js";
 import { getSector } from "./sectors.js";
 import { recordSectorSignal } from "./sectorSignals.js";
@@ -714,6 +716,9 @@ export async function analyzeCandles(
     signal.confidence = penaltyAdjusted;
     signal.confidenceScore = penaltyAdjusted;
     signal.strategy = displayStrategy;
+    const swingSummary = scoreSwingOpportunity(signal);
+    signal.swingScore = swingSummary.score;
+    signal.swingBreakdown = swingSummary.breakdown;
 
     const sector = getSector(symbol);
     recordSectorSignal(sector, signal.direction);
@@ -741,6 +746,31 @@ export async function rankAndExecute(signals = []) {
     reason: null,
   };
   if (!top) return result;
+  const autoConfig = getAutoTradingConfig();
+  const effectiveConfidence =
+    top.confidence ?? top.confidenceScore ?? top.algoSignal?.confidence;
+  if (
+    autoConfig.minConfidence !== null &&
+    effectiveConfidence !== undefined &&
+    effectiveConfidence < autoConfig.minConfidence
+  ) {
+    result.reason = "confidence";
+    return result;
+  }
+
+  const swingSummary =
+    typeof top.swingScore === "number"
+      ? { score: top.swingScore, breakdown: top.swingBreakdown }
+      : scoreSwingOpportunity(top);
+  top.swingScore = swingSummary.score;
+  top.swingBreakdown = swingSummary.breakdown;
+  if (
+    autoConfig.minSwingScore !== null &&
+    top.swingScore < autoConfig.minSwingScore
+  ) {
+    result.reason = "swing";
+    return result;
+  }
 
   const { refreshAccountBalance } = await import("./account.js");
   await refreshAccountBalance();
@@ -778,8 +808,12 @@ export async function rankAndExecute(signals = []) {
   });
   const tradeValue = top.entry * top.qty;
   const sector = getSector(top.stock || top.symbol);
+  const maxOpen =
+    autoConfig.maxOpenTrades && autoConfig.maxOpenTrades > 0
+      ? Math.min(autoConfig.maxOpenTrades, MAX_OPEN_TRADES)
+      : MAX_OPEN_TRADES;
   const exposureOk =
-    openPositions.size < MAX_OPEN_TRADES &&
+    openPositions.size < maxOpen &&
     checkExposureLimits({
       symbol: top.stock || top.symbol,
       tradeValue,
@@ -800,8 +834,18 @@ export async function rankAndExecute(signals = []) {
     const execution = await sendToExecution(top);
     if (execution) {
       const label = top.pattern || top.strategy || top.strategyName || "signal";
+      const swingPct =
+        top.swingScore !== undefined
+          ? `${Math.round(top.swingScore * 1000) / 10}%`
+          : "n/a";
+      const confidencePct =
+        effectiveConfidence !== undefined
+          ? `${Math.round(effectiveConfidence * 1000) / 10}%`
+          : "n/a";
       console.log(
-        `[AUTO-EXEC] Submitted ${top.stock || top.symbol} via ${label}`
+        `[AUTO-EXEC] Submitted ${
+          top.stock || top.symbol
+        } via ${label} (confidence ${confidencePct}, swing ${swingPct})`
       );
       result.top = top;
       result.orders = execution;

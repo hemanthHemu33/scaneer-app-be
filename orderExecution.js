@@ -347,6 +347,7 @@ export async function placeOrder(signal, maxRetries = 3) {
       normalizedSignal.signalId || normalizedSignal.algoSignal?.signalId,
     confidence:
       normalizedSignal.confidence ?? normalizedSignal.confidenceScore,
+    swingScore: normalizedSignal.swingScore ?? null,
     signal: normalizedSignal,
   };
 

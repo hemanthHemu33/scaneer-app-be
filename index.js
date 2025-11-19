@@ -49,6 +49,10 @@ import {
 import { selectTopSignal } from "./signalRanker.js";
 import { logTrade } from "./tradeLogger.js";
 import { logError } from "./logger.js";
+import {
+  getAutoTradingConfig,
+  updateAutoTradingConfig,
+} from "./autoTrader.js";
 
 const apiSecret = process.env.KITE_API_SECRET;
 
@@ -146,6 +150,15 @@ app.get("/health", async (req, res) => {
     instrumentTokenCount,
     lastTickTs,
   });
+});
+
+app.get("/autotrader/config", (req, res) => {
+  res.json({ status: "ok", config: getAutoTradingConfig() });
+});
+
+app.post("/autotrader/config", (req, res) => {
+  const config = updateAutoTradingConfig(req.body || {});
+  res.json({ status: "ok", config });
 });
 
 // ADD STOCK SYMBOLS ENDPOINT
