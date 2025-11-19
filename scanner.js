@@ -39,7 +39,6 @@ import { sendToExecution } from "./orderExecution.js";
 import { initAccountBalance, getAccountBalance } from "./account.js";
 import { calculateRequiredMargin } from "./util.js";
 import { getAutoTradingConfig } from "./autoTrader.js";
-import { scoreSwingOpportunity } from "./swingTrader.js";
 import { buildSignal } from "./signalBuilder.js";
 import { getSector } from "./sectors.js";
 import { recordSectorSignal } from "./sectorSignals.js";
@@ -755,20 +754,6 @@ export async function rankAndExecute(signals = []) {
     effectiveConfidence < autoConfig.minConfidence
   ) {
     result.reason = "confidence";
-    return result;
-  }
-
-  const swingSummary =
-    typeof top.swingScore === "number"
-      ? { score: top.swingScore, breakdown: top.swingBreakdown }
-      : scoreSwingOpportunity(top);
-  top.swingScore = swingSummary.score;
-  top.swingBreakdown = swingSummary.breakdown;
-  if (
-    autoConfig.minSwingScore !== null &&
-    top.swingScore < autoConfig.minSwingScore
-  ) {
-    result.reason = "swing";
     return result;
   }
 
