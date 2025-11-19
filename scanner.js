@@ -715,6 +715,9 @@ export async function analyzeCandles(
     signal.confidence = penaltyAdjusted;
     signal.confidenceScore = penaltyAdjusted;
     signal.strategy = displayStrategy;
+    const swingSummary = scoreSwingOpportunity(signal);
+    signal.swingScore = swingSummary.score;
+    signal.swingBreakdown = swingSummary.breakdown;
 
     const sector = getSector(symbol);
     recordSectorSignal(sector, signal.direction);
@@ -816,8 +819,18 @@ export async function rankAndExecute(signals = []) {
     const execution = await sendToExecution(top);
     if (execution) {
       const label = top.pattern || top.strategy || top.strategyName || "signal";
+      const swingPct =
+        top.swingScore !== undefined
+          ? `${Math.round(top.swingScore * 1000) / 10}%`
+          : "n/a";
+      const confidencePct =
+        effectiveConfidence !== undefined
+          ? `${Math.round(effectiveConfidence * 1000) / 10}%`
+          : "n/a";
       console.log(
-        `[AUTO-EXEC] Submitted ${top.stock || top.symbol} via ${label}`
+        `[AUTO-EXEC] Submitted ${
+          top.stock || top.symbol
+        } via ${label} (confidence ${confidencePct}, swing ${swingPct})`
       );
       result.top = top;
       result.orders = execution;
