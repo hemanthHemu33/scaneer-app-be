@@ -1886,10 +1886,17 @@ function normalizeResult(
   const closes = features.closes || candles.map((c) => c.close);
   const price = raw.entry ?? closes.at(-1);
   const dir = raw.direction || inferDirectionByName(raw.name || raw.type) || "Long";
-  const usedAtr = Math.min(
-    atr || 0,
-    (context.avgAtr || atr || 0) * config.riskAtrMaxMultiple
-  );
+  const fallbackAtr =
+    (Number.isFinite(atr) && atr > 0
+      ? atr
+      : Number.isFinite(context.avgAtr) && context.avgAtr > 0
+      ? context.avgAtr
+      : Math.max((Number(price) || 0) * 0.002, 0.01));
+  const riskCapBase =
+    Number.isFinite(context.avgAtr) && context.avgAtr > 0
+      ? context.avgAtr
+      : fallbackAtr;
+  const usedAtr = Math.min(fallbackAtr, riskCapBase * config.riskAtrMaxMultiple);
   const entry = price;
   let stopLoss =
     raw.stopLoss !== undefined

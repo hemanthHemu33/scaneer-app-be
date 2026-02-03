@@ -4,11 +4,20 @@ import { logSignalExpired, logSignalMutation } from './auditLogger.js';
 import db from './db.js';
 import { logError } from './logger.js';
 
+const DEFAULT_EXPIRY_MINUTES = Number(process.env.SIGNAL_DEFAULT_EXPIRY_MINUTES) || 5;
+
+function resolveExpiryMs(signal) {
+  const candidate = signal.expiresAt || signal.algoSignal?.expiresAt;
+  const resolved = candidate ? new Date(candidate).getTime() : NaN;
+  if (Number.isFinite(resolved)) return resolved;
+  return Date.now() + DEFAULT_EXPIRY_MINUTES * 60 * 1000;
+}
+
 export async function addSignal(signal) {
   const symbol = signal.stock || signal.symbol;
   const direction = signal.direction || (signal.side === 'buy' ? 'Long' : 'Short');
   const confidence = signal.confidence || signal.confidenceScore || 0;
-  const expiresAt = new Date(signal.expiresAt || signal.algoSignal?.expiresAt).getTime();
+  const expiresAt = resolveExpiryMs(signal);
   const signalId = signal.signalId || signal.algoSignal?.signalId || `${symbol}-${Date.now()}`;
 
   let symbolMap = activeSignals.get(symbol);
@@ -112,7 +121,11 @@ export async function checkExpiries(now = Date.now()) {
         } catch (err) {
           logError('DB expiry update failed', err);
         }
+        sigMap.delete(id);
       }
+    }
+    if (sigMap.size === 0) {
+      activeSignals.delete(symbol);
     }
   }
 }
@@ -122,4 +135,3 @@ if (process.env.NODE_ENV !== 'test') {
   expiryInterval = setInterval(() => checkExpiries(), 60 * 1000);
 }
 export { expiryInterval };
-

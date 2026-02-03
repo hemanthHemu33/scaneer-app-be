@@ -124,6 +124,8 @@ export function ingestTick({ token, symbol, tick }) {
   if (!tokenStr || !symbol) return;
   const ts = tick.timestamp || tick.last_trade_time || Date.now();
   const minuteMs = getMinuteStart(ts);
+  const cutoff = Date.now() - WATERMARK_MS - MINUTE_MS;
+  if (minuteMs <= cutoff) return;
   const buckets = ensureTokenBuckets(tokenStr);
   if (!buckets.has(minuteMs)) {
     buckets.set(minuteMs, {
