@@ -15,7 +15,7 @@ function toDateSafe(v) {
     const d2 = new Date(v.replace(" ", "T"));
     if (!Number.isNaN(+d2)) return d2;
   }
-  return new Date(); // last resort (shouldn't happen often)
+  return null;
 }
 
 function minuteKey(ts) {
@@ -26,13 +26,15 @@ function minuteKey(ts) {
 
 function normalizeCandle(c) {
   const ts = c.timestamp ?? c.date ?? c.ts ?? c.minute ?? Date.now();
+  const timestamp = toDateSafe(ts);
+  if (!timestamp) return null;
   return {
     open: Number(c.open),
     high: Number(c.high),
     low: Number(c.low),
     close: Number(c.close),
     volume: Number(c.volume) || 0,
-    timestamp: toDateSafe(ts),
+    timestamp,
   };
 }
 
@@ -56,6 +58,7 @@ export async function ensureCandleHistory(token) {
       const mapByMin = new Map();
       for (const r of raw) {
         const c = normalizeCandle({ ...r, timestamp: r.date ?? r.timestamp });
+        if (!c) continue;
         mapByMin.set(minuteKey(c.timestamp), c);
       }
       const arr = Array.from(mapByMin.values()).sort(
@@ -75,6 +78,7 @@ export async function ensureCandleHistory(token) {
 export function pushCandle(token, candle, max = HISTORY_CAP) {
   const tokenStr = String(token);
   const c = normalizeCandle(candle);
+  if (!c) return candleHistory[tokenStr] || [];
   const key = minuteKey(c.timestamp);
 
   const arr = candleHistory[tokenStr] || (candleHistory[tokenStr] = []);

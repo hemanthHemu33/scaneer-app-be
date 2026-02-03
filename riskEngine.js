@@ -200,7 +200,6 @@ export function isSignalValid(signal, ctx = {}) {
     riskState.lastResetMonth = month;
   }
 
-  riskState.signalCount += 1;
   if (riskState.systemPaused) return recordRejection("systemPaused");
   const bucketMs = Number.isFinite(ctx.timeBucketMs)
     ? ctx.timeBucketMs
@@ -216,14 +215,8 @@ export function isSignalValid(signal, ctx = {}) {
     return recordRejection("tooManySimultaneousSignals", {
       max: maxSimul,
     });
-  riskState.timeBuckets.set(bucket, count + 1);
-  if (riskState.timeBuckets.size > 10) {
-    for (const [k] of riskState.timeBuckets) {
-      if (k < bucket - 10) riskState.timeBuckets.delete(k);
-    }
-  }
   const maxSignals = ctx.maxSignalsPerDay ?? riskState.maxSignalsPerDay;
-  if (riskState.signalCount > maxSignals)
+  if (riskState.signalCount + 1 > maxSignals)
     return recordRejection("maxSignalsPerDay", {
       max: maxSignals,
       count: riskState.signalCount,
@@ -256,7 +249,7 @@ export function isSignalValid(signal, ctx = {}) {
     : undefined;
   if (
     Number.isFinite(floodThreshold) &&
-    riskState.signalCount > floodThreshold
+    riskState.signalCount + 1 > floodThreshold
   ) {
     const interval = Number.isFinite(ctx.signalFloodThrottleMs)
       ? ctx.signalFloodThrottleMs
@@ -918,6 +911,13 @@ export function isSignalValid(signal, ctx = {}) {
     riskState.correlationMap.set(group, now);
   }
 
+  riskState.signalCount += 1;
+  riskState.timeBuckets.set(bucket, count + 1);
+  if (riskState.timeBuckets.size > 10) {
+    for (const [k] of riskState.timeBuckets) {
+      if (k < bucket - 10) riskState.timeBuckets.delete(k);
+    }
+  }
   if (ctx.addToWatchlist) riskState.watchList.add(inst);
   return debugTrace ? { ok: true, trace: debugTrace } : true;
 }
