@@ -1381,6 +1381,9 @@ async function flushAutoExecuteQueue() {
       else if (reason === "exposure") status = "blocked by exposure for";
       else if (reason === "execution-failed")
         status = "execution failed for";
+      else if (reason === "confidence")
+        status = "insufficient confidence for";
+      else if (reason === "swing") status = "no swing edge for";
       console.log(
         `🤖 Auto execution evaluated ${signals.length} signal(s); ${status} ${symbol}${
           strategy ? ` (${strategy})` : ""
