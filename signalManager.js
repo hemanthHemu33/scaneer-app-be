@@ -3,14 +3,32 @@ import { sendNotification } from './telegram.js';
 import { logSignalExpired, logSignalMutation } from './auditLogger.js';
 import db from './db.js';
 import { logError } from './logger.js';
+import { ensureClock } from './src/backtest/clock.js';
 
 const DEFAULT_EXPIRY_MINUTES = Number(process.env.SIGNAL_DEFAULT_EXPIRY_MINUTES) || 5;
+let activeClock = ensureClock();
+
+function nowMs() {
+  return activeClock.now();
+}
+
+function nowDate() {
+  return new Date(nowMs());
+}
+
+export function setSignalManagerClock(clockLike) {
+  activeClock = ensureClock(clockLike);
+}
+
+export function resetSignalManagerClock() {
+  activeClock = ensureClock();
+}
 
 function resolveExpiryMs(signal) {
   const candidate = signal.expiresAt || signal.algoSignal?.expiresAt;
   const resolved = candidate ? new Date(candidate).getTime() : NaN;
   if (Number.isFinite(resolved)) return resolved;
-  return Date.now() + DEFAULT_EXPIRY_MINUTES * 60 * 1000;
+  return nowMs() + DEFAULT_EXPIRY_MINUTES * 60 * 1000;
 }
 
 export async function addSignal(signal) {
@@ -18,7 +36,7 @@ export async function addSignal(signal) {
   const direction = signal.direction || (signal.side === 'buy' ? 'Long' : 'Short');
   const confidence = signal.confidence || signal.confidenceScore || 0;
   const expiresAt = resolveExpiryMs(signal);
-  const signalId = signal.signalId || signal.algoSignal?.signalId || `${symbol}-${Date.now()}`;
+  const signalId = signal.signalId || signal.algoSignal?.signalId || `${symbol}-${nowMs()}`;
 
   let symbolMap = activeSignals.get(symbol);
   if (!symbolMap) {
@@ -42,7 +60,7 @@ export async function addSignal(signal) {
       try {
         await db.collection('active_signals').updateOne(
           { signalId: info.signal.signalId || info.signal.algoSignal?.signalId },
-          { $set: { status: 'cancelled', updatedAt: new Date() } },
+          { $set: { status: 'cancelled', updatedAt: nowDate() } },
           { upsert: true }
         );
       } catch (err) {
@@ -71,9 +89,9 @@ export async function addSignal(signal) {
           confidence,
           expiresAt: new Date(expiresAt),
           status: 'active',
-          updatedAt: new Date(),
+          updatedAt: nowDate(),
         },
-        $setOnInsert: { createdAt: new Date() },
+        $setOnInsert: { createdAt: nowDate() },
       },
       { upsert: true }
     );
@@ -84,7 +102,7 @@ export async function addSignal(signal) {
       direction,
       confidence,
       expiresAt: new Date(expiresAt),
-      generatedAt: signal.generatedAt ? new Date(signal.generatedAt) : new Date(),
+      generatedAt: signal.generatedAt ? new Date(signal.generatedAt) : nowDate(),
     });
     insertedSignal = result;
   } catch (err) {
@@ -97,7 +115,7 @@ export async function addSignal(signal) {
   };
 }
 
-export async function checkExpiries(now = Date.now()) {
+export async function checkExpiries(now = nowMs()) {
   for (const [symbol, sigMap] of activeSignals.entries()) {
     for (const [id, info] of sigMap.entries()) {
       if (info.status === 'active' && info.expiresAt && now > info.expiresAt) {

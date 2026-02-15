@@ -3,9 +3,27 @@
 import db from './db.js';
 import { sendNotification } from './telegram.js';
 import { applyRealizedPnL } from './account.js';
+import { ensureClock } from './src/backtest/clock.js';
 
 export const openPositions = new Map(); // symbol -> position object
 const lastExitTime = new Map();
+let activeClock = ensureClock();
+
+function nowMs() {
+  return activeClock.now();
+}
+
+function nowDate() {
+  return new Date(nowMs());
+}
+
+export function setPortfolioClock(clockLike) {
+  activeClock = ensureClock(clockLike);
+}
+
+export function resetPortfolioClock() {
+  activeClock = ensureClock();
+}
 
 // --- helpers ---
 function normSide(v) {
@@ -16,7 +34,7 @@ function normSide(v) {
 }
 
 function upsertLivePositionDoc(p) {
-  return { ...p, updatedAt: new Date() };
+  return { ...p, updatedAt: nowDate() };
 }
 
 /**
@@ -71,7 +89,7 @@ export async function trackOpenPositions(broker, cache = db) {
       entryPrice: Number.isFinite(entry) ? entry : 0,
       markPrice: Number.isFinite(mark) && mark > 0 ? mark : undefined,
       sector: p.sector || 'GEN',
-      updatedAt: new Date(),
+      updatedAt: nowDate(),
     };
     openPositions.set(symbol, position);
     docs.push(position);
@@ -192,7 +210,7 @@ export function checkExposureLimits({
 export function preventReEntry(symbol, windowMs = 15 * 60 * 1000) {
   if (openPositions.has(symbol)) return false;
   const last = lastExitTime.get(symbol);
-  if (last && Date.now() - last < windowMs) return false;
+  if (last && nowMs() - last < windowMs) return false;
   return true;
 }
 
@@ -220,7 +238,7 @@ export async function recordEntry({
     entryPrice: Number.isFinite(entryNum) ? entryNum : 0,
     sector,
     strategy,
-    updatedAt: new Date(),
+    updatedAt: nowDate(),
   };
   if (Number.isFinite(markNum) && markNum > 0) {
     position.markPrice = markNum;
@@ -239,7 +257,7 @@ export async function recordEntry({
  * @param {string} [opts.reason]
  */
 export async function recordExit(symbol, opts = {}) {
-  lastExitTime.set(symbol, Date.now());
+  lastExitTime.set(symbol, nowMs());
   const pos = openPositions.get(symbol);
   const { exitPrice, qty, fees = 0, reason = 'exit' } = opts;
   if (pos && typeof exitPrice === 'number') {
@@ -262,7 +280,7 @@ export async function recordExit(symbol, opts = {}) {
   const qtyNum = Number(qty);
   if (pos && Number.isFinite(qtyNum) && qtyNum < pos.qty) {
     pos.qty = pos.qty - qtyNum;
-    openPositions.set(symbol, { ...pos, updatedAt: new Date() });
+    openPositions.set(symbol, { ...pos, updatedAt: nowDate() });
     if (db?.collection) {
       const col = db.collection('live_positions');
       await col.updateOne(
