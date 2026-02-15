@@ -5,7 +5,8 @@
   "main": "index.js",
   "scripts": {
     "test": "node --test --experimental-test-module-mocks",
-    "start": "node index.js"
+    "start": "node index.js",
+    "backtest:run": "node scripts/bt_run.js"
   },
   "author": "",
   "license": "ISC",

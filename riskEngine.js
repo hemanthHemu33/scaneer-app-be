@@ -13,6 +13,7 @@ import {
 import { calculateStdDev, calculateZScore } from "./util.js";
 import { resolveSignalConflicts } from "./portfolioContext.js";
 import { riskDefaults } from "./riskConfig.js";
+import { ensureClock } from "./src/backtest/clock.js";
 
 // Safe defaults if riskDefaults is partial or missing keys
 const defaultConfig = {
@@ -48,6 +49,24 @@ const riskDebug = process.env.RISK_DEBUG === "true";
 function getWeekNumber(d = new Date()) {
   const oneJan = new Date(d.getFullYear(), 0, 1);
   return Math.floor((d - oneJan) / (7 * 24 * 60 * 60 * 1000));
+}
+
+let activeClock = ensureClock();
+
+export function setRiskClock(clockLike) {
+  activeClock = ensureClock(clockLike);
+}
+
+export function resetRiskClock() {
+  activeClock = ensureClock();
+}
+
+function nowMs() {
+  return activeClock.now();
+}
+
+function nowDate() {
+  return new Date(nowMs());
 }
 
 class RiskState {
@@ -95,9 +114,9 @@ class RiskState {
       maxSignalsPerDay: this.config.maxSignalsPerDay,
       signalFloodThreshold: this.config.signalFloodThreshold,
       volatilityThrottleMs: this.config.volatilityThrottleMs,
-      lastResetDay: new Date().getDate(),
-      lastResetWeek: getWeekNumber(),
-      lastResetMonth: new Date().getMonth(),
+      lastResetDay: nowDate().getDate(),
+      lastResetWeek: getWeekNumber(nowDate()),
+      lastResetMonth: nowDate().getMonth(),
     });
     this.duplicateMap.clear();
     this.correlationMap.clear();
@@ -132,9 +151,9 @@ export function recordTradeResult({
   riskState.lastTradeWasLoss = pnl < 0;
   if (pnl < 0) riskState.consecutiveLosses += 1;
   else riskState.consecutiveLosses = 0;
-  riskState.lastTradeTime = Date.now();
+  riskState.lastTradeTime = nowMs();
   if (pnl < 0 && symbol && strategy) {
-    riskState.strategyFailMap.set(`${symbol}-${strategy}`, Date.now());
+    riskState.strategyFailMap.set(`${symbol}-${strategy}`, nowMs());
   }
   if (
     riskState.dailyLoss >= riskState.maxDailyLoss ||
@@ -156,14 +175,15 @@ export function recordTradeExecution({ symbol, sector }) {
   const sec = sector || "GEN";
   const sc = riskState.tradesPerSector.get(sec) || 0;
   riskState.tradesPerSector.set(sec, sc + 1);
-  riskState.lastTradeTime = Date.now();
+  riskState.lastTradeTime = nowMs();
 }
 
 export function isSignalValid(signal, ctx = {}) {
-  const now = Date.now();
-  const today = new Date().getDate();
-  const week = getWeekNumber();
-  const month = new Date().getMonth();
+  const now = nowMs();
+  const clockDate = nowDate();
+  const today = clockDate.getDate();
+  const week = getWeekNumber(clockDate);
+  const month = clockDate.getMonth();
   const debugTrace = Array.isArray(ctx.debugTrace)
     ? ctx.debugTrace
     : riskDebug
