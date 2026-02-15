@@ -16,6 +16,7 @@ const dbMock = test.mock.module('../db.js', {
       },
       deleteOne: async () => {},
       find: () => ({ toArray: async () => [] }),
+      updateOne: async () => {},
     }),
   },
 });
@@ -35,10 +36,16 @@ const {
   preventReEntry,
   resolveSignalConflicts,
   recordExit,
+  setPortfolioClock,
+  resetPortfolioClock,
 } = await import('../portfolioContext.js');
 
 dbMock.restore();
 telegramMock.restore();
+
+test.after(() => {
+  resetPortfolioClock();
+});
 
 await trackOpenPositions(broker, dbMock.defaultExport);
 
@@ -58,9 +65,10 @@ test('checkExposureLimits blocks high exposure', () => {
   assert.equal(allowed, false);
 });
 
-recordExit('AAA');
+await recordExit('AAA');
 
-test('preventReEntry blocks within window', () => {
+test('preventReEntry blocks within window using injected clock', () => {
+  setPortfolioClock({ now: () => 10_000 });
   const ok = preventReEntry('AAA', 1000000); // large window
   assert.equal(ok, false);
 });

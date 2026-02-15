@@ -8,6 +8,21 @@ import {
   resolveSignalConflicts,
   openPositions,
 } from './portfolioContext.js';
+import { ensureClock } from './src/backtest/clock.js';
+
+let activeClock = ensureClock();
+
+function nowMs() {
+  return activeClock.now();
+}
+
+export function setTradeLifecycleClock(clockLike) {
+  activeClock = ensureClock(clockLike);
+}
+
+export function resetTradeLifecycleClock() {
+  activeClock = ensureClock();
+}
 
 /**
  * Wait for an order to be filled by polling getAllOrders()
@@ -17,8 +32,8 @@ import {
  * @returns {Promise<boolean>} fill status
  */
 export async function waitForOrderFill(orderId, timeout = 30000, interval = 1000) {
-  const start = Date.now();
-  while (Date.now() - start < timeout) {
+  const start = nowMs();
+  while (nowMs() - start < timeout) {
     const orders = await getAllOrders();
     const ord = orders.find((o) => o.order_id === orderId);
     if (ord && ord.status === 'COMPLETE') return true;
@@ -183,4 +198,3 @@ export async function executeSignal(signal, opts = {}) {
     targetId: targetOrder.order_id,
   };
 }
-

@@ -1,7 +1,21 @@
 import { logTrade } from './tradeLogger.js';
 import { applyRealizedPnL } from './account.js';
+import { ensureClock } from './src/backtest/clock.js';
 
 let trailingPct = 0.5;
+let activeClock = ensureClock();
+
+function nowMs() {
+  return activeClock.now();
+}
+
+export function setExitClock(clockLike) {
+  activeClock = ensureClock(clockLike);
+}
+
+export function resetExitClock() {
+  activeClock = ensureClock();
+}
 
 export function setTrailingPercent(pct) {
   trailingPct = pct;
@@ -40,7 +54,7 @@ export function applyTrailingSL(position) {
  */
 export function forceTimeExit(position) {
   if (!position?.openTime) return false;
-  const hold = Date.now() - position.openTime;
+  const hold = nowMs() - position.openTime;
   const max = position.maxHoldMs ?? 30 * 60 * 1000; // default 30 min
   return hold >= max;
 }
@@ -71,7 +85,7 @@ export function shouldExit(signal, price, timeHeldMs) {
   if (!signal) return false;
   const slHit = signal.direction === 'Long' ? price <= signal.stopLoss : price >= signal.stopLoss;
   if (slHit) return true;
-  if (signal.expiresAt && Date.now() > new Date(signal.expiresAt).getTime()) return true;
+  if (signal.expiresAt && nowMs() > new Date(signal.expiresAt).getTime()) return true;
   return false;
 }
 
